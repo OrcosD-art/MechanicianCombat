@@ -24,6 +24,7 @@ bbprof_*/
 tools/Blockbench5-portable/
 tools/downloads/
 tools/js/
+tools/gh_classic_login.ps1
 
 # Large local remapping data; restore through documented build tooling
 tools/remap/
