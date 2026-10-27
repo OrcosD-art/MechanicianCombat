@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:block",
+  "pools": [
+    {
+      "bonus_rolls": 0.0,
+      "conditions": [
+        {
+          "condition": "minecraft:survives_explosion"
+        }
+      ],
+      "entries": [
+        {
+          "type": "minecraft:item",
+          "name": "tkgun:backpack_modification_table"
+        }
+      ],
+      "rolls": 1.0
+    }
+  ],
+  "random_sequence": "tkgun:blocks/backpack_modification_table"
+}

@@ -1,0 +1,38 @@
+{
+  "texture": "backpack_modification_table_ui_template.png",
+  "source": "minecraft:textures/gui/container/smithing.png",
+  "size": [256, 256],
+  "visibleGuiArea": [176, 166],
+  "armorPreviewBox": [52, 7, 71, 72],
+  "armorPreviewAnchor": [87, 73],
+  "armorPreviewScale": 25,
+  "partSlotItemPositions": [
+    [8, 30],
+    [26, 30],
+    [8, 48],
+    [26, 48]
+  ],
+  "partSlotBoxes": [
+    [7, 29, 18, 18],
+    [25, 29, 18, 18],
+    [7, 47, 18, 18],
+    [25, 47, 18, 18]
+  ],
+  "partSlotKinds": [
+    "backpack_core",
+    "portable_launcher_or_auto_launcher",
+    "reserved",
+    "reserved"
+  ],
+  "backpackSlot": [152, 66],
+  "backpackSlotBox": [151, 65, 18, 18],
+  "backpackPreviewScale": 50.413567,
+  "backpackPreviewOffset": [-9.5, -19.809195],
+  "backpackPreviewYaw": -45,
+  "backpackPreviewPitch": 22.5,
+  "backpackPreviewVerticalFlip": true,
+  "outputSlotMarked": true,
+  "inventorySlotStart": [8, 84],
+  "hotbarSlotStart": [8, 142],
+  "note": "The right-side slot stores a persistent Combat Backpack in the block entity. The upper-left component slot accepts only a Backpack Core; the upper-right accepts either launcher type. The lower two component slots are reserved. A launcher installs only after the core and enables its HUD behavior. Closing the screen leaves items in the table. Component flags and launcher type persist on the backpack item. Core and launcher groups stay hidden until installed."
+}

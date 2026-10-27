@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "equipment",
+  "group": "combat_backpack_coloring",
+  "ingredients": [
+    {
+      "item": "tkgun:combat_backpack"
+    },
+    {
+      "item": "minecraft:gray_dye"
+    }
+  ],
+  "result": {
+    "count": 1,
+    "id": "tkgun:combat_backpack_gray"
+  }
+}

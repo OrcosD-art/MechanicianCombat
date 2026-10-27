@@ -1,0 +1,27 @@
+{
+	"schemaVersion": 1,
+	"id": "tkgun",
+	"version": "${version}",
+	"name": "MechanicianCombat",
+	"description": "第三人称持枪动作: 手持/瞄准/射击/拉栓/过热/滑铲/翻滚, 素材来自 711.zip 的 bowgun bbmodel",
+	"authors": ["codex (for slienceXUE)"],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["com.tk.gun.TkGunServer"],
+		"client": ["com.tk.gun.client.TkGunClient"]
+	},
+	"mixins": ["tkgun.mixins.json", "tkgun.camera.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.16.0",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*",
+		"geckolib": ">=4.8.0",
+		"accessories": ">=1.1.0-beta.54"
+	},
+	"recommends": {
+		"combat_roll": ">=2.0.6+1.21.1",
+		"shouldersurfing": ">=4.21.0"
+	}
+}

@@ -1,0 +1,40 @@
+# Generated builds and archives
+build/
+dist/
+release/
+archives/
+backups/
+package/
+handoff/
+wind_charge_export/
+*.log
+launch_test.args
+*.bak
+*.bak_*
+*.orig
+__pycache__/
+*.pyc
+
+# Local Blockbench installations, profiles, caches, and downloaded binaries
+bb5/
+bb516/
+bb516_tmp/
+bbprofile*/
+bbprof_*/
+tools/Blockbench5-portable/
+tools/downloads/
+tools/js/
+
+# Large local remapping data; restore through documented build tooling
+tools/remap/
+
+# Local dependencies and obsolete dependency bundles
+libs/
+obsolete_dependencies/
+
+# IDE and OS metadata
+.idea/
+.vscode/
+*.iml
+Thumbs.db
+.DS_Store

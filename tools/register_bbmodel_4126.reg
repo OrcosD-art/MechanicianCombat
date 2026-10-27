@@ -1,0 +1,16 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\.bbmodel]
+@="Blockbench4126.bbmodel"
+
+[HKEY_CURRENT_USER\Software\Classes\.bbmodel\OpenWithProgids]
+"Blockbench4126.bbmodel"=hex(0):
+
+[HKEY_CURRENT_USER\Software\Classes\Blockbench4126.bbmodel]
+@="Blockbench 4.12.6 Model"
+
+[HKEY_CURRENT_USER\Software\Classes\Blockbench4126.bbmodel\DefaultIcon]
+@="\"C:\\Users\\lmc\\AppData\\Local\\Programs\\Blockbench\\resources\\bbmodel.ico\",0"
+
+[HKEY_CURRENT_USER\Software\Classes\Blockbench4126.bbmodel\shell\open\command]
+@="\"C:\\Users\\lmc\\AppData\\Local\\Programs\\Blockbench\\Blockbench.exe\" \"%1\""

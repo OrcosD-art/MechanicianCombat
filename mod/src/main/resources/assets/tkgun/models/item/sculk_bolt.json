@@ -1,0 +1,138 @@
+{
+	"__comment": "素材 子弹/幽匿弹.bbmodel（Java 方块，16x16 贴图，UV 用像素坐标）",
+	"texture_size": [
+		16,
+		16
+	],
+	"textures": {
+		"0": "tkgun:item/bullets",
+		"particle": "tkgun:item/bullets"
+	},
+	"elements": [
+		{
+			"from": [
+				6.5,
+				0,
+				6.5
+			],
+			"to": [
+				9.5,
+				8,
+				9.5
+			],
+			"faces": {
+				"north": {
+					"uv": [
+						12,
+						1,
+						15,
+						9
+					],
+					"texture": "#0"
+				},
+				"east": {
+					"uv": [
+						12,
+						1,
+						15,
+						9
+					],
+					"texture": "#0"
+				},
+				"south": {
+					"uv": [
+						12,
+						1,
+						15,
+						9
+					],
+					"texture": "#0"
+				},
+				"west": {
+					"uv": [
+						12,
+						1,
+						15,
+						9
+					],
+					"texture": "#0"
+				},
+				"up": {
+					"uv": [
+						12,
+						9,
+						15,
+						12
+					],
+					"texture": "#0"
+				},
+				"down": {
+					"uv": [
+						12,
+						5,
+						15,
+						8
+					],
+					"texture": "#0"
+				}
+			}
+		}
+	],
+	"display": {
+		"thirdperson_righthand": {
+			"translation": [
+				-1.5,
+				1.5,
+				0
+			],
+			"scale": [
+				0.5,
+				0.5,
+				0.5
+			]
+		},
+		"thirdperson_lefthand": {
+			"translation": [
+				-2,
+				0.5,
+				0
+			],
+			"scale": [
+				0.5,
+				0.5,
+				0.5
+			]
+		},
+		"firstperson_righthand": {
+			"translation": [
+				2.75,
+				5.75,
+				0
+			]
+		},
+		"firstperson_lefthand": {
+			"translation": [
+				3,
+				5.25,
+				0
+			]
+		},
+		"gui": {
+			"rotation": [
+				24.15,
+				-4.03,
+				28.39
+			],
+			"translation": [
+				-2.5,
+				5,
+				0
+			],
+			"scale": [
+				1.5,
+				1.5,
+				1.5
+			]
+		}
+	}
+}

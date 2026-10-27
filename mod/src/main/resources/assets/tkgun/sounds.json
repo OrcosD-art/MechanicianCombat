@@ -1,0 +1,202 @@
+{
+    "gunshot3":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "tkgun:gunshot3",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "gunshot2":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "tkgun:gunshot2",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "grapeshot_fire":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "tkgun:grapeshot_fire",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "grapeshot_hit":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:grapeshot_hit",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "crossbow_fire":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:crossbow_fire",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "bolt":  {
+                 "sounds":  [
+                                {
+                                    "name":  "tkgun:bolt",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "dryfire":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "tkgun:dryfire",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "vent":  {
+                 "sounds":  [
+                                {
+                                    "name":  "tkgun:vent",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "roll":  {
+                 "sounds":  [
+                                {
+                                    "name":  "tkgun:roll",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "mag":  {
+                "sounds":  [
+                               {
+                                   "name":  "tkgun:mag",
+                                   "stream":  false
+                               }
+                           ]
+            },
+    "reload1":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "tkgun:reload1",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "reload2":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "tkgun:reload2",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "imp1":  {
+                 "sounds":  [
+                                {
+                                    "name":  "tkgun:imp1",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "cutting1":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "tkgun:cutting1",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "explosion1":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:explosion1",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "rose_quartz_hit":  {
+                            "sounds":  [
+                                           {
+                                               "name":  "tkgun:rose_quartz_hit",
+                                               "stream":  false
+                                           }
+                                       ]
+                        },
+    "sonic_shot":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:sonic_shot",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "sonic_boom":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:sonic_boom",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "gunshot":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "tkgun:gunshot",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "backpack_open":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:backpack_open",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "backpack_close":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "tkgun:backpack_close",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "golem_swing":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "tkgun:golem_swing",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "golem_hammer":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "tkgun:golem_hammer",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "golem_explosion":  {
+                            "sounds":  [
+                                           {
+                                               "name":  "tkgun:golem_explosion",
+                                               "stream":  false
+                                           }
+                                       ]
+                        },
+    "golem_electric":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "tkgun:golem_electric",
+                                              "stream":  false
+                                          }
+                                      ]
+                       }
+}

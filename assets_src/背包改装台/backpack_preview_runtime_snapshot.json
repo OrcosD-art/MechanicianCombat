@@ -1,0 +1,38 @@
+{
+  "capturedDate": "2026-10-23",
+  "minecraftVersion": "1.21.1",
+  "modBuild": "r276-2026-10-23",
+  "configurationRemoved": true,
+  "effectivePreviewTransform": {
+    "previewCenter": [87.0, 43.0],
+    "scale": 50.413567,
+    "positionOffset": [-9.5, -19.809195, 120.0],
+    "pivot": [0.0, 0.0, 0.0],
+    "yaw": -45.0,
+    "pitch": 22.5,
+    "verticalFlip": true,
+    "clipToInnerFrame": true
+  },
+  "maintenance": {
+    "A": {
+      "rotation": [-45.0, 0.0, 0.0],
+      "position": [0.0, 2.0, -1.0]
+    },
+    "B": {
+      "rotation": [-22.5, 0.0, 0.0],
+      "position": [0.0, 0.0, 0.0]
+    },
+    "C1": {
+      "rotation": [0.0, 0.0, 0.0],
+      "position": [0.0, 0.0, 0.0]
+    },
+    "C2": {
+      "rotation": [0.0, 0.0, 0.0],
+      "position": [0.0, 0.0, 0.0]
+    },
+    "C3": {
+      "rotation": [0.0, 0.0, 0.0],
+      "position": [0.0, 0.0, 0.0]
+    }
+  }
+}

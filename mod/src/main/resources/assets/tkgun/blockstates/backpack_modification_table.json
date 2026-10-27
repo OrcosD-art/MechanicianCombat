@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "tkgun:block/backpack_modification_table"
+    },
+    "facing=east": {
+      "model": "tkgun:block/backpack_modification_table",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "tkgun:block/backpack_modification_table",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "tkgun:block/backpack_modification_table",
+      "y": 270
+    }
+  }
+}

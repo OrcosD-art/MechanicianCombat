@@ -1,0 +1,23 @@
+{
+	"replace": false,
+	"values": [
+		"tkgun:combat_backpack",
+		"tkgun:combat_backpack_black",
+		"tkgun:combat_backpack_blue",
+		"tkgun:combat_backpack_brown",
+		"tkgun:combat_backpack_cyan",
+		"tkgun:combat_backpack_gray",
+		"tkgun:combat_backpack_green",
+		"tkgun:combat_backpack_light_blue",
+		"tkgun:combat_backpack_light_gray",
+		"tkgun:combat_backpack_lime",
+		"tkgun:combat_backpack_magenta",
+		"tkgun:combat_backpack_orange",
+		"tkgun:combat_backpack_pink",
+		"tkgun:combat_backpack_purple",
+		"tkgun:combat_backpack_red",
+		"tkgun:combat_backpack_shulker_box",
+		"tkgun:combat_backpack_white",
+		"tkgun:combat_backpack_yellow"
+	]
+}
