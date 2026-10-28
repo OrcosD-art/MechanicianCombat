@@ -1,11 +1,13 @@
 # Generated builds and archives
 build/
+build-r*/
 dist/
 release/
 archives/
 backups/
 package/
 handoff/
+work/
 wind_charge_export/
 *.log
 launch_test.args

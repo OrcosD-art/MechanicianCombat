@@ -191,8 +191,6 @@ public class TkGunClient implements ClientModInitializer {
 	}
 
 	private static final Map<Integer, Move> MOVES = new HashMap<>();
-	/** Players currently venting heat; true marks that the initial burst was emitted. */
-	private static final Map<Integer, Boolean> VENTING_PLAYERS = new HashMap<>();
 	private static final Identifier GUN_STEP_MODIFIER = TkGun.id("gun_step_height");
 	private static boolean heldGunLastTick;
 	/** 停下之后还当作"在动"几 tick，免得临界速度来回抖。 */
@@ -273,6 +271,14 @@ public class TkGunClient implements ClientModInitializer {
 		if (forwardInput == 0.0D && sideInput == 0.0D) {
 			return;
 		}
+		// Roll/sprint correction has already turned the body toward the physical
+		// movement vector and will re-express these keys as forward input.
+		boolean correctedDirection = GunClientState.rolling(entityId)
+				|| GunClientState.dashing(entityId);
+		if (correctedDirection) {
+			forwardInput = 1.0D;
+			sideInput = 0.0D;
+		}
 		Move move = MOVES.computeIfAbsent(entityId, ignored -> new Move());
 		float yaw = client.player.getYaw();
 		double radians = Math.toRadians(yaw);
@@ -280,14 +286,15 @@ public class TkGunClient implements ClientModInitializer {
 		double fz = Math.cos(radians);
 		double rx = -Math.cos(radians);
 		double rz = -Math.sin(radians);
-		double speed = client.player.isSprinting() ? 0.28D : 0.216D;
+		boolean sprinting = client.player.isSprinting() || GunClientState.dashing(entityId);
+		double speed = sprinting ? 0.28D : 0.216D;
 		move.dx = (fx * forwardInput + rx * sideInput) * speed;
 		move.dz = (fz * forwardInput + rz * sideInput) * speed;
 		move.x = client.player.getX();
 		move.z = client.player.getZ();
 		move.yaw = yaw;
 		move.until = ticks + MOVING_HOLD_TICKS;
-		move.sprinting = client.player.isSprinting();
+		move.sprinting = sprinting;
 		move.aiming = GunCamera.aiming(client);
 	}
 
@@ -501,57 +508,6 @@ public class TkGunClient implements ClientModInitializer {
 	}
 
 	/**
-	 * Emits overheat steam from the rendered gun locator. The authoritative gun
-	 * state is mirrored for every player, so observers receive the same effect.
-	 */
-	private static void tickHeatVentParticles(MinecraftClient client) {
-		if (client.world == null || client.player == null) {
-			VENTING_PLAYERS.clear();
-			return;
-		}
-		long now = client.world.getTime();
-		for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
-			GunClientState.Entry state = GunClientState.get(player.getId());
-			boolean venting = TkGun.holdingGun(player) && state != null
-					&& (state.state == TkGun.State.OVERHEAT
-					|| state.heat >= TkGun.HEAT_MAX - 0.01F);
-			boolean wasVenting = Boolean.TRUE.equals(
-					VENTING_PLAYERS.put(player.getId(), venting));
-			if (!venting) {
-				VENTING_PLAYERS.remove(player.getId());
-				continue;
-			}
-			if (player.squaredDistanceTo(client.player) > 64.0D * 64.0D) {
-				continue;
-			}
-			net.minecraft.util.math.Vec3d locator =
-					com.tk.gun.client.rig.BowgunRigRenderer.locatorPosition(player.getId());
-			if (locator == null) {
-				continue;
-			}
-			if (!wasVenting) {
-				for (int i = 0; i < 6; i++) {
-					client.world.addParticle(TkGunParticles.HEAT_VENT,
-							locator.x, locator.y, locator.z,
-							0.0D, 0.02D, 0.0D);
-				}
-				for (int i = 0; i < 8; i++) {
-					client.world.addParticle(
-							net.minecraft.particle.ParticleTypes.CAMPFIRE_COSY_SMOKE,
-							locator.x, locator.y, locator.z,
-							0.0D, 0.01D, 0.0D);
-				}
-			} else if (now % 4L == 0L) {
-				client.world.addParticle(TkGunParticles.HEAT_VENT,
-						locator.x, locator.y, locator.z,
-						0.0D, 0.015D, 0.0D);
-			}
-		}
-		VENTING_PLAYERS.entrySet().removeIf(entry ->
-				client.world.getEntityById(entry.getKey()) == null);
-	}
-
-	/**
 	 * 服务端那套**固定推算**的枪口（`TkGun.MUZZLE_*` 常量 + 玩家 yaw）—— **只用来做检测对比**
 	 * （蓝色粒子），子弹不走这条路。它就是之前偏到枪口左边 0.25 格的那个值。
 	 */
@@ -685,6 +641,7 @@ public class TkGunClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		com.tk.gun.client.rig.BowgunPlayerAnimatorPose.register();
 		if (!CombatRollHook.isInstalled()) {
 			fallbackRollKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 					"key.tkgun.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
@@ -807,8 +764,8 @@ public class TkGunClient implements ClientModInitializer {
 			thirdPersonForced = false;
 			heldGunLastTick = false;
 			MOVES.clear();
-			VENTING_PLAYERS.clear();
 			backpackActionDown = false;
+			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			return;
 		}
 		// Backpack X is intentionally handled before focus, roll, reload and other
@@ -823,7 +780,6 @@ public class TkGunClient implements ClientModInitializer {
 		}
 		heldGunLastTick = holdingGunNow;
 		tickClientStepHeight(client, holdingGunNow);
-		tickHeatVentParticles(client);
 		trackMovement(client);
 		forceOverShoulder(client);
 		FallbackShoulderCamera.tick(client);
@@ -947,6 +903,8 @@ public class TkGunClient implements ClientModInitializer {
 				TkGun.LOGGER.info("[tkgun] 翻滚键：蹲射准备中，忽略");
 			} else {
 				GunRollPayload rollPayload = rollDirectionPayload(client);
+				SprintDirectionCorrection.alignForRoll(
+						client, rollPayload.directionX(), rollPayload.directionZ());
 				ClientPlayNetworking.send(rollPayload);
 				// 状态包要下一 tick 才到；先把本地 rig 锁到 ROLL，避免闪一帧 run。
 				GunClientState.beginLocalRoll(client.player.getId());

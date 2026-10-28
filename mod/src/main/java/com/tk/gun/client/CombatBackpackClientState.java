@@ -40,6 +40,7 @@ public final class CombatBackpackClientState {
 
 	private static final Map<Integer, Entry> ENTRIES = new HashMap<>();
 	private static int ticks;
+	private static int nextViewSyncAt;
 
 	public static void trigger(ClientPlayerEntity player) {
 		if (player == null) {
@@ -95,6 +96,13 @@ public final class CombatBackpackClientState {
 			reset(player.getId());
 			return;
 		}
+		if (ticks >= nextViewSyncAt
+				&& BackpackUpgradeData.launcherType(
+						CombatBackpackItem.equippedStack(player))
+						== BackpackUpgradeData.LauncherType.AUTO) {
+			sendView(player);
+			nextViewSyncAt = ticks + 2;
+		}
 		if (entry.firingRequested
 				&& ticks - entry.firingRequestedAt >= FIRE_RESULT_TIMEOUT_TICKS) {
 			// A disconnect or rejected packet must not strand C3 in the firing state.
@@ -119,6 +127,15 @@ public final class CombatBackpackClientState {
 				cameraPos.x, cameraPos.y, cameraPos.z,
 				camera.getYaw(), camera.getPitch(),
 				halfHorizontalTan, halfVerticalTan));
+	}
+
+	private static void sendView(ClientPlayerEntity player) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		Camera camera = client.gameRenderer.getCamera();
+		Vec3d cameraPos = camera.getPos();
+		ClientPlayNetworking.send(new com.tk.gun.net.CombatBackpackViewPayload(
+				cameraPos.x, cameraPos.y, cameraPos.z,
+				camera.getYaw(), camera.getPitch()));
 	}
 
 	public static void applyStatus(int ownerEntityId, int targetEntityId, int phase,

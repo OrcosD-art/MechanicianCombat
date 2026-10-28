@@ -7,7 +7,8 @@ param(
     [string]$Fapi = "D:\codex\mod\tkgun_handoff_20261016\03_tools\fapi-named",
     [string]$Deps = "D:\codex\mod\tkgun_handoff_20261016\04_deps",
     [string]$Out = "D:\codex\mod\rebuild\dist\MechanicianCombat-1.0.0.jar",
-    [string]$JavaHome = "C:\Program Files\Java\jdk-21"
+    [string]$JavaHome = "C:\Program Files\Java\jdk-21",
+    [string]$BuildDir = ""
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -19,10 +20,10 @@ $REMAPPER = "$Root\tools\remap\tiny-remapper-fat.jar"
 $YARN = "$Root\tools\remap\yarn-1.21.1.tiny"
 $INTER = "$Root\tools\remap\intermediary-1.21.1.tiny"
 $MC_SLIM = "$Libs\net\minecraft\client\1.21.1-20240808.144430\client-1.21.1-20240808.144430-slim.jar"
-$MC_INT = "$Root\build\mc-intermediary.jar"
-$MC_NAMED = "$Root\build\mc-named.jar"
-$CLASSES = "$Root\build\classes"
-$BUILD = "$Root\build"
+$BUILD = if ($BuildDir) { $BuildDir } else { "$Root\build" }
+$MC_INT = "$BUILD\mc-intermediary.jar"
+$MC_NAMED = "$BUILD\mc-named.jar"
+$CLASSES = "$BUILD\classes"
 $SRC = "$Root\mod\src\main"
 
 if (-not (Test-Path -LiteralPath $JAVA)) { throw "Java executable not found: $JAVA" }

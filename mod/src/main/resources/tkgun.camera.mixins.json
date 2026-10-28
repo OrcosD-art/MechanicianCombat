@@ -7,7 +7,7 @@
     "GameRendererZoomMixin",
     "FallbackShoulderCameraMixin",
     "FallbackShoulderMouseMixin",
-    "FallbackShoulderRunMixin",
+    "SprintDirectionInputMixin",
     "VanillaCrosshairMixin",
     "ShoulderSurfingCrosshairMixin",
     "FocusInputLockMixin",
@@ -20,6 +20,7 @@
     "GunTooltipBackgroundMixin",
     "CombatRollInputGuardMixin",
     "OffhandSwapGuardClientMixin",
+    "OffhandUseGuardClientMixin",
     "OffhandStorageFirstPersonMixin",
     "OffhandStorageThirdPersonMixin"
   ],

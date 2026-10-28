@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Output,
     [string]$Prefix = "item",
     [int]$Port = 9346,
-    [string]$Exe = "D:\codex\mod\rebuild\bb516\Blockbench.exe",
-    [string]$Profile = "D:\codex\mod\rebuild\bbprofile5"
+    [string]$Exe = "D:\codex\mod\rebuild\tools\Blockbench5-portable\Blockbench.exe",
+    [string]$Profile = "D:\codex\mod\rebuild\bbprofile_bb522"
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path -LiteralPath $Model)) {

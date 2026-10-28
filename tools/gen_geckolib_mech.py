@@ -33,8 +33,9 @@ OUT_ANIM = os.path.join(RES, "animations", "entity", "bowgun_rig.animation.json"
 OUT_TEX = os.path.join(RES, "textures", "entity", "bowgun_gun.png")
 TEX_DIR = os.path.join(RES, "textures", "entity")
 PLUGIN_CANDIDATES = (
-    os.path.join(TOOLS, "geckolib.js"),
-    os.path.join(REBUILD, "bbprofile", "plugins", "geckolib.js"),
+    os.path.join(TOOLS, "geckolib_legacy_412.js"),
+    os.path.join(REBUILD, "bbprofile", "plugins", "animation_utils.js"),
+    os.path.join(REBUILD, "bbprofile", "plugins", "geckolib_plugin.js"),
     os.path.join(os.environ.get("APPDATA", ""), "Blockbench", "plugins", "geckolib.js"),
 )
 PORT = os.environ.get("BB_PORT", "9222")
@@ -85,7 +86,11 @@ return JSON.stringify({
 const info = { catalog: false, loaded: false, err: null };
 function findGecko() {
     const arr = Plugins.all || [];
-    return arr.filter(p => p && p.id === 'geckolib')[0] || arr['geckolib'] || null;
+    return arr.filter(p => p && p.id === 'animation_utils')[0]
+        || arr['animation_utils']
+        || arr.filter(p => p && p.id === 'geckolib')[0]
+        || arr['geckolib']
+        || null;
 }
 try {
     if (Plugins.loading_promise) { try { await Plugins.loading_promise; } catch (e) { /* ignore */ } }

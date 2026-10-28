@@ -4,6 +4,7 @@ import com.tk.gun.api.FortressDestroyerGun;
 import com.tk.gun.api.AbyssalAncientCannonGun;
 import com.tk.gun.api.GunDefinition;
 import com.tk.gun.api.GunRegistry;
+import com.tk.gun.api.VeritasEtJustitiaGun;
 import com.tk.gun.item.BowgunItem;
 import com.tk.gun.net.GunFirePayload;
 import com.tk.gun.net.GunStatePayload;
@@ -54,6 +55,7 @@ import java.util.UUID;
 public class TkGunServer implements ModInitializer {
 	public static Item BOWGUN;
 	public static Item ABYSSAL_ANCIENT_CANNON;
+	public static Item VERITAS_ET_JUSTITIA;
 	public static Item BOLT;
 	public static net.minecraft.block.Block BACKPACK_MODIFICATION_TABLE;
 	public static net.minecraft.item.BlockItem BACKPACK_MODIFICATION_TABLE_ITEM;
@@ -128,6 +130,12 @@ public class TkGunServer implements ModInitializer {
 		double frontOffsetY;
 		double frontOffsetZ;
 		float frontOffsetYaw;
+		double aimCameraX;
+		double aimCameraY;
+		double aimCameraZ;
+		double aimYaw;
+		double aimPitch;
+		long aimUpdatedAt = -1L;
 		long summonReadyUntil;
 		long summonCastUntil;
 		double summonX;
@@ -144,6 +152,12 @@ public class TkGunServer implements ModInitializer {
 		public long stateUntil;
 		public long stateStarted;
 		public TkGun.State state = TkGun.State.IDLE;
+		/** The current airborne session must not trigger idle/landing roll. */
+		public boolean airborneDisqualified;
+		/** Authoritative normal-airborne animation override (fall distance greater than one block). */
+		public boolean airborneIdle;
+		/** The landing has met the vanilla raw fall-damage condition. */
+		public boolean landingRollArmed;
 		/**
 		 * **翻滚后的快速蹲射宽限窗**（截止 tick）。
 		 *
@@ -171,6 +185,11 @@ public class TkGunServer implements ModInitializer {
 		public long dodgeFocusQueuedAt;
 		/** 最近一次由滑铲进入 fast ready 的 tick，用于屏蔽同一个 Z 输入的重复包。 */
 		public long lastSlideFastFocusAt;
+		/** Decaying forward drift carried through the sliding_fast_ready transition. */
+		public long slideFastFocusStart;
+		public long slideFastFocusUntil;
+		public double slideFastFocusDirX;
+		public double slideFastFocusDirZ;
 		public long slideUntil;
 		public long slideCooldownUntil;
 		/**
@@ -242,6 +261,10 @@ public class TkGunServer implements ModInitializer {
 		public long dodgeLockUntil;
 		/** 加速冲刺的截止 tick（每次闪避给 3 秒）。 */
 		public long dashUntil;
+		/** Speed-only tail after a completed slide; never controls dodge inputs or aim locks. */
+		public long speedBoostUntil;
+		/** A single slide may extend the speed modifier only once. */
+		public boolean slideBoostApplied;
 		/** Last dash-active value sent to clients; used to broadcast the expiry. */
 		public boolean dashSyncActive;
 		/** Native fallback roll cooldown used only without Combat Roll. */
@@ -568,6 +591,9 @@ public class TkGunServer implements ModInitializer {
 				new Item.Settings().maxCount(1));
 		ABYSSAL_ANCIENT_CANNON = GunRegistry.register(
 				AbyssalAncientCannonGun.DEFINITION,
+				new Item.Settings().maxCount(1));
+		VERITAS_ET_JUSTITIA = GunRegistry.register(
+				VeritasEtJustitiaGun.DEFINITION,
 				new Item.Settings().maxCount(1));
 		BOLT = Registry.register(Registries.ITEM, TkGun.id("bolt"),
 				new com.tk.gun.item.MoltenTridentItem(new Item.Settings().maxCount(64)
@@ -919,6 +945,9 @@ public class TkGunServer implements ModInitializer {
 				com.tk.gun.net.GunSoundPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.CombatBackpackFirePayload.ID,
 				com.tk.gun.net.CombatBackpackFirePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.CombatBackpackViewPayload.ID,
+				com.tk.gun.net.CombatBackpackViewPayload.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunSoundPayload.ID, (payload, context) ->
 				context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
@@ -940,6 +969,10 @@ public class TkGunServer implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.CombatBackpackFirePayload.ID,
 				(payload, context) -> context.server().execute(() ->
 						handleBackpackAction(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.CombatBackpackViewPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleBackpackView(context.player(), payload)));
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.OpenAmmoStoragePayload.ID,
 				com.tk.gun.net.OpenAmmoStoragePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.SwitchAmmoPayload.ID,
@@ -1082,7 +1115,8 @@ public class TkGunServer implements ModInitializer {
 				rollCooldownTicks,
 				TkGun.magazineCapacity(actor, false),
 				TkGun.magazineCapacity(actor, true),
-				TkGun.definition(actor).maxShotIndex());
+				TkGun.definition(actor).maxShotIndex(),
+				st.airborneIdle);
 		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(p, payload);
 		}
@@ -1090,6 +1124,16 @@ public class TkGunServer implements ModInitializer {
 
 	public static int activeMag(PState st) {
 		return st.deployed ? st.focusShots : st.mag;
+	}
+
+	public static int applyAirborneLandingDamageReduction(ServerPlayerEntity player, int rawDamage) {
+		PState st = state(player);
+		if (rawDamage <= 0 || st.airborneDisqualified || !player.isAlive()
+				|| !TkGun.holdingGun(player) || isAirborneActionState(st.state)) {
+			return rawDamage;
+		}
+		st.landingRollArmed = true;
+		return Math.max(0, rawDamage / 2);
 	}
 
 	private static void setState(MinecraftServer server, ServerPlayerEntity player, TkGun.State state, int ticks) {
@@ -1163,6 +1207,8 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		BackpackCharge state = backpackState(player, now);
+		updateBackpackAim(player, state, payload.cameraX(), payload.cameraY(), payload.cameraZ(),
+				payload.cameraYaw(), payload.cameraPitch(), now);
 		if (now < state.cooldownUntil) {
 			syncBackpackStatus(player, state, now);
 			sendBackpackFireResult(player);
@@ -1198,6 +1244,38 @@ public class TkGunServer implements ModInitializer {
 		} else {
 			launchBackpackProjectile(player, payload, target, state);
 		}
+	}
+
+	private static void handleBackpackView(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackViewPayload payload) {
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseLauncher(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		updateBackpackAim(player, state, payload.cameraX(), payload.cameraY(), payload.cameraZ(),
+				payload.cameraYaw(), payload.cameraPitch(), now);
+	}
+
+	private static void updateBackpackAim(ServerPlayerEntity player, BackpackCharge state,
+			double cameraX, double cameraY, double cameraZ,
+			double cameraYaw, double cameraPitch, long now) {
+		if (!Double.isFinite(cameraX) || !Double.isFinite(cameraY)
+				|| !Double.isFinite(cameraZ) || !Double.isFinite(cameraYaw)
+				|| !Double.isFinite(cameraPitch)) {
+			return;
+		}
+		Vec3d camera = new Vec3d(cameraX, cameraY, cameraZ);
+		if (camera.squaredDistanceTo(player.getBoundingBox().getCenter()) > 64.0D) {
+			return;
+		}
+		state.aimCameraX = cameraX;
+		state.aimCameraY = cameraY;
+		state.aimCameraZ = cameraZ;
+		state.aimYaw = cameraYaw;
+		state.aimPitch = cameraPitch;
+		state.aimUpdatedAt = now;
 	}
 
 	private static void handleSummonAntennaAction(ServerPlayerEntity player,
@@ -1719,9 +1797,9 @@ public class TkGunServer implements ModInitializer {
 		}
 
 		LivingEntity target = activeBackpackTarget(player, state, now);
-		if (target == null || !autoTargetVisible(player, target)) {
+		if (target == null || !autoTargetVisible(player, target, state, now)) {
 			int oldTarget = state.targetEntityId;
-			target = findAutoTarget(player, -1);
+			target = findAutoTarget(player, -1, state, now);
 			if (oldTarget != targetId(target)
 					&& player.getServerWorld().getEntityById(oldTarget)
 					instanceof LivingEntity oldLiving) {
@@ -1756,8 +1834,10 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	private static boolean autoTargetVisible(ServerPlayerEntity player,
-			LivingEntity target) {
-		Vec3d eye = player.getEyePos();
+			LivingEntity target, BackpackCharge state, long now) {
+		if (state.aimUpdatedAt < 0 || now - state.aimUpdatedAt > 20) {
+			return false;
+		}
 		Vec3d playerCenter = player.getBoundingBox().getCenter();
 		Vec3d center = target.getBoundingBox().getCenter();
 		Vec3d fromPlayer = center.subtract(playerCenter);
@@ -1766,13 +1846,17 @@ public class TkGunServer implements ModInitializer {
 				|| fromPlayer.lengthSquared() < 1.0E-8D) {
 			return false;
 		}
-		Vec3d offset = center.subtract(eye);
-		Vec3d direction = player.getRotationVector();
+		Vec3d camera = new Vec3d(
+				state.aimCameraX, state.aimCameraY, state.aimCameraZ);
+		Vec3d offset = center.subtract(camera);
+		Vec3d direction = Vec3d.fromPolar(
+				(float) state.aimPitch, (float) state.aimYaw);
 		return offset.normalize().dotProduct(direction) >= 0.0D
-				&& player.canSee(target);
+				&& hasBlockLineOfSight(player, camera, center);
 	}
 
-	private static LivingEntity findAutoTarget(ServerPlayerEntity player, int excludedEntityId) {
+	private static LivingEntity findAutoTarget(ServerPlayerEntity player,
+			int excludedEntityId, BackpackCharge state, long now) {
 		ServerWorld world = player.getServerWorld();
 		net.minecraft.util.math.Box search =
 				player.getBoundingBox().expand(AUTO_BACKPACK_TARGET_RADIUS);
@@ -1782,7 +1866,7 @@ public class TkGunServer implements ModInitializer {
 				entity -> entity != player && entity.getId() != excludedEntityId
 						&& entity.isAlive() && !entity.isSpectator()
 						&& entity.canHit() && !CombatTargeting.isGolem(entity)
-						&& autoTargetVisible(player, entity))) {
+						&& autoTargetVisible(player, entity, state, now))) {
 			double distance = candidate.squaredDistanceTo(player);
 			if (distance < nearestDistance) {
 				nearest = candidate;
@@ -1806,7 +1890,7 @@ public class TkGunServer implements ModInitializer {
 			sendBackpackFireResult(player);
 			return;
 		}
-		LivingEntity target = findAutoTarget(player, -1);
+		LivingEntity target = findAutoTarget(player, -1, state, now);
 		if (target == null) {
 			syncBackpackStatus(player, state, now);
 			sendBackpackFireResult(player);
@@ -1894,7 +1978,7 @@ public class TkGunServer implements ModInitializer {
 		} else {
 			state.autoShotsOnTarget++;
 			if (state.autoShotsOnTarget >= 2) {
-				LivingEntity next = findAutoTarget(player, target.getId());
+				LivingEntity next = findAutoTarget(player, target.getId(), state, now);
 				if (next != null) {
 					target.removeStatusEffect(StatusEffects.GLOWING);
 					state.targetEntityId = next.getId();
@@ -2116,6 +2200,9 @@ public class TkGunServer implements ModInitializer {
 		if (!com.tk.gun.item.BackpackLauncherRules.hasActiveLauncher(player)) {
 			return;
 		}
+		if (player.isUsingItem() && player.getActiveHand() == Hand.OFF_HAND) {
+			player.stopUsingItem();
+		}
 		net.minecraft.entity.player.PlayerInventory inventory = player.getInventory();
 		ItemStack offhand = inventory.getStack(
 				net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT);
@@ -2203,6 +2290,9 @@ public class TkGunServer implements ModInitializer {
 		clearDodgeCooldownsForFocus(st);
 		st.deployed = true;
 		setState(server, player, TkGun.State.AIM_SLIDE, 600);
+		if (wasSliding) {
+			applySlideFastFocusInertia(player, st, now);
+		}
 		TkGun.LOGGER.info("[tkgun] 滑铲中右键 -> 加速架枪（AIM_SLIDE 3 倍速，滑铲剩余={} tick）玩家={}",
 				slideLeft, player.getName().getString());
 		if (!wasSliding) {
@@ -3402,7 +3492,12 @@ public class TkGunServer implements ModInitializer {
 					st.dashUntil - now, player.getName().getString());
 		}
 		st.dashUntil = 0;
+		st.speedBoostUntil = 0;
+		st.slideBoostApplied = false;
 		GunStateMachine.clearDash(player);
+		if (fromSlide) {
+			applySlideFastFocusInertia(player, st, now);
+		}
 		// 0.38 秒预输入兑现后直接进入 AIM_ROLL，播放新版 rolling_fast_ready。
 		TkGun.State aimState = fromSlide ? TkGun.State.AIM_SLIDE
 				: (fromRoll ? TkGun.State.AIM_ROLL : TkGun.State.AIM);
@@ -3430,7 +3525,70 @@ public class TkGunServer implements ModInitializer {
 		return true;
 	}
 
+	private static void applySlideFastFocusInertia(ServerPlayerEntity player,
+												 PState st, long now) {
+		double forwardX = st.slideDirX;
+		double forwardZ = st.slideDirZ;
+		double lengthSquared = forwardX * forwardX + forwardZ * forwardZ;
+		if (lengthSquared < 1.0E-6D) {
+			double yaw = Math.toRadians(player.getYaw());
+			forwardX = -Math.sin(yaw);
+			forwardZ = Math.cos(yaw);
+			lengthSquared = 1.0D;
+		}
+		double length = Math.sqrt(lengthSquared);
+		st.slideFastFocusStart = now;
+		st.slideFastFocusUntil = now + TkGun.AIM_TICKS_SLIDE;
+		st.slideFastFocusDirX = forwardX / length;
+		st.slideFastFocusDirZ = forwardZ / length;
+		applySlideFastFocusInertia(player, st);
+	}
+
+	private static void applySlideFastFocusInertia(ServerPlayerEntity player, PState st) {
+		double forwardX = st.slideFastFocusDirX;
+		double forwardZ = st.slideFastFocusDirZ;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(
+				forwardX * TkGun.SLIDE_FAST_FOCUS_INERTIA,
+				velocity.y,
+				forwardZ * TkGun.SLIDE_FAST_FOCUS_INERTIA);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		TkGun.LOGGER.info("[tkgun] 滑铲 -> sliding_fast_ready：保留前向惯性 {} 格/tick 玩家={}",
+				TkGun.SLIDE_FAST_FOCUS_INERTIA, player.getName().getString());
+	}
+
 	/** 解除专注；由 Z 切换、过热或收枪触发，并按 Focus_over 过渡收尾。 */
+	/**
+	 * A one-shot velocity is consumed by the next movement update after the
+	 * client-side focus input lock zeroes the movement keys. Reapply a decaying
+	 * velocity for exactly the sliding_fast_ready transition.
+	 */
+	private static void tickSlideFastFocusInertia(ServerPlayerEntity player,
+												 PState st, long now) {
+		if (st.slideFastFocusUntil == 0) {
+			return;
+		}
+		if (st.state != TkGun.State.AIM_SLIDE || now >= st.slideFastFocusUntil) {
+			st.slideFastFocusStart = 0;
+			st.slideFastFocusUntil = 0;
+			return;
+		}
+		long duration = Math.max(1L, st.slideFastFocusUntil - st.slideFastFocusStart);
+		double progress = Math.min(1.0D,
+				(now - st.slideFastFocusStart) / (double) duration);
+		double speed = TkGun.SLIDE_FAST_FOCUS_INERTIA * (1.0D - progress);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(
+				st.slideFastFocusDirX * speed,
+				velocity.y,
+				st.slideFastFocusDirZ * speed);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+	}
+
 	public static void stopFocus(ServerPlayerEntity player) {
 		PState st = state(player);
 		if (!st.deployed) {
@@ -3667,6 +3825,9 @@ public class TkGunServer implements ModInitializer {
 					&& TkGun.holdingGun(player) && wantsMove(player)) {
 				st.stateUntil = 0;
 				st.state = TkGun.State.IDLE;
+				if (now < st.dashUntil) {
+					player.setSprinting(true);
+				}
 				lockAimAfterDodge(st, now);
 				broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
 				TkGun.LOGGER.info("[tkgun] 翻滚收势期间出现移动输入 -> 立即切回行走/奔跑 玩家={}",
@@ -3688,6 +3849,9 @@ public class TkGunServer implements ModInitializer {
 				// 快速专注只能由翻滚 0.38 秒处的组合输入进入，不再经过额外过渡动作。
 				if (ended == TkGun.State.ROLL) {
 					if (holding && wantsMove(player)) {
+						if (now < st.dashUntil) {
+							player.setSprinting(true);
+						}
 						lockAimAfterDodge(st, now);
 						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
 					} else {
@@ -3726,13 +3890,108 @@ public class TkGunServer implements ModInitializer {
 			// （检视的定时音效/粒子点随旧素材的 `simple` 一起作废：新素材里没有 simple 了，
 			//   INSPECT 现在播作者的 Focus_over_shooting 样品，它自己没有埋音效事件。）
 
+			tickSlideFastFocusInertia(player, st, now);
 			tickSlide(player, st, now);
 			tickSlideReady(player, st, now);
 			tickAimSlow(player, st);
+			tickLongAirborne(player, st, now);
 		}
 	}
 
 	/** 推进已经由 Alt 循环启动的滑铲；不再把潜行键（Z）本身当成滑铲触发键。 */
+	private static void tickLongAirborne(ServerPlayerEntity player, PState st, long now) {
+		if (player.isOnGround()) {
+			boolean landingRoll = player.isAlive() && TkGun.holdingGun(player)
+					&& st.landingRollArmed && !st.airborneDisqualified
+					&& !isAirborneActionState(st.state);
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			st.airborneDisqualified = false;
+			if (landingRoll) {
+				startAirborneLandingRoll(player, st, now);
+			} else if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (!GunAirborneRules.isOrdinaryAirborne(player) || isAirborneActionState(st.state)) {
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			st.airborneDisqualified = true;
+			if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (!TkGun.holdingGun(player)) {
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (st.airborneDisqualified) {
+			return;
+		}
+		boolean shouldIdle = player.fallDistance > GunAirborneRules.IDLE_AFTER_DISTANCE;
+		if (shouldIdle != st.airborneIdle) {
+			st.airborneIdle = shouldIdle;
+			rebroadcast(player);
+			if (shouldIdle) {
+				TkGun.LOGGER.info("[tkgun] gun airborne over one block -> idle player={}",
+						player.getName().getString());
+			}
+		}
+	}
+
+	private static boolean isAirborneActionState(TkGun.State state) {
+		return state == TkGun.State.ROLL || state == TkGun.State.ROLL_TO_IDLE
+				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY
+				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE
+				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER;
+	}
+
+	private static void startAirborneLandingRoll(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null || !player.isAlive() || !TkGun.holdingGun(player)) {
+			return;
+		}
+		float yaw = (float) Math.toRadians(player.getYaw());
+		Vec3d facing = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+
+		boolean wasOverheat = st.state == TkGun.State.OVERHEAT;
+		clearPendingShots(player, st, "long airborne landing roll");
+		player.stopUsingItem();
+		player.removeStatusEffect(StatusEffects.SLOWNESS);
+		restoreLastFocusAmmoSelection(player, st);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		if (wasOverheat) {
+			st.overheatUntil = 0;
+			st.heat = TkGun.HEAT_MAX * 0.4F;
+		}
+
+		// Automatic rolls ignore the manual dodge lock, but retain the normal
+		// roll speed window so the landing does not become a no-op.
+		st.lastDodgeAt = now;
+		st.speedBoostUntil = 0;
+		st.slideBoostApplied = false;
+		st.lastDodgeKind = 1;
+		st.dashUntil = now + GunStateMachine.DASH_TICKS;
+		st.rollRequestX = facing.x;
+		st.rollRequestZ = facing.z;
+		startFallbackRoll(player, st, now);
+		TkGun.LOGGER.info("[tkgun] long airborne landing -> facing roll player={}",
+				player.getName().getString());
+	}
+
 	private static void tickSlide(ServerPlayerEntity player, PState st, long now) {
 		MinecraftServer server = player.getServer();
 		if (now < st.slideUntil) {
@@ -3767,6 +4026,7 @@ public class TkGunServer implements ModInitializer {
 		} else if (st.slideMeasuring) {
 			// 滑完把**实测位移**打进日志：用户要 3~4 格，这条数字就是验收标准，别靠看
 			st.slideMeasuring = false;
+			GunStateMachine.extendSpeedBoostAfterSlide(player, st, now);
 			// 滑铲结束后再锁 1 秒；从起铲时刻算会让最后一段滑行吃掉冷却。
 			st.dodgeBlockUntil = Math.max(st.dodgeBlockUntil, now + 20);
 			double dx = player.getX() - st.slideFromX;
@@ -3801,6 +4061,7 @@ public class TkGunServer implements ModInitializer {
 		st.slideFromX = player.getX();
 		st.slideFromZ = player.getZ();
 		st.slideMeasuring = true;
+		st.slideBoostApplied = false;
 		double v0 = 2.0D * TkGun.SLIDE_DISTANCE / (double) TkGun.SLIDE_TICKS;
 		player.setVelocity(flat.x * v0, player.getVelocity().y, flat.z * v0);
 		player.velocityModified = true;
@@ -3945,6 +4206,7 @@ public class TkGunServer implements ModInitializer {
 		st.slideUntil = now + TkGun.SLIDE_TICKS;
 		st.slideCooldownUntil = now + TkGun.SLIDE_COOLDOWN;
 		st.slideMeasuring = true;
+		st.slideBoostApplied = false;
 		setState(player.getServer(), player, TkGun.State.SLIDE, TkGun.SLIDE_TICKS);
 		consumeSlideFocus(player, st, now);
 		playSound(player, TkGun.SND_VENT, 0.5F, 1.6F);   // 铲地摩擦（和原滑铲同一套音）

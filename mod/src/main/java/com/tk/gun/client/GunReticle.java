@@ -73,14 +73,6 @@ public final class GunReticle {
 		// ⚠️ 2026-10-16 用户："这个着弹点正常情况下是不显示的，**只有在玩家长按右键的时候**它才显示。
 		//    你现在平常状态就显示，导致玩家模型在瞎转" → 圈圈只在**长按右键瞄准**时画。
 		if (!GunCamera.aiming(client)) {
-			if (FallbackShoulderCamera.isFallbackActive(client)) {
-				int centerX = context.getScaledWindowWidth() / 2;
-				int centerY = context.getScaledWindowHeight() / 2;
-				drawReticleX(context, centerX, centerY);
-				reticleScreenX = centerX;
-				reticleScreenY = centerY;
-				reticleVisible = true;
-			}
 			return;
 		}
 		if (GunCamera.aimOutsideCone()) {

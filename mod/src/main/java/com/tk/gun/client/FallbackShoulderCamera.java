@@ -3,7 +3,6 @@ package com.tk.gun.client;
 import com.tk.gun.TkGun;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.input.KeyboardInput;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.Perspective;
 import net.minecraft.entity.Entity;
@@ -35,9 +34,6 @@ public final class FallbackShoulderCamera {
 	private static final double ACTION_HEIGHT = 0.32D;
 	private static final double TRANSITION_SECONDS = 0.10D;
 	private static final double COLLISION_MARGIN = 0.15D;
-	/** Full lateral input can steer the body to the camera's side, without the old 45-degree cap. */
-	private static final float RUN_SIDE_STEER_DEGREES = 90.0F;
-	private static final float RUN_STEER_DEGREES_PER_TICK = 4.0F;
 
 	private static boolean active;
 	private static boolean initialized;
@@ -127,38 +123,6 @@ public final class FallbackShoulderCamera {
 			player.setYaw(cameraYaw);
 			player.setBodyYaw(cameraYaw);
 		}
-		return true;
-	}
-
-	/**
-	 * In decoupled sprint/dash movement, A/D steer the body instead of
-	 * producing vanilla camera-relative strafe input.
-	 */
-	public static boolean steerRunningInput(MinecraftClient client, KeyboardInput input) {
-		if (!active || !isEligible(client) || client.currentScreen != null) {
-			return false;
-		}
-		ClientPlayerEntity player = client.player;
-		boolean dashing = GunClientState.dashing(player.getId());
-		boolean sprintIntent = player.isSprinting()
-				|| (client.options.sprintKey.isPressed() && input.movementForward > 0.05F);
-		if (!dashing && !sprintIntent) {
-			return false;
-		}
-
-		float steer = MathHelper.clamp(input.movementSideways, -1.0F, 1.0F);
-		float targetYaw = MathHelper.wrapDegrees(
-				cameraYaw - steer * RUN_SIDE_STEER_DEGREES);
-		float delta = MathHelper.wrapDegrees(targetYaw - player.getYaw());
-		float step = MathHelper.clamp(delta,
-				-RUN_STEER_DEGREES_PER_TICK, RUN_STEER_DEGREES_PER_TICK);
-		float bodyYaw = MathHelper.wrapDegrees(player.getYaw() + step);
-		player.setYaw(bodyYaw);
-		player.setBodyYaw(bodyYaw);
-		player.setHeadYaw(cameraYaw);
-
-		// A/D are steering commands while running, not simultaneous strafe.
-		input.movementSideways = 0.0F;
 		return true;
 	}
 

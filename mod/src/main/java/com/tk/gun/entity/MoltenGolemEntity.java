@@ -7,6 +7,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.SpawnGroup;
+import net.minecraft.entity.Tameable;
 import net.minecraft.entity.ai.goal.Goal;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.data.DataTracker;
@@ -14,6 +15,7 @@ import net.minecraft.entity.data.TrackedData;
 import net.minecraft.entity.data.TrackedDataHandlerRegistry;
 import net.minecraft.entity.mob.Monster;
 import net.minecraft.entity.passive.IronGolemEntity;
+import net.minecraft.entity.passive.TameableEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.NbtHelper;
@@ -38,10 +40,11 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntity {
+public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntity, Tameable {
 	private static final int LANDING_TICKS = 70;
 	private static final int ATK2_COOLDOWN_TICKS = 100;
 	private static final int ATK3_COOLDOWN_TICKS = 400;
@@ -49,6 +52,9 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 	private static final TrackedData<Integer> VISUAL_STATE =
 			DataTracker.registerData(MoltenGolemEntity.class,
 					TrackedDataHandlerRegistry.INTEGER);
+	private static final TrackedData<Optional<UUID>> OWNER_UUID =
+			DataTracker.registerData(MoltenGolemEntity.class,
+					TrackedDataHandlerRegistry.OPTIONAL_UUID);
 
 	private static final SoundEvent SWING_SOUND = SoundEvent.of(TkGun.id("golem_swing"));
 	private static final SoundEvent HAMMER_SOUND = SoundEvent.of(TkGun.id("golem_hammer"));
@@ -119,6 +125,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 	protected void initDataTracker(DataTracker.Builder builder) {
 		super.initDataTracker(builder);
 		builder.add(VISUAL_STATE, VisualState.LANDING.ordinal());
+		builder.add(OWNER_UUID, Optional.empty());
 	}
 
 	public VisualState getVisualState() {
@@ -169,6 +176,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 			tickSummoning();
 			return;
 		}
+		tickOwnerTargeting();
 		if (attackKind != AttackKind.NONE) {
 			tickAttack();
 			return;
@@ -193,7 +201,8 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 	@Override
 	public boolean tryAttack(Entity target) {
 		if (getWorld().isClient() || target == null || attackKind != AttackKind.NONE
-				|| summonTicks > 0 || CombatTargeting.isGolem(target)) {
+				|| summonTicks > 0 || CombatTargeting.isGolem(target)
+				|| target instanceof LivingEntity living && isOwnerAllied(living)) {
 			return false;
 		}
 		AttackKind next = chooseAttack();
@@ -344,6 +353,9 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 		if (ownerUuid != null && ownerUuid.equals(entity.getUuid())) {
 			return false;
 		}
+		if (isOwnerAllied(entity)) {
+			return false;
+		}
 		LivingEntity currentTarget = getTarget();
 		return entity instanceof Monster || entity == currentTarget
 				|| entity.getType().getSpawnGroup() == SpawnGroup.MONSTER;
@@ -471,23 +483,79 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 	private void bindNearestSummoner() {
 		PlayerEntity nearest = getWorld().getClosestPlayer(this, 16.0D);
 		if (nearest != null && nearest.isAlive()) {
-			ownerUuid = nearest.getUuid();
+			setSummoner(nearest.getUuid());
 		}
-	}
-
-	private PlayerEntity getSummoner() {
-		if (ownerUuid == null || !(getWorld() instanceof ServerWorld serverWorld)) {
-			return null;
-		}
-		return serverWorld.getPlayerByUuid(ownerUuid);
 	}
 
 	public void setSummoner(UUID summoner) {
 		this.ownerUuid = summoner;
+		dataTracker.set(OWNER_UUID, Optional.ofNullable(summoner));
 	}
 
 	public boolean isSummonedBy(UUID summoner) {
-		return summoner != null && summoner.equals(ownerUuid);
+		return summoner != null && summoner.equals(getOwnerUuid());
+	}
+
+	public boolean isTamed() {
+		return getOwnerUuid() != null;
+	}
+
+	public boolean isOwner(LivingEntity entity) {
+		UUID owner = getOwnerUuid();
+		return owner != null && entity != null && owner.equals(entity.getUuid());
+	}
+
+	@Override
+	public UUID getOwnerUuid() {
+		return getWorld().isClient()
+				? dataTracker.get(OWNER_UUID).orElse(null)
+				: ownerUuid;
+	}
+
+	@Override
+	public PlayerEntity getOwner() {
+		LivingEntity owner = Tameable.super.getOwner();
+		return owner instanceof PlayerEntity player ? player : null;
+	}
+
+	private boolean isOwnerAllied(LivingEntity entity) {
+		if (entity == this || !entity.isAlive() || entity.isSpectator()) {
+			return false;
+		}
+		PlayerEntity owner = getOwner();
+		if (isOwner(entity) || (owner != null && entity.isTeammate(owner))) {
+			return true;
+		}
+		UUID ownerUuid = getOwnerUuid();
+		return ownerUuid != null && entity instanceof TameableEntity pet
+				&& ownerUuid.equals(pet.getOwnerUuid());
+	}
+
+	private void tickOwnerTargeting() {
+		PlayerEntity owner = getOwner();
+		if (owner == null || !owner.isAlive()) {
+			return;
+		}
+		LivingEntity current = getTarget();
+		if (current != null && (!current.isAlive() || isOwnerAllied(current))) {
+			setTarget(null);
+		}
+		LivingEntity attacker = owner.getAttacker();
+		if (isValidOwnerThreat(attacker, owner)) {
+			setTarget(attacker);
+			return;
+		}
+		if (getTarget() == null) {
+			LivingEntity attacked = owner.getAttacking();
+			if (isValidOwnerThreat(attacked, owner)) {
+				setTarget(attacked);
+			}
+		}
+	}
+
+	private boolean isValidOwnerThreat(LivingEntity threat, PlayerEntity owner) {
+		return threat != null && threat.isAlive() && threat != owner
+				&& !isOwnerAllied(threat);
 	}
 
 	public void beginRelocationSummon(double x, double y, double z, float yaw) {
@@ -514,7 +582,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 		Box area = Box.of(center, radius * 2.0D, radius * 2.0D, radius * 2.0D);
 		for (LivingEntity target : getWorld().getEntitiesByClass(LivingEntity.class, area,
 				entity -> entity != this && entity.isAlive() && !entity.isSpectator()
-						&& !CombatTargeting.isGolem(entity))) {
+						&& !CombatTargeting.isGolem(entity) && !isOwnerAllied(entity))) {
 			Vec3d targetCenter = target.getBoundingBox().getCenter();
 			double distance = targetCenter.distanceTo(center);
 			if (distance > radius) {
@@ -543,6 +611,10 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 		}
 		if (!getWorld().isClient() && summonTicks > 0) {
 			return false;
+		}
+		if (!getWorld().isClient() && source.getAttacker() instanceof LivingEntity attacker
+				&& !isOwnerAllied(attacker)) {
+			setTarget(attacker);
 		}
 		return super.damage(source, amount);
 	}
@@ -580,7 +652,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 		atk3Cooldown = nbt.getInt("Atk3Cooldown");
 		attackElapsed = nbt.getInt("AttackElapsed");
 		attackDamageDone = nbt.getBoolean("AttackDamageDone");
-		ownerUuid = nbt.contains("Owner") ? NbtHelper.toUuid(nbt.get("Owner")) : null;
+		setSummoner(nbt.contains("Owner") ? NbtHelper.toUuid(nbt.get("Owner")) : null);
 		try {
 			attackKind = AttackKind.valueOf(nbt.getString("AttackKind"));
 		} catch (IllegalArgumentException exception) {
@@ -643,7 +715,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 			if (golem.isSummoning() || golem.isCombatAttacking()) {
 				return false;
 			}
-			owner = golem.getSummoner();
+			owner = golem.getOwner();
 			if (owner == null || !owner.isAlive() || owner.isSpectator()) {
 				return false;
 			}

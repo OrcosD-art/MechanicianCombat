@@ -1,8 +1,8 @@
 param(
     [int]$Port = 9336,
     [string]$Exe = "C:\Users\lmc\AppData\Local\Programs\Blockbench\Blockbench.exe",
-    [string]$Profile = "D:\codex\mod\rebuild\bbprof_backpack_ps",
-    [string]$Plugin = "D:\codex\mod\rebuild\tools\geckolib.js",
+    [string]$Profile = "D:\codex\mod\rebuild\bbprofile_bb4126",
+    [string]$Plugin = "D:\codex\mod\rebuild\tools\geckolib_legacy_412.js",
     [string]$SourceDir = ""
 )
 $ErrorActionPreference = "Stop"
@@ -189,7 +189,11 @@ return JSON.stringify({
 const info = { catalog: false, loaded: false, actions: [], error: null };
 function findGecko() {
     const all = Plugins.all || [];
-    return all.filter(p => p && p.id === 'geckolib')[0] || all['geckolib'] || null;
+    return all.filter(p => p && p.id === 'animation_utils')[0]
+        || all['animation_utils']
+        || all.filter(p => p && p.id === 'geckolib')[0]
+        || all['geckolib']
+        || null;
 }
 try {
     if (Plugins.loading_promise) {
@@ -201,7 +205,7 @@ try {
         await new Promise(r => setTimeout(r, 500));
     }
     const plugin = findGecko();
-    if (!plugin) throw new Error('geckolib not found in plugin catalog');
+    if (!plugin) throw new Error('animation_utils/geckolib not found in plugin catalog');
     await plugin.load('__PLUGIN_PATH__');
     info.loaded = !!plugin.loaded;
     for (let i = 0; i < 40; i++) {

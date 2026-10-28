@@ -15,6 +15,14 @@ final class CombatRollBridge {
 			if (!TkGun.holdingGun(player)) {
 				return;
 			}
+			double horizontalSq = direction.x * direction.x + direction.z * direction.z;
+			if (horizontalSq > 1.0E-6D) {
+				float rollYaw = (float) Math.toDegrees(Math.atan2(-direction.x, direction.z));
+				player.setYaw(rollYaw);
+				player.setBodyYaw(rollYaw);
+				player.setHeadYaw(rollYaw);
+				player.prevYaw = rollYaw;
+			}
 			TkGunServer.onRollStarted(player);
 			var world = player.getServerWorld();
 			for (int i = 0; i < 10; i++) {

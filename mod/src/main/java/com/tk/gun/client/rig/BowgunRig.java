@@ -104,13 +104,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/**
-	 * 作者在动画里埋的**粒子关键帧**：`Overheat` 0.4167s、`Focus_over_shooting` 3.0s
-	 * （effect 都叫 `"particles"`，其中后者还带 `pre_effect_script: "cooling;"`）。
-	 * 不注册 handler 的话 GeckoLib 只打一句 `Particle Keyframe found ... no keyframe handler registered`，
-	 * 什么都不放。这里照作者意图，在**正在渲染的那个玩家**身上补一簇散热粒子。
-	 *
-	 * <p>为什么不跟 `locator`（枪口）：这两个点更像是"枪身/身上排汽"（服务端过热期间本来也在持续放
-	 * `tkgun:heat_vent`），跟枪口反而会跑到枪管前端去。挂个日志方便验收"关键帧真的触发了"。
+	 * Spawns the authored particle effect at the model's locator. The current source
+	 * places `particles` on `Overheat` at 0.25 seconds.
 	 */
 	private static void onParticleKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.ParticleKeyframeEvent<BowgunRig> event) {
@@ -244,6 +239,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 	/** 当前 rig 控制器在播哪一段（渲染器判"这段要不要跟随视角"要用）。 */
 	public static String currentAnimation() {
 		return currentAnimationName;
+	}
+
+	/** Animation layers affecting the current player's body in this GeckoLib render pass. */
+	public static java.util.Set<String> currentPlayerPoseAnimations() {
+		java.util.Set<String> names = new java.util.LinkedHashSet<>();
+		if (currentAnimationName != null && !currentAnimationName.isBlank()) {
+			names.add(currentAnimationName);
+		}
+		if (upperName != null && !upperName.isBlank()) {
+			names.add(upperName);
+		}
+		return names;
 	}
 	private static String lastLogged = "";
 	/** 演示模式（`-Dtkgun.demo=1`）才打这类诊断日志。 */
@@ -385,8 +392,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
 			return PlayState.STOP;
 		}
-		if (!TkGun.definition(player).id()
-				.equals(TkGun.id("abyssal_ancient_cannon"))) {
+		net.minecraft.util.Identifier gunId = TkGun.definition(player).id();
+		if (!gunId.equals(TkGun.id("abyssal_ancient_cannon"))
+				&& !gunId.equals(TkGun.id("veritas_et_justitia"))) {
 			return PlayState.STOP;
 		}
 		GunClientState.Entry entry = GunClientState.get(entity.getId());
@@ -499,6 +507,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		GunClientState.Entry e = GunClientState.get(entity.getId());
 		if (e == null) {
+			return null;
+		}
+		if (e.airborneIdle) {
 			return null;
 		}
 		boolean firing = e.active() && e.state == TkGun.State.FIRE;
@@ -692,6 +703,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return play(state, "idle");
 		}
 		GunClientState.Entry e = GunClientState.get(entity.getId());
+		if (e != null && e.airborneIdle) {
+			return play(state, "idle");
+		}
 		// **上半身叠层模式**（腰射举枪 / 架枪走动 / 换弹走动）：这条控制器只负责腿，
 		// 上身交给 `upper` 那条（GeckoLib 里后注册的控制器覆盖先注册的，按骨骼生效）——
 		// 这样"架枪走路""边走边换弹"都是"上身保持姿势 + 腿在走"，见 upperAnimationFor 的表。

@@ -28,6 +28,8 @@ public final class GunClientState {
 		public int hipMagazineCapacity = TkGun.MAG_CAPACITY_HIP;
 		public int focusMagazineCapacity = TkGun.MAG_CAPACITY_FOCUS;
 		public int maxShotIndex = TkGun.SHOT_ANIM_MAX;
+		/** Authoritative normal-airborne hold flag from the server. */
+		public boolean airborneIdle;
 		/** 服务端正在执行主动装填；HUD 据此显示“装填”。 */
 		public boolean reloading;
 		/**
@@ -112,6 +114,7 @@ public final class GunClientState {
 		e.hipMagazineCapacity = Math.max(1, payload.hipMagazineCapacity());
 		e.focusMagazineCapacity = Math.max(1, payload.focusMagazineCapacity());
 		e.maxShotIndex = Math.max(1, payload.maxShotIndex());
+		e.airborneIdle = payload.airborneIdle();
 		e.shotIndex = Math.max(1, Math.min(e.maxShotIndex, payload.shotIndex()));
 		e.mag = Math.max(0,
 				Math.min(payload.focus() ? e.focusMagazineCapacity : e.hipMagazineCapacity, payload.mag()));
@@ -295,6 +298,9 @@ public final class GunClientState {
 		Entry e = ENTRIES.get(entityId);
 		if (e == null || !e.active()) {
 			return null;
+		}
+		if (e.airborneIdle) {
+			return "idle";
 		}
 		switch (e.state) {
 			case IDLE:

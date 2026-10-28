@@ -8,7 +8,7 @@ import net.minecraft.registry.Registry;
 /**
  * 711 素材里那个「散热粒子.json」是 Bedrock 草稿（identifier/texture 都是空的），
  * 这里把它补完并落到本服能用的形式上：一个真正的 MC 粒子 tkgun:heat_vent，
- * 8 帧贴图在 resources/assets/tkgun/textures/particle/heat_vent_0..7.png。
+ * 12 帧贴图在 resources/assets/tkgun/textures/particle/heat_vent_0..11.png。
  *
  * 2026-10-13 机械师素材又给了 `粒子.zip`：`converge.png`(32x192) / `xplo.png`(48x288)
  * 两张竖条翻页贴图 —— 切成单帧后登记成

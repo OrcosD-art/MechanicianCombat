@@ -28,7 +28,8 @@ import java.util.Map;
 /**
  * 玩家 rig 的 GeckoLib 渲染器。
  *
- * <p>主渲染（玩家皮肤）只画身体：**在 {@link #renderCubesOfBone} 里把非身体骨骼的方块跳过**。
+ * <p>本渲染器只评估 GeckoLib 动画、采集玩家身体姿势并绘制枪械。玩家身体、皮肤和装备层
+ * 由原版 {@code PlayerRenderer} 绘制，并通过 {@link BowgunPlayerAnimatorPose} 应用同一帧姿态。
  *
  * <p>⚠️ 别改用 {@code bone.setHidden(true)} 来藏枪：GeckoLib 里 hidden 会**连子骨骼一起
  * 不遍历**（renderChildBones 见到 isHidingChildren 直接 return），而枪件是
@@ -40,8 +41,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	public static final Set<String> BODY_BONES = Set.of(
 			"chest", "head", "arm_left", "arm_right", "leg_left", "leg_right");
 	/**
-	 * 遍历时顺手记下身体那 6 根 + 它们的父骨 {@code body} 的引用（现在只用于诊断/自检；
-	 * 2026-10-14 试过用它给原版模型/盔甲折父链，那套已按用户要求撤掉了，见 SKILL.md）。
+	 * 遍历时采样身体那 6 根 + 父骨 {@code body}，供 PlayerAnimator 驱动原版玩家模型。
 	 */
 	private static final Set<String> POSE_BONES = Set.of(
 			"body", "chest", "head", "arm_left", "arm_right", "leg_left", "leg_right");
@@ -108,14 +108,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	public BowgunRigRenderer(EntityRendererFactory.Context context) {
 		super(context, new BowgunRigModel(), BowgunRig.INSTANCE);
 		addRenderLayer(new BowgunGunLayer(this));
-		// **玩家皮肤第二层**（头发/帽子/衣服覆盖层）：用户 2026-10-17 要求。
-		// 我们接管玩家模型后，身体 6 块骨骼的 UV 是按"第一层"写死的，原版那套第二层方块就没了 ——
-		// 这一层把同样的方块按第二层 UV 再画一遍（并沿法线外扩一点点防 z-fighting），见 BowgunSkinLayer。
-		addRenderLayer(new BowgunSkinLayer(this));
-		// 原版 ArmorFeatureRenderer 随整条 PlayerEntityRenderer 一起被取消；这一层在同样的身体骨骼上
-		// 按原版盔甲贴图重画头盔/胸甲/护腿/靴子，见 BowgunArmorLayer。
-		addRenderLayer(new BowgunArmorLayer(this));
 		addRenderLayer(new CombatBackpackRigLayer(this));
+		// 原版 PlayerRenderer 继续负责皮肤第二层、盔甲、披风和 Curios。
 		// ⚠️ **气流那一层默认不开**（2026-10-16 用户实测反馈："枪口特效完全糊着、像管风琴一列一列
 		//    排开、太小"）：v4 素材把枪口焰第 2/3/4 帧那三块平面改成采样 `airflow.png` 的一整帧
 		//    （32x32 = 2 格大的白云团），三块正好在炮管前方 z=-66/-62/-58 排成一列 →
@@ -125,20 +119,13 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		// addRenderLayer(new BowgunAirflowLayer(this));
 	}
 
-	/** 身体那 6 根骨头的引用（每帧遍历时顺手记下），给 {@link RigPose} 把位姿搬到原版模型上用。 */
-	private final Map<String, GeoBone> bodyBones = new HashMap<>();
-
-	public GeoBone bone(String name) {
-		return bodyBones.get(name);
-	}
+	/** Local bone transforms from this pass, consumed by the vanilla PlayerModel. */
+	private final Map<String, BowgunPlayerAnimatorPose.BonePose> playerPose = new HashMap<>();
 
 	@Override
 	public void renderCubesOfBone(MatrixStack poseStack, GeoBone bone, VertexConsumer buffer,
 								  int packedLight, int packedOverlay, int colour) {
-		if (!BODY_BONES.contains(bone.getName())) {
-			return;   // 枪件由 BowgunGunLayer 换贴图补画
-		}
-		super.renderCubesOfBone(poseStack, bone, buffer, packedLight, packedOverlay, colour);
+		// Player body is drawn by PlayerRenderer; guns are drawn by BowgunGunLayer.
 	}
 
 	/**
@@ -168,9 +155,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		if (currentFrame && ROOT_BONE.equals(name)) {
 			lastAimPos = null;
 			lastMuzzlePos = null;
-		}
-		if (POSE_BONES.contains(name)) {
-			bodyBones.put(name, bone);   // 给 RigPose（原版模型/盔甲那层）用
+			playerPose.clear();
 		}
 
 		// **上半身叠层（举枪 / 开火）时特效平面怎么处理**（2026-10-15 素材 v3）：
@@ -197,12 +182,16 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			// 真正的奔跑仍由完整 run 动画驱动，不走 bodyLocked 分支。
 			bone.setRotX(0.0F);
 		}
+		boolean chestBobTransform = false;
+		float chestBobPx = 0.0F;
 		if (bodyLocked && CHEST_BONE.equals(name)) {
 			String walk = TkGunClient.walkAnimation(poseEntity.getId());
 			if (walk != null && walk.startsWith("walk_")) {
 				// 把作者 walk_* 的 chest.position.y 曲线叠加到腰射上半身。
-				float bobPx = walkChestBobPx(TkGunClient.walkPhase(poseEntity.getId()));
-				poseStack.translate(0.0F, bobPx / 16.0F, 0.0F);
+				chestBobPx = walkChestBobPx(TkGunClient.walkPhase(poseEntity.getId()));
+				poseStack.push();
+				poseStack.translate(0.0F, chestBobPx / 16.0F, 0.0F);
+				chestBobTransform = true;
 			}
 		}
 
@@ -303,7 +292,12 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			int capacity = GunClientState.capacity(getCurrentEntity().getId());
 			int fired = e == null ? 0 : Math.max(0, Math.min(capacity, e.mag));
 			TkGun.State state = e == null ? TkGun.State.IDLE : e.state;
-			boolean mergedFocusFire = e != null && state == TkGun.State.FIRE && e.focus
+			// AIM_HOLD reuses the current shot clip for shots 4+. Keep applying
+			// the same chain offset during the hold phase so the authored tail
+			// pose does not snap back to the un-offset clip position.
+			boolean focusMagazinePose = e != null && e.focus
+					&& (state == TkGun.State.FIRE || state == TkGun.State.AIM_HOLD);
+			boolean mergedFocusFire = focusMagazinePose
 					&& TkGun.mergedFocusShot(e.shotIndex, e.maxShotIndex);
 			// 普通专注射击按两段弹链阶段共用动画；这里按发数叠加阶段内偏移，
 			// 等价于原 Focus_shooting1..5 中仅有的差异。
@@ -319,7 +313,12 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			//     提前显会看到"弹夹还没插、弹链已经在枪上"。
 			boolean reloading = e != null && (state == TkGun.State.RELOAD || e.reloading);
 			boolean magIn = reloading && e.elapsed >= RELOAD_MAG_IN_TICKS;
-			if (mergedFocusFire) {
+			if (state == TkGun.State.OVERHEAT) {
+				// Focus overheat is only entered after the focus magazine's final
+				// shot. Preserve the ejected/empty chain instead of falling back
+				// to the hip-fire magazine presentation at zero shots fired.
+				hide(bone);
+			} else if (mergedFocusFire) {
 				show(bone);
 				int firstChainEnd = Math.max(3, e.maxShotIndex - 4);
 				boolean firstChainPhase = e.shotIndex <= firstChainEnd;
@@ -336,7 +335,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 						bone.setPosX(bone.getPosX() - (e.shotIndex - secondChainStart));
 					}
 				}
-			} else if (state != TkGun.State.FIRE && (!reloading || magIn)
+			} else if (!focusMagazinePose && state != TkGun.State.FIRE && (!reloading || magIn)
 					&& !(reloading && "change3".equals(name))) {
 				int shown = magIn ? 0 : fired;   // 换弹里按"新弹夹"摆
 				if (shown >= capacity) {
@@ -351,10 +350,6 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 						show(bone);
 					} else if ("magazine_2".equals(name)) {
 						bone.setPosX(-Math.max(0, shown - 3));
-						show(bone);
-					} else if (state == TkGun.State.OVERHEAT) {
-						// 过热动画只写了 change3 的位移、没写缩放 —— 万一上一段打空后留下的
-						// scale 0 还在，这里把弹夹显回来（用户要的就是"过热时弹夹按实际弹量摆"）。
 						show(bone);
 					}
 					// ⚠️ 架枪（Focus_ready）里 **change3 的 scale 不要动**：作者用它做"弹夹从枪身里
@@ -371,6 +366,18 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 
 		super.renderRecursively(poseStack, animatable, bone, type, bufferSource, buffer, isReRender, partialTick,
 				packedLight, packedOverlay, colour);
+		if (currentFrame && POSE_BONES.contains(name)) {
+			playerPose.put(name, new BowgunPlayerAnimatorPose.BonePose(
+					bone.getPosX(), bone.getPosY() + chestBobPx, bone.getPosZ(),
+					bone.getRotX(), bone.getRotY(), bone.getRotZ(),
+					bone.getPivotX(), bone.getPivotY(), bone.getPivotZ()));
+		}
+		if (currentFrame && ROOT_BONE.equals(name)) {
+			BowgunPlayerAnimatorPose.capture(renderedEntity.getId(), playerPose);
+		}
+		if (chestBobTransform) {
+			poseStack.pop();
+		}
 		// 两个定位器都在 body 子树里；body 的 super 返回时它们这一帧都已遍历完。
 		// 用 locator - aim 得到视觉枪管中心线，而不是假设枪沿 locator 的局部 -Z。
 		if (currentFrame && ROOT_BONE.equals(name)

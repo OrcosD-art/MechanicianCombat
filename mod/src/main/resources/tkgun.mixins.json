@@ -9,7 +9,9 @@
     "TridentEntityAccessor",
     "OffhandSwapGuardMixin",
     "OffhandPlacementGuardMixin",
-    "BackpackFireworkSelfDamageMixin"
+    "BackpackFireworkSelfDamageMixin",
+    "PlayerFallDamageMixin",
+    "OffhandUseGuardMixin"
   ],
   "client": [
     "PlayerEntityRendererRigMixin"

@@ -3,8 +3,8 @@ param(
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
     [string]$Prefix = "gun",
     [int]$Port = 9341,
-    [string]$Exe = "D:\codex\mod\rebuild\bb5\Blockbench\Blockbench.exe",
-    [string]$Profile = "D:\codex\mod\rebuild\bbprofile5"
+    [string]$Exe = "D:\codex\mod\rebuild\tools\Blockbench5-portable\Blockbench.exe",
+    [string]$Profile = "D:\codex\mod\rebuild\bbprofile_bb522"
 )
 $ErrorActionPreference = "Stop"
 
@@ -20,7 +20,7 @@ $modelPath = (Resolve-Path -LiteralPath $Model).Path
 $modelText = [IO.File]::ReadAllText($modelPath, [Text.Encoding]::UTF8)
 $jobPath = Join-Path $OutputDirectory "raw_export_job.js"
 $pluginLoaderPath = Join-Path $OutputDirectory "load_geckolib.js"
-$pluginPath = "D:\codex\mod\rebuild\tools\geckolib_bb5.js"
+$pluginPath = "D:\codex\mod\rebuild\tools\geckolib.js"
 $job = "globalThis.__BB_JOB = {name:" + ($Prefix | ConvertTo-Json -Compress) +
     ",modelJson:" + $modelText + ",skinUv:{}};`nreturn 1;"
 [IO.File]::WriteAllText($jobPath, $job, (New-Object Text.UTF8Encoding($false)))
@@ -39,8 +39,11 @@ try {
     }
     const p = findGecko();
     if (!p) throw new Error('geckolib missing from plugin catalog');
-    await p.load($($pluginPath | ConvertTo-Json -Compress));
-    info.loaded = !!p.loaded;
+    const alreadyLoaded = Object.keys(BarItems).some(k => /^export_geckolib/.test(k));
+    if (!alreadyLoaded) {
+        await p.load($($pluginPath | ConvertTo-Json -Compress));
+    }
+    info.loaded = alreadyLoaded || !!p.loaded;
     for (let i=0; i<40; i++) {
         info.actions = Object.keys(BarItems).filter(k => /^export_geckolib/.test(k));
         if (info.actions.length) break;
@@ -82,6 +85,13 @@ try {
         throw "Failed to load GeckoLib plugin."
     }
     Write-Output "Plugin: $pluginResult"
+    $useBuiltin = $true
+    try {
+        $pluginInfo = ($pluginResult | Out-String) | ConvertFrom-Json
+        $useBuiltin = @($pluginInfo.actions).Count -eq 0
+    } catch {
+        $useBuiltin = $true
+    }
 
     & powershell.exe -NoProfile -ExecutionPolicy Bypass `
         -File "D:\codex\mod\rebuild\tools\cdp.ps1" --port $Port --file $jobPath | Out-Null
@@ -89,7 +99,12 @@ try {
         throw "Failed to load model into Blockbench."
     }
 
-    $exporter = "D:\codex\mod\rebuild\tools\bb_export_geckolib.js"
+    $exporter = if ($useBuiltin) {
+        "D:\codex\mod\rebuild\tools\bb_export_builtin.js"
+    } else {
+        "D:\codex\mod\rebuild\tools\bb_export_geckolib.js"
+    }
+    Write-Output "Exporter: $exporter"
     $raw = & powershell.exe -NoProfile -ExecutionPolicy Bypass `
         -File "D:\codex\mod\rebuild\tools\cdp.ps1" --port $Port --file $exporter
     if ($LASTEXITCODE -ne 0) {
@@ -99,7 +114,11 @@ try {
     Write-Output "Export log: $($result.log -join '; ')"
     Write-Output "Export items: $((@($result.exports | ForEach-Object { [string]$_.name })) -join ', ')"
     $exportedGeo = $null
-    $exportedAnim = $null
+    $exportedAnim = if ($result.animation_document) {
+        [string]$result.animation_document
+    } else {
+        $null
+    }
     foreach ($entry in $result.exports) {
         $name = ([string]$entry.name).ToLowerInvariant()
         if (-not $entry.content) {

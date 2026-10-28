@@ -18,6 +18,7 @@
 		"java": ">=21",
 		"fabric-api": "*",
 		"geckolib": ">=4.8.0",
+		"playeranimator": "*",
 		"accessories": ">=1.1.0-beta.54"
 	},
 	"recommends": {

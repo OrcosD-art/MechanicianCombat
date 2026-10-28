@@ -119,6 +119,19 @@ public final class ShoulderSurfBridge {
 		}
 	}
 
+	/** Current camera yaw from ShoulderSurfing, without changing its camera. */
+	public static Float shoulderCameraYaw() {
+		try {
+			IShoulderSurfing api = ShoulderSurfing.getInstance();
+			if (api != null && api.isShoulderSurfing()) {
+				return api.getCamera().getYRot();
+			}
+		} catch (Throwable ignored) {
+			// Optional dependency: callers fall back to Minecraft's camera.
+		}
+		return null;
+	}
+
 	/** 诊断用（演示模式日志里带上它，好确认"现在到底是它的越肩视角还是原版第三人称"）。 */
 	public static String describe() {
 		try {

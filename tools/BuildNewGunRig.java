@@ -29,11 +29,20 @@ import java.util.Comparator;
  */
 public final class BuildNewGunRig {
 	private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
-	private static final String MODEL_ID = "geometry.tkgun.abyssal_ancient_cannon_rig";
+	private static final String DEFAULT_MODEL_ID = "geometry.tkgun.abyssal_ancient_cannon_rig";
 	private static final List<String> EMPTY_EFFECT_BONES = List.of(
 			"smoke", "dash1", "dash2", "dash3", "dash4");
 	private static final Set<String> STRUCTURAL_GUN_BONES = Set.of(
 			"gun", "barrel", "case", "change3", "change4", "change5", "A", "B");
+	/**
+	 * These inherited clips come from the Fortress rig. Their gun-subtree channels
+	 * describe the old hinged barrel, so matching bone names must not leak into a
+	 * new gun unless that gun's own source explicitly authors the same clip.
+	 */
+	private static final Set<String> INHERITED_CLOSED_ANIMATIONS = Set.of(
+			"idle", "walk_front", "walk_back", "walk_left", "walk_right",
+			"run", "roll", "roll_to_idle", "sliding", "reload", "reload_upper",
+			"roll_to_idle_upper", "sliding_fast_ready", "rolling_fast_ready");
 
 	public static void main(String[] args) throws Exception {
 		Path baseGeoPath = Path.of(args[0]);
@@ -44,22 +53,21 @@ public final class BuildNewGunRig {
 		Path outputGeo = Path.of(args[5]);
 		Path outputAnim = Path.of(args[6]);
 		Path outputTexture = Path.of(args[7]);
+		String modelId = args.length > 8 ? args[8] : DEFAULT_MODEL_ID;
+		Path extraShellTexture = args.length > 9 ? Path.of(args[9]) : null;
 
 		JsonObject fullGeo = read(baseGeoPath);
 		JsonObject fullAnim = read(baseAnimPath);
-		JsonObject source = read(sourceBbmodelPath);
+		JsonObject source = readBbmodel(sourceBbmodelPath);
 		JsonObject rawGeo = read(rawGeoPath);
 		JsonObject rawAnim = read(rawAnimPath);
 
-		Map<String, Integer> textureOffsets = buildTextureAtlas(source, outputTexture);
+		TextureAtlas atlas = buildTextureAtlas(source, outputTexture, extraShellTexture);
 		JsonObject fullGeometry = fullGeo.getAsJsonArray("minecraft:geometry")
 				.get(0).getAsJsonObject();
 		JsonObject rawGeometry = rawGeo.getAsJsonArray("minecraft:geometry")
 				.get(0).getAsJsonObject();
-		rewriteGunUv(rawGeometry, source, textureOffsets);
-		for (JsonElement element : rawGeometry.getAsJsonArray("bones")) {
-			scaleHorizontalUv(element.getAsJsonObject(), 64.0D / 288.0D);
-		}
+		rewriteGunUv(rawGeometry, source, atlas);
 
 		JsonArray baseBones = fullGeometry.getAsJsonArray("bones");
 		Set<String> baseBoneNames = boneNames(baseBones);
@@ -75,8 +83,7 @@ public final class BuildNewGunRig {
 			} else if ("shells".equals(name)) {
 				bone.remove("cubes");
 			} else if (name.startsWith("shell")) {
-				offsetHorizontalUv(bone, 64.0D);
-				scaleHorizontalUv(bone, 64.0D / 288.0D);
+				normalizeAtlasUv(bone, atlas.shellOffset, atlas.width, atlas.height);
 			}
 			mergedBones.add(bone);
 		}
@@ -93,7 +100,7 @@ public final class BuildNewGunRig {
 		fullGeometry.add("bones", mergedBones);
 
 		JsonObject description = fullGeometry.getAsJsonObject("description");
-		description.addProperty("identifier", MODEL_ID);
+		description.addProperty("identifier", modelId);
 		description.addProperty("texture_width", 64);
 		description.addProperty("texture_height", 64);
 
@@ -116,6 +123,7 @@ public final class BuildNewGunRig {
 		}
 
 		JsonObject rawAnimations = rawAnim.getAsJsonObject("animations");
+		clearInheritedClosedHinge(animations, rawAnimations);
 		mergeFocusAnimation(animations, rawAnimations, "Focus_ready", finalBoneNames);
 		mergeFocusAnimation(animations, rawAnimations, "Focus_over", finalBoneNames);
 		addGunFrameOverride(animations, rawAnimations, "open",
@@ -131,7 +139,39 @@ public final class BuildNewGunRig {
 		System.out.println("Geometry bones: " + mergedBones.size());
 		System.out.println("Gun subtree bones: " + String.join(", ", gunBoneNames));
 		System.out.println("Animations: " + animations.size());
-		System.out.println("Texture atlas: " + outputTexture + " (288x64)");
+		System.out.println("Texture atlas: " + outputTexture
+				+ " (" + atlas.width() + "x" + atlas.height() + ")");
+	}
+
+	/**
+	 * The source rigs only author Focus/deploy clips. For inherited closed and
+	 * locomotion clips, reset the replacement gun's hinge to its geometry rest
+	 * pose unless the source explicitly provides that animation.
+	 */
+	private static void clearInheritedClosedHinge(JsonObject animations,
+											  JsonObject rawAnimations) {
+		for (String name : INHERITED_CLOSED_ANIMATIONS) {
+			JsonObject animation = animations.getAsJsonObject(name);
+			if (animation == null || !animation.has("bones")) {
+				continue;
+			}
+			JsonObject rawAnimation = rawAnimations.getAsJsonObject(name);
+			if (rawAnimation != null && rawAnimation.has("bones")
+					&& rawAnimation.getAsJsonObject("bones").has("change1")) {
+				continue;
+			}
+			JsonObject bones = animation.getAsJsonObject("bones");
+			if (!bones.has("change1")) {
+				continue;
+			}
+			JsonObject change1 = new JsonObject();
+			JsonArray zero = new JsonArray();
+			zero.add(0);
+			zero.add(0);
+			zero.add(0);
+			change1.add("rotation", zero);
+			bones.add("change1", change1);
+		}
 	}
 
 	private static void mergeFocusAnimation(JsonObject animations, JsonObject rawAnimations,
@@ -218,7 +258,8 @@ public final class BuildNewGunRig {
 		return terminal.deepCopy();
 	}
 
-	private static void scaleHorizontalUv(JsonObject bone, double factor) {
+	private static void normalizeAtlasUv(JsonObject bone, double offsetU,
+									   int atlasWidth, int atlasHeight) {
 		JsonArray cubes = bone.getAsJsonArray("cubes");
 		if (cubes == null) {
 			return;
@@ -233,34 +274,22 @@ public final class BuildNewGunRig {
 				JsonArray values = entry.getAsJsonArray("uv");
 				JsonArray size = entry.getAsJsonArray("uv_size");
 				values.set(0, new com.google.gson.JsonPrimitive(
-						values.get(0).getAsDouble() * factor));
+						(values.get(0).getAsDouble() + offsetU)
+								* 64.0D / atlasWidth));
+				values.set(1, new com.google.gson.JsonPrimitive(
+						values.get(1).getAsDouble() * 64.0D / atlasHeight));
 				if (size != null) {
 					size.set(0, new com.google.gson.JsonPrimitive(
-							size.get(0).getAsDouble() * factor));
+							size.get(0).getAsDouble() * 64.0D / atlasWidth));
+					size.set(1, new com.google.gson.JsonPrimitive(
+							size.get(1).getAsDouble() * 64.0D / atlasHeight));
 				}
 			}
 		}
 	}
 
-	private static void offsetHorizontalUv(JsonObject bone, double offset) {
-		JsonArray cubes = bone.getAsJsonArray("cubes");
-		if (cubes == null) {
-			return;
-		}
-		for (JsonElement cubeElement : cubes) {
-			JsonObject uv = cubeElement.getAsJsonObject().getAsJsonObject("uv");
-			if (uv == null) {
-				continue;
-			}
-			for (Map.Entry<String, JsonElement> face : uv.entrySet()) {
-				JsonArray values = face.getValue().getAsJsonObject().getAsJsonArray("uv");
-				values.set(0, new com.google.gson.JsonPrimitive(
-						values.get(0).getAsDouble() + offset));
-			}
-		}
-	}
-
-	private static Map<String, Integer> buildTextureAtlas(JsonObject source, Path output)
+	private static TextureAtlas buildTextureAtlas(JsonObject source, Path output,
+												  Path extraShellTexture)
 			throws Exception {
 		JsonArray textures = source.getAsJsonArray("textures");
 		Map<String, JsonObject> byId = new LinkedHashMap<>();
@@ -268,36 +297,61 @@ public final class BuildNewGunRig {
 			JsonObject texture = element.getAsJsonObject();
 			byId.put(texture.get("id").getAsString(), texture);
 		}
-		List<String> order = List.of("0", "2", "1");
+
+		List<AtlasEntry> entries = new ArrayList<>();
+		if (byId.containsKey("0")) {
+			entries.add(sourceTexture(byId.remove("0")));
+		}
+		String shellId = null;
+		for (Map.Entry<String, JsonObject> candidate : List.copyOf(byId.entrySet())) {
+			if (candidate.getValue().get("name").getAsString()
+					.toUpperCase(java.util.Locale.ROOT).contains("BOWGUN")) {
+				shellId = candidate.getKey();
+				entries.add(sourceTexture(byId.remove(candidate.getKey())));
+				break;
+			}
+		}
+		if (extraShellTexture != null) {
+			BufferedImage shell = ImageIO.read(extraShellTexture.toFile());
+			if (shell == null) {
+				throw new IllegalStateException("Could not read shell texture: "
+						+ extraShellTexture);
+			}
+			entries.add(new AtlasEntry(extraShellTexture.toString(), shell.getWidth(),
+					shell.getHeight(), shell));
+		}
+		byId.entrySet().stream()
+				.sorted(Comparator.comparingInt(entry -> textureOrder(entry.getKey())))
+				.map(Map.Entry::getValue)
+				.forEach(texture -> entries.add(sourceTexture(texture)));
+
 		Map<String, Integer> offsets = new LinkedHashMap<>();
 		int width = 0;
-		for (String id : order) {
-			if (!byId.containsKey(id)) {
-				continue;
+		int height = 1;
+		int shellOffset = 64;
+		for (AtlasEntry entry : entries) {
+			offsets.put(entry.id(), width);
+			if ((shellId != null && shellId.equals(entry.id()))
+					|| (shellId == null && extraShellTexture != null
+							&& entry.id().equals(extraShellTexture.toString()))) {
+				shellOffset = width;
 			}
-			offsets.put(id, width);
-			width += byId.get(id).get("width").getAsInt();
+			width += entry.image().getWidth();
+			height = Math.max(height, entry.image().getHeight());
 		}
-		BufferedImage atlas = new BufferedImage(width, 64, BufferedImage.TYPE_INT_ARGB);
+		BufferedImage atlas = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D graphics = atlas.createGraphics();
-		for (String id : order) {
-			if (!byId.containsKey(id)) {
-				continue;
-			}
-			JsonObject texture = byId.get(id);
-			String sourceUri = texture.get("source").getAsString();
-			byte[] bytes = Base64.getDecoder().decode(sourceUri.substring(sourceUri.indexOf(',') + 1));
-			BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
-			graphics.drawImage(image, offsets.get(id), 0, null);
+		for (AtlasEntry entry : entries) {
+			graphics.drawImage(entry.image(), offsets.get(entry.id()), 0, null);
 		}
 		graphics.dispose();
 		Files.createDirectories(output.getParent());
 		ImageIO.write(atlas, "png", output.toFile());
-		return offsets;
+		return new TextureAtlas(offsets, width, height, shellOffset);
 	}
 
 	private static void rewriteGunUv(JsonObject rawGeometry, JsonObject source,
-									 Map<String, Integer> offsets) {
+									 TextureAtlas atlas) {
 		Map<String, ArrayDeque<JsonObject>> sourceElements = sourceElementsByGroup(source);
 		for (JsonElement element : rawGeometry.getAsJsonArray("bones")) {
 			JsonObject bone = element.getAsJsonObject();
@@ -324,15 +378,53 @@ public final class BuildNewGunRig {
 						continue;
 					}
 					String textureId = textureElement.getAsString();
-					Integer offset = offsets.get(textureId);
+					Integer offset = atlas.offsets().get(textureId);
 					if (offset != null) {
 						JsonObject entry = uv.getAsJsonObject(face);
 						JsonArray rawUv = entry.getAsJsonArray("uv");
+						JsonArray rawSize = entry.getAsJsonArray("uv_size");
 						rawUv.set(0, new com.google.gson.JsonPrimitive(
-								rawUv.get(0).getAsDouble() + offset));
+								(rawUv.get(0).getAsDouble() + offset)
+										* 64.0D / atlas.width()));
+						rawUv.set(1, new com.google.gson.JsonPrimitive(
+								rawUv.get(1).getAsDouble()
+										* 64.0D / atlas.height()));
+						if (rawSize != null) {
+							rawSize.set(0, new com.google.gson.JsonPrimitive(
+									rawSize.get(0).getAsDouble()
+											* 64.0D / atlas.width()));
+							rawSize.set(1, new com.google.gson.JsonPrimitive(
+									rawSize.get(1).getAsDouble()
+											* 64.0D / atlas.height()));
+						}
 					}
 				}
 			}
+		}
+	}
+
+	private static AtlasEntry sourceTexture(JsonObject texture) {
+		try {
+			String sourceUri = texture.get("source").getAsString();
+			byte[] bytes = Base64.getDecoder().decode(
+					sourceUri.substring(sourceUri.indexOf(',') + 1));
+			BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
+			if (image == null) {
+				throw new IllegalStateException("Could not decode embedded texture "
+						+ texture.get("name").getAsString());
+			}
+			return new AtlasEntry(texture.get("id").getAsString(),
+					image.getWidth(), image.getHeight(), image);
+		} catch (Exception failure) {
+			throw new IllegalStateException("Could not build texture atlas entry", failure);
+		}
+	}
+
+	private static int textureOrder(String id) {
+		try {
+			return Integer.parseInt(id);
+		} catch (NumberFormatException ignored) {
+			return Integer.MAX_VALUE;
 		}
 	}
 
@@ -431,9 +523,22 @@ public final class BuildNewGunRig {
 		return GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), JsonObject.class);
 	}
 
+	private static JsonObject readBbmodel(Path path) throws Exception {
+		String text = Files.readString(path, StandardCharsets.UTF_8);
+		text = text.replaceAll("(?<!\\\\)\\\\(?![\"\\\\/bfnrtu])", "\\\\\\\\");
+		return GSON.fromJson(text, JsonObject.class);
+	}
+
 	private static void write(Path path, JsonObject document) throws Exception {
 		Files.createDirectories(path.getParent());
 		Files.writeString(path, GSON.toJson(document), StandardCharsets.UTF_8);
+	}
+
+	private record AtlasEntry(String id, int width, int height, BufferedImage image) {
+	}
+
+	private record TextureAtlas(Map<String, Integer> offsets,
+								int width, int height, int shellOffset) {
 	}
 
 	private static final class JsonArrayBuilder {

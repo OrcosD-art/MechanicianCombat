@@ -4,7 +4,7 @@ param(
     [string]$AnimationOut = "D:\codex\mod\rebuild\build\auto_launcher.raw.animation.json",
     [int]$Port = 9352,
     [string]$Exe = "D:\codex\mod\rebuild\tools\Blockbench5-portable\Blockbench.exe",
-    [string]$Profile = "D:\codex\mod\rebuild\bbprof_backpack_ps",
+    [string]$Profile = "D:\codex\mod\rebuild\bbprofile_bb522",
     [string]$Plugin = "D:\codex\mod\rebuild\tools\geckolib.js"
 )
 

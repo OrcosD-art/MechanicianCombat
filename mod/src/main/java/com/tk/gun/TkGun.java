@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r417-2026-10-27";
+	public static final String BUILD = "r450-2026-10-28";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -169,6 +169,8 @@ public final class TkGun {
 	 * 位移按"离起点距离"封顶，所以按不按前进键都一样远（日志会打实测值）。
 	 */
 	public static final double SLIDE_DISTANCE = 4.6D;
+	/** Small forward momentum retained when a slide transitions into sliding_fast_ready. */
+	public static final double SLIDE_FAST_FOCUS_INERTIA = 0.18D;
 	public static final int SLIDE_COOLDOWN = 50;      // 滑铲冷却
 	/**
 	 * 滑铲收势长度。收势结束后回到 IDLE；若服务端仍标记为专注，则重新进入快速举枪。

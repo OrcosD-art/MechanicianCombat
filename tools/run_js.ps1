@@ -3,8 +3,8 @@
 param(
     [Parameter(Mandatory = $true)][string[]]$Js,
     [int]$Port = 9333,
-    [string]$Exe = "D:\codex\mod\rebuild\bb5\Blockbench\Blockbench.exe",
-    [string]$Profile = "D:\codex\mod\rebuild\bbprofile5"
+    [string]$Exe = "D:\codex\mod\rebuild\tools\Blockbench5-portable\Blockbench.exe",
+    [string]$Profile = "D:\codex\mod\rebuild\bbprofile_bb522"
 )
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8

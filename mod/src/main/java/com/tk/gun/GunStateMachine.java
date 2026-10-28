@@ -29,6 +29,8 @@ import net.minecraft.util.math.Vec3d;
 public final class GunStateMachine {
 	/** 翻滚之后的"加速冲刺"持续 tick（用户 2026-10-16："持续个 3 秒呗…相当于获得一个加速爆发冲刺"）。 */
 	public static final int DASH_TICKS = 60;
+	/** A completed slide adds this much speed-only buff after the current dash ends. */
+	public static final int SLIDE_SPEED_BOOST_EXTENSION_TICKS = 40;
 	/**
 	 * 冲刺时的移速加成（乘算：**+50% 总移速**）。
 	 *
@@ -109,9 +111,16 @@ public final class GunStateMachine {
 
 	/** 翻滚后的"加速冲刺"：`dashUntil` 之前给移速加成，过了就摘掉。 */
 	public static boolean tickDash(PlayerEntity player, TkGunServer.PState st, long now) {
-		boolean want = now < st.dashUntil;
-		boolean syncChanged = want != st.dashSyncActive;
-		st.dashSyncActive = want;
+		// dashUntil still owns dodge timing. speedBoostUntil only extends the
+		// movement modifier after a completed slide and must not revive roll,
+		// aim-lock, fast-focus, or dodge-window semantics.
+		boolean want = now < st.dashUntil || now < st.speedBoostUntil;
+		// Broadcast only the authoritative dodge window. Keeping dashSyncActive
+		// tied to speedBoostUntil would make clients retain aim locks after the
+		// actual dash expired.
+		boolean dashActive = now < st.dashUntil;
+		boolean syncChanged = dashActive != st.dashSyncActive;
+		st.dashSyncActive = dashActive;
 		EntityAttributeInstance attr = player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
 		if (attr == null) {
 			return syncChanged;
@@ -124,6 +133,19 @@ public final class GunStateMachine {
 			attr.removeModifier(DASH_MODIFIER);
 		}
 		return syncChanged;
+	}
+
+	/** Applies the one-time two-second speed extension for a completed slide. */
+	public static void extendSpeedBoostAfterSlide(ServerPlayerEntity player,
+												 TkGunServer.PState st, long now) {
+		if (st.slideBoostApplied) {
+			return;
+		}
+		st.slideBoostApplied = true;
+		long currentEnd = Math.max(now, Math.max(st.dashUntil, st.speedBoostUntil));
+		st.speedBoostUntil = currentEnd + SLIDE_SPEED_BOOST_EXTENSION_TICKS;
+		TkGun.LOGGER.info("[tkgun] 滑铲完成 -> 加速效果延长 {} tick（仅移速，原截止 {}）玩家={}",
+				SLIDE_SPEED_BOOST_EXTENSION_TICKS, currentEnd, player.getName().getString());
 	}
 
 	/** 下线/收回枪时清干净（不然加速会留在身上）。 */
@@ -203,6 +225,8 @@ public final class GunStateMachine {
 		}
 		boolean chained = st.lastDodgeAt > 0 && now - st.lastDodgeAt <= DODGE_CHAIN_WINDOW;
 		st.lastDodgeAt = now;
+		st.speedBoostUntil = 0;
+		st.slideBoostApplied = false;
 		// **翻滚 / 滑铲交替循环**：1 = 刚翻滚（下次 Alt 走滑铲），2 = 刚滑铲（下次重新翻滚）。
 		st.lastDodgeKind = roll ? 1 : 2;
 		st.dashUntil = now + DASH_TICKS;

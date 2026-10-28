@@ -48,7 +48,7 @@ public final class ShoulderCouplingState {
 		int id = client.player.getId();
 		// 疾跑 / 翻滚后的加速冲刺必须保持解耦，由原版/ShoulderSurfing 的移动视角处理；
 		// 否则每 tick 写 yaw 会和冲刺中的相机插值互相拉扯。
-		if (client.player.isSprinting() || GunClientState.dashing(id)) {
+		if (usesDecoupledSprint(client)) {
 			return false;
 		}
 		if (GunClientState.focusish(id) || GunClientState.aimLocked(id)) {
@@ -89,7 +89,7 @@ public final class ShoulderCouplingState {
 			return 0;
 		}
 		int id = client.player.getId();
-		if (client.player.isSprinting() || GunClientState.dashing(id)) {
+		if (usesDecoupledSprint(client)) {
 			return client.player.isSprinting() ? 1 : 2;
 		}
 		if (GunClientState.focusish(id)) {
@@ -109,6 +109,31 @@ public final class ShoulderCouplingState {
 			case INSPECT -> 11;
 			default -> GunClientState.aimLocked(id) ? 12 : 0;
 		};
+	}
+
+	/**
+	 * Includes the sprint-start input frame. Vanilla sets isSprinting() later in
+	 * the movement tick, so checking only the flag can couple the camera for one
+	 * frame immediately after sprint begins.
+	 */
+	private static boolean usesDecoupledSprint(MinecraftClient client) {
+		return isSprintDirectionActive(client);
+	}
+
+	/** Sprint, roll acceleration, or a held sprint key with active movement input. */
+	public static boolean isSprintDirectionActive(MinecraftClient client) {
+		if (client == null || client.player == null) {
+			return false;
+		}
+		boolean movementKey = client.options.forwardKey.isPressed()
+				|| client.options.backKey.isPressed()
+				|| client.options.leftKey.isPressed()
+				|| client.options.rightKey.isPressed();
+		return client.player.isSprinting()
+				|| GunClientState.dashing(client.player.getId())
+				|| GunClientState.rolling(client.player.getId())
+				|| (client.options.sprintKey.isPressed()
+						&& movementKey);
 	}
 
 	private ShoulderCouplingState() {

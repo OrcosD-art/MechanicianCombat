@@ -10,7 +10,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 							  boolean reloading, boolean focus, int shotSeq, boolean dashing,
 							  int dashTicks, int aimLockTicks, int heatLockTicks, String magAmmo,
 							  int rollCooldownTicks, int hipMagazineCapacity,
-							  int focusMagazineCapacity, int maxShotIndex)
+							  int focusMagazineCapacity, int maxShotIndex,
+							  boolean airborneIdle)
 		implements CustomPayload {
 	public static final CustomPayload.Id<GunStatePayload> ID =
 			new CustomPayload.Id<>(TkGun.id("state"));
@@ -39,6 +40,7 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 				buf.writeVarInt(value.hipMagazineCapacity());
 				buf.writeVarInt(value.focusMagazineCapacity());
 				buf.writeVarInt(value.maxShotIndex());
+				buf.writeBoolean(value.airborneIdle());
 			},
 			buf -> new GunStatePayload(buf.readVarInt(), buf.readByte(), buf.readVarInt(), buf.readVarInt(),
 					buf.readVarInt(), buf.readVarInt(),
@@ -58,7 +60,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 					buf.readableBytes() > 0 ? buf.readVarInt() : 0,
 					buf.readableBytes() > 0 ? buf.readVarInt() : 6,
 					buf.readableBytes() > 0 ? buf.readVarInt() : 10,
-					buf.readableBytes() > 0 ? buf.readVarInt() : 10));
+					buf.readableBytes() > 0 ? buf.readVarInt() : 10,
+					buf.readableBytes() > 0 && buf.readBoolean()));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {
