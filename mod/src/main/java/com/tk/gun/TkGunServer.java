@@ -10,6 +10,7 @@ import com.tk.gun.net.GunFirePayload;
 import com.tk.gun.net.GunStatePayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -39,6 +40,7 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
@@ -314,6 +316,30 @@ public class TkGunServer implements ModInitializer {
 		public ItemStack lastHeldGun = ItemStack.EMPTY;
 		/** 当前手持枪械的弹匣是否已经从未 NBT 载入（防止默认 0/空覆盖存档）。 */
 		public boolean magLoaded;
+		/** Current Veritas close-combat step (1..4). */
+		public int meleeCombo;
+		public boolean meleeHitDone;
+		public boolean meleeQueued;
+		public boolean meleeInputHeld;
+		public long meleeInputPressedAt;
+		public boolean meleeAtk3MainEnded;
+		public boolean meleeAtk4Empowered;
+		public boolean meleeHoldOver;
+		public int meleeHoldOverHits;
+		public boolean meleeDashAttack;
+		public boolean meleeDashMoving;
+		public boolean meleeReturning;
+		/** This recovery follows a dash attack and must start from ATK_2_end. */
+		public boolean meleeDashReturn;
+		/** Dash recovery should hand off to run instead of the idle upper pose. */
+		public boolean meleeReturnToRun;
+		public boolean meleeDashResumeSprint;
+		public double meleeDashDirX;
+		public double meleeDashDirZ;
+		public double meleeDashFromX;
+		public double meleeDashFromZ;
+		public long lastMeleeAt;
+		public boolean betterCombatAttackDisabled;
 		/** Last gun family; switching to a different registered definition resets focus-only state. */
 		public Identifier gunDefinitionId;
 	}
@@ -366,7 +392,7 @@ public class TkGunServer implements ModInitializer {
 		return st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
 				|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
 				|| st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER
-				|| st.state == TkGun.State.INSPECT
+				|| st.state == TkGun.State.INSPECT || st.state == TkGun.State.MELEE
 				|| now < st.aimLockUntil || now < st.dashUntil
 				|| now < st.overheatUntil;
 	}
@@ -525,6 +551,8 @@ public class TkGunServer implements ModInitializer {
 		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
 		PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
 				!TkGun.holdingGun(player));
+		AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) ->
+				TkGun.holdingGun(player) ? ActionResult.FAIL : ActionResult.PASS);
 		TkGunParticles.register();
 		Registry.register(
 				Registries.SCREEN_HANDLER,
@@ -702,6 +730,9 @@ public class TkGunServer implements ModInitializer {
 						.dimensions(0.5F, 0.5F)
 						.build("molten_trident"));
 		PayloadTypeRegistry.playS2C().register(GunStatePayload.ID, GunStatePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.MeleeImpactPayload.ID,
+				com.tk.gun.net.MeleeImpactPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(com.tk.gun.net.GunHitMarkerPayload.ID,
 				com.tk.gun.net.GunHitMarkerPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(com.tk.gun.net.GunDemoPayload.ID,
@@ -743,6 +774,12 @@ public class TkGunServer implements ModInitializer {
 				com.tk.gun.net.GunFocusPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunReloadPayload.ID,
 				com.tk.gun.net.GunReloadPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunMeleePayload.ID,
+				com.tk.gun.net.GunMeleePayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunMeleePayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleMeleeInput(context.player(), payload.pressed(),
+								payload.movingForward())));
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunFocusPayload.ID, (payload, context) ->
 				context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
@@ -799,7 +836,8 @@ public class TkGunServer implements ModInitializer {
 					PState st = state(p);
 					long now = p.getWorld().getTime();
 					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
-							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY) {
+							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
+							|| st.state == TkGun.State.MELEE) {
 						return;
 					}
 					if (now < st.reloadUntil) {
@@ -848,6 +886,13 @@ public class TkGunServer implements ModInitializer {
 					// 任何仍在翻滚/翻滚过渡中的 Alt 都不能再次启动翻滚。
 					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE) {
 						TkGun.LOGGER.info("[tkgun] 翻滚/过渡中，这次 Alt 忽略 玩家={}", p.getName().getString());
+						return;
+					}
+					boolean dashMeleeRecovery = st.state == TkGun.State.MELEE
+							&& st.meleeReturning && st.meleeDashReturn;
+					if (st.state == TkGun.State.MELEE && !dashMeleeRecovery) {
+						TkGun.LOGGER.info("[tkgun] 近战动画尚未完成硬直，这次 Alt 忽略 玩家={}",
+								p.getName().getString());
 						return;
 					}
 					// **蹲射准备期间（AIM/AIM_FAST/AIM_SLIDE 过门）屏蔽闪避键**（用户 2026-10-17）；
@@ -900,7 +945,8 @@ public class TkGunServer implements ModInitializer {
 					// The native roll cooldown gates a new roll, not the slide that belongs
 					// to the previous roll's dash window.
 					if (!CombatRollHook.isInstalled()
-							&& rollNow < st.fallbackRollReadyAt) {
+							&& rollNow < st.fallbackRollReadyAt
+							&& !dashMeleeRecovery) {
 						TkGun.LOGGER.info("[tkgun] 内置翻滚冷却中，拒绝 Alt（剩余 {} tick）玩家={}",
 								st.fallbackRollReadyAt - rollNow, p.getName().getString());
 						rebroadcast(p);
@@ -963,6 +1009,20 @@ public class TkGunServer implements ModInitializer {
 					}
 					if (++st.soundCount > TkGun.KEYFRAME_SOUNDS_PER_TICK) {
 						return;
+					}
+					if ("vent".equals(payload.sound())) {
+						Identifier gunId = TkGun.definition(p).id();
+						if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
+							p.getServerWorld().playSound(null, p.getBlockPos(),
+									net.minecraft.sound.SoundEvents.BLOCK_SCULK_SHRIEKER_SHRIEK,
+									net.minecraft.sound.SoundCategory.BLOCKS, 2.0F,
+									0.6F + p.getRandom().nextFloat() * 0.4F);
+							return;
+						}
+						if (gunId.equals(TkGun.id("veritas_et_justitia"))) {
+							playSound(p, TkGun.SND_SWORD_HEAT, kf.volume(), kf.pitch());
+							return;
+						}
 					}
 					playSound(p, kf.id(), kf.volume(), kf.pitch());
 				}));
@@ -1116,7 +1176,8 @@ public class TkGunServer implements ModInitializer {
 				TkGun.magazineCapacity(actor, false),
 				TkGun.magazineCapacity(actor, true),
 				TkGun.definition(actor).maxShotIndex(),
-				st.airborneIdle);
+				st.airborneIdle, st.meleeDashAttack, st.meleeReturning,
+				st.meleeDashReturn, st.meleeReturnToRun, st.meleeHoldOver);
 		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(p, payload);
 		}
@@ -1468,22 +1529,17 @@ public class TkGunServer implements ModInitializer {
 		state.summonZ = destination.z;
 		state.summonCastUntil = now + SUMMON_ANTENNA_CAST_TICKS;
 		state.summonReadyUntil = 0;
-		spawnSummonAntennaShriek(player.getServerWorld(), origin);
+		playSummonAntennaTrigger(player.getServerWorld(), origin);
 	}
 
-	private static void spawnSummonAntennaShriek(ServerWorld world,
+	private static void playSummonAntennaTrigger(ServerWorld world,
 			Vec3d origin) {
-		// Match a sculk shrieker: ten delayed copies from one point, moving up.
-		for (int index = 0; index < 10; index++) {
-			world.spawnParticles(
-					new net.minecraft.particle.ShriekParticleEffect(index * 5),
-					origin.x, origin.y, origin.z,
-					1, 0.0D, 0.0D, 0.0D, 0.0D);
+		// Three simultaneous triggers form the stronger antenna activation cue.
+		for (int i = 0; i < 3; i++) {
+			world.playSound(null, origin.x, origin.y, origin.z,
+					SoundEvents.BLOCK_SCULK_SENSOR_CLICKING,
+					SoundCategory.BLOCKS, TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
 		}
-		world.playSound(null, origin.x, origin.y, origin.z,
-				SoundEvents.BLOCK_SCULK_SHRIEKER_SHRIEK,
-				SoundCategory.BLOCKS, 2.0F,
-				0.6F + world.random.nextFloat() * 0.4F);
 	}
 
 	public static void clearBackpackCooldown(ServerPlayerEntity player) {
@@ -2240,12 +2296,517 @@ public class TkGunServer implements ModInitializer {
 	 *
 	 * <p>普通右键只建立 item-use 瞄准状态；专注由 Z 切换。本方法供调试命令和快速举枪路径使用。
 	 */
+	private static boolean isVeritasMainHand(ServerPlayerEntity player) {
+		return TkGun.isGun(player.getMainHandStack())
+				&& TkGun.definition(player.getMainHandStack()).id()
+						.equals(TkGun.id("veritas_et_justitia"));
+	}
+
+	private static void handleMeleeInput(ServerPlayerEntity player, boolean pressed,
+			boolean movingForward) {
+		if (player == null || player.getServer() == null || !player.isAlive()) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		st.meleeInputHeld = pressed;
+		st.meleeInputPressedAt = pressed ? now : 0L;
+		if (!pressed) {
+			if (st.state == TkGun.State.MELEE && st.meleeCombo == 3
+					&& st.meleeAtk3MainEnded) {
+				beginMelee(player, st, now, 4, false);
+			}
+			return;
+		}
+		if (!isVeritasMainHand(player) || !player.isOnGround()) {
+			st.meleeInputHeld = false;
+			st.meleeInputPressedAt = 0L;
+			return;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			if (st.meleeDashAttack) {
+				return;
+			}
+			if (st.meleeReturning) {
+				st.meleeQueued = true;
+				return;
+			}
+			if (st.meleeCombo != 3
+					&& now >= st.stateStarted + TkGun.MELEE_HIT_TICK) {
+				st.meleeQueued = true;
+			}
+			return;
+		}
+		if (st.state != TkGun.State.IDLE || st.deployed || player.isUsingItem()
+				|| !GunStateMachine.canFire(st.state)) {
+			st.meleeInputHeld = false;
+			st.meleeInputPressedAt = 0L;
+			return;
+		}
+		if ((now < st.dashUntil || now < st.speedBoostUntil)
+				&& movingForward) {
+			beginDashMelee(player, st, now);
+			return;
+		}
+		int next = st.lastMeleeAt > 0 && now - st.lastMeleeAt <= 60
+				? nextMeleeTap(st.meleeCombo) : 1;
+		beginMelee(player, st, now, next, false);
+	}
+
+	private static int nextMeleeTap(int current) {
+		return switch (current) {
+			case 1 -> 2;
+			case 2 -> 4;
+			case 3 -> 4;
+			default -> 1;
+		};
+	}
+
+	private static boolean isMeleeLongPress(PState st, long now) {
+		return st.meleeInputHeld && st.meleeInputPressedAt > 0L
+				&& now - st.meleeInputPressedAt >= TkGun.MELEE_LONG_PRESS_TICKS;
+	}
+
+	private static java.lang.reflect.Method betterCombatDisableMethod;
+	private static boolean betterCombatBridgeResolved;
+
+	private static void syncBetterCombatAttackFlag(ServerPlayerEntity player, boolean disabled) {
+		PState st = state(player);
+		if (st.betterCombatAttackDisabled == disabled) {
+			return;
+		}
+		if (!net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("bettercombat")) {
+			return;
+		}
+		if (!betterCombatBridgeResolved) {
+			betterCombatBridgeResolved = true;
+			try {
+				Class<?> flags = Class.forName("net.bettercombat.api.CombatFlags");
+				betterCombatDisableMethod = flags.getMethod("setAttacksDisabled",
+						ServerPlayerEntity.class, boolean.class);
+			} catch (Throwable throwable) {
+				TkGun.LOGGER.warn("[tkgun] Better Combat attack bridge unavailable: {}",
+						throwable.toString());
+			}
+		}
+		try {
+			if (betterCombatDisableMethod != null) {
+				betterCombatDisableMethod.invoke(null, player, disabled);
+				st.betterCombatAttackDisabled = disabled;
+			}
+		} catch (Throwable throwable) {
+			TkGun.LOGGER.warn("[tkgun] Failed to update Better Combat attack flag: {}",
+					throwable.toString());
+		}
+	}
+
+	private static void beginMelee(ServerPlayerEntity player, PState st, long now,
+			int step, boolean empowered) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeCombo = Math.max(1, Math.min(4, step));
+		st.shotIndex = st.meleeCombo;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = st.meleeCombo == 4 && empowered;
+		st.meleeHoldOver = false;
+		st.meleeHoldOverHits = 0;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeReturning = false;
+		st.meleeDashReturn = false;
+		st.meleeReturnToRun = false;
+		st.meleeDashResumeSprint = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		if (st.meleeCombo == 3) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+		}
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.meleeTicks(st.meleeCombo));
+	}
+
+	private static void beginMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeCombo = 4;
+		st.shotIndex = 4;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = true;
+		st.meleeAtk4Empowered = true;
+		st.meleeHoldOver = true;
+		st.meleeHoldOverHits = 0;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeReturning = false;
+		st.meleeDashReturn = false;
+		st.meleeReturnToRun = false;
+		st.meleeDashResumeSprint = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.MELEE_HOLD_OVER_TICKS);
+	}
+
+	private static void beginMeleeReturn(ServerPlayerEntity player, PState st, int step,
+										 boolean dashReturn, boolean returnToRun) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeReturning = true;
+		st.meleeDashReturn = dashReturn;
+		st.meleeReturnToRun = dashReturn && returnToRun;
+		st.meleeHoldOver = false;
+		st.meleeHoldOverHits = 0;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeHitDone = true;
+		st.meleeQueued = false;
+		st.shotIndex = Math.max(1, Math.min(4, step));
+		st.shotSeq++;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.MELEE_RETURN_TICKS);
+		if (dashReturn) {
+			TkGun.LOGGER.info("[tkgun] dash melee recovery -> {} player={}",
+					returnToRun ? "ATK_2_dash_to_run" : "ATK_2_dash_to_idle",
+					player.getName().getString());
+		}
+	}
+
+	private static void beginDashMelee(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null) {
+			return;
+		}
+		double yaw = Math.toRadians(player.getYaw());
+		st.meleeCombo = 2;
+		st.shotIndex = 2;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleeDashAttack = true;
+		st.meleeDashMoving = false;
+		st.meleeReturning = false;
+		st.meleeDashResumeSprint = player.isSprinting();
+		st.meleeDashDirX = -Math.sin(yaw);
+		st.meleeDashDirZ = Math.cos(yaw);
+		st.meleeDashFromX = player.getX();
+		st.meleeDashFromZ = player.getZ();
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.dashSyncActive = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		GunStateMachine.clearDash(player);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.MELEE_DASH_TOTAL_TICKS);
+		st.meleeDashMoving = true;
+		performDashMeleeHorizontalPlaneHit(player);
+		playSound(player, TkGun.SND_SWORD_HEAT, 0.8F, 1.0F);
+		double initialSpeed = 2.0D * TkGun.MELEE_DASH_DISTANCE
+				/ TkGun.MELEE_DASH_MOVE_TICKS;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.meleeDashDirX * initialSpeed, velocity.y,
+				st.meleeDashDirZ * initialSpeed);
+		player.velocityModified = true;
+		TkGun.LOGGER.info("[tkgun] dash attack triggered: acceleration cleared, "
+						+ "{} tick controlled slide, first hit done player={}",
+				TkGun.MELEE_DASH_MOVE_TICKS, player.getName().getString());
+	}
+
+	private static void tickMelee(ServerPlayerEntity player, PState st, long now) {
+		if (st.state != TkGun.State.MELEE) {
+			return;
+		}
+		if (st.meleeReturning) {
+			return;
+		}
+		if (st.meleeDashAttack) {
+			tickDashMeleeMove(player, st, now);
+			return;
+		}
+		if (st.meleeHoldOver) {
+			tickMeleeHoldOver(player, st, now);
+			return;
+		}
+		if (!st.meleeHitDone && now >= st.stateStarted + TkGun.MELEE_HIT_TICK) {
+			st.meleeHitDone = true;
+			performMeleeHit(player, st, st.meleeCombo);
+		}
+		if (st.meleeCombo != 3) {
+			return;
+		}
+		if (!st.meleeAtk3MainEnded
+				&& now >= st.stateStarted + TkGun.MELEE_ATK3_MAIN_END_TICK) {
+			st.meleeAtk3MainEnded = true;
+			if (!isMeleeLongPress(st, now)) {
+				beginMelee(player, st, now, 4, false);
+				return;
+			}
+			TkGun.LOGGER.info("[tkgun] ATK_3 main end -> hold last frame for ATK_4 charge player={}",
+					player.getName().getString());
+		}
+		if (st.meleeAtk3MainEnded
+				&& now >= st.stateStarted + TkGun.meleeTicks(3)) {
+			TkGun.LOGGER.info("[tkgun] ATK_3 charge complete -> ATK_hold_over player={}",
+					player.getName().getString());
+			beginMeleeHoldOver(player, st, now);
+		}
+	}
+
+	private static void tickDashMeleeMove(ServerPlayerEntity player, PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		if (elapsed >= TkGun.MELEE_DASH_MOVE_TICKS) {
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			if (!st.meleeHitDone) {
+				st.meleeHitDone = true;
+				performDashMeleeHorizontalPlaneHit(player);
+			}
+			int stunElapsed = (int) (elapsed - TkGun.MELEE_DASH_MOVE_TICKS);
+			double inertia = stunElapsed < TkGun.MELEE_DASH_STUN_TICKS
+					? TkGun.MELEE_DASH_STUN_SPEED
+						* (1.0D - stunElapsed / (double) TkGun.MELEE_DASH_STUN_TICKS)
+					: 0.0D;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(st.meleeDashDirX * inertia, velocity.y,
+					st.meleeDashDirZ * inertia);
+			player.velocityModified = true;
+			return;
+		}
+		double dx = player.getX() - st.meleeDashFromX;
+		double dz = player.getZ() - st.meleeDashFromZ;
+		double travelled = dx * st.meleeDashDirX + dz * st.meleeDashDirZ;
+		double left = Math.max(0.0D, TkGun.MELEE_DASH_DISTANCE - travelled);
+		double progress = elapsed / (double) TkGun.MELEE_DASH_MOVE_TICKS;
+		double speed = Math.min(left,
+				2.0D * TkGun.MELEE_DASH_DISTANCE
+						/ TkGun.MELEE_DASH_MOVE_TICKS * (1.0D - progress));
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.meleeDashDirX * speed, velocity.y, st.meleeDashDirZ * speed);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+	}
+
+	private static void tickMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		while (st.meleeHoldOverHits < TkGun.MELEE_HOLD_OVER_HIT_TICKS.length
+				&& elapsed >= TkGun.MELEE_HOLD_OVER_HIT_TICKS[st.meleeHoldOverHits]) {
+			st.meleeHoldOverHits++;
+			performMeleeHit(player, st, 4);
+			// A successful hit pauses the authored timeline. Re-read it so the
+			// next authored hit cannot fire during the same server tick.
+			elapsed = now - st.stateStarted;
+		}
+	}
+
+	private static boolean finishDashMelee(ServerPlayerEntity player, PState st) {
+		double dx = player.getX() - st.meleeDashFromX;
+		double dz = player.getZ() - st.meleeDashFromZ;
+		TkGun.LOGGER.info("[tkgun] dash melee end: forward={} blocks, target={} player={}",
+				round3(dx * st.meleeDashDirX + dz * st.meleeDashDirZ),
+				TkGun.MELEE_DASH_DISTANCE, player.getName().getString());
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		// Dash attacks terminate the current normal combo; the next attack
+		// after hard-stop/recovery starts from ATK_1.
+		st.meleeCombo = 0;
+		st.lastMeleeAt = 0L;
+		st.meleeInputHeld = false;
+		st.meleeInputPressedAt = 0L;
+		boolean resumeSprint = st.meleeDashResumeSprint;
+		st.meleeDashResumeSprint = false;
+		GunStateMachine.clearDash(player);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		player.setSprinting(resumeSprint);
+		return resumeSprint;
+	}
+
+	private static void performMeleeHit(ServerPlayerEntity player, PState st, int step) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		List<Entity> hitTargets = new ArrayList<>();
+		double range = TkGun.MELEE_RANGE;
+		Vec3d origin = player.getPos().add(0.0D, 0.9D, 0.0D);
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(range, 2.5D, range);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
+			Vec3d offset = entity.getBoundingBox().getCenter().subtract(origin);
+			double depth = offset.dotProduct(forward);
+			double lateral = Math.abs(offset.dotProduct(right));
+			double vertical = Math.abs(offset.y);
+			double radius = entity.getWidth() * 0.5D;
+			boolean inBox = switch (step) {
+				case 2 -> depth > 0.0D && depth <= range
+						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
+						&& vertical <= 1.5D + entity.getHeight() * 0.5D;
+				case 3 -> Math.hypot(offset.x, offset.z) <= range + radius
+						&& vertical <= 2.5D + entity.getHeight() * 0.5D;
+				case 4 -> depth > 0.0D && depth <= range
+						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
+						&& vertical <= 2.5D + entity.getHeight() * 0.5D;
+				default -> depth >= -0.25D && depth <= range
+						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
+						&& vertical <= 1.8D + entity.getHeight() * 0.5D;
+			};
+			if (!inBox) {
+				continue;
+			}
+			float damage = TkGun.DIAMOND_AXE_DAMAGE
+					* (step == 4 && st.meleeAtk4Empowered ? 2.0F : 1.0F);
+			if (st.meleeHoldOver && entity instanceof LivingEntity living) {
+				living.timeUntilRegen = 0;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player), damage)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			boolean critical = st.meleeHoldOver || st.meleeAtk4Empowered;
+			boolean cameraShake = step == 3 && !st.meleeHoldOver
+					|| st.meleeHoldOver
+					&& st.meleeHoldOverHits == TkGun.MELEE_HOLD_OVER_HIT_TICKS.length;
+			MeleeImpactService.apply(player, st, hitTargets, forward,
+					MeleeImpactService.ticksForStep(step), critical, true, cameraShake);
+		}
+		if (step != 2) {
+			player.getServerWorld().spawnParticles(
+					net.minecraft.particle.ParticleTypes.SWEEP_ATTACK,
+					player.getX() + forward.x * 1.5D,
+					player.getY() + 1.0D,
+					player.getZ() + forward.z * 1.5D,
+					3, 0.35D, 0.25D, 0.35D, 0.0D);
+		}
+	}
+
+	private static void performDashMeleeHorizontalPlaneHit(ServerPlayerEntity player) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		List<Entity> hitTargets = new ArrayList<>();
+		double range = TkGun.MELEE_RANGE;
+		Vec3d origin = player.getPos().add(0.0D,
+				player.getStandingEyeHeight() * 0.15D, 0.0D);
+		Vec3d boxCenter = origin.add(forward.multiply(range * 0.5D));
+		double halfWidth = range;
+		double halfHeight = range / 6.0D;
+		double halfDepth = range * 0.5D;
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(range * 1.5D, range / 3.0D + 2.0D, range * 1.5D);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), boxCenter,
+					right, up, forward, halfWidth, halfHeight, halfDepth)) {
+				continue;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player),
+					TkGun.DIAMOND_AXE_DAMAGE)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			MeleeImpactService.apply(player, state(player), hitTargets, forward,
+					MeleeImpactService.DASH_TICKS, false, false, false);
+		}
+	}
+
+	private static boolean orientedBoxOverlaps(net.minecraft.util.math.Box bounds,
+			Vec3d center, Vec3d right, Vec3d up, Vec3d forward,
+			double halfWidth, double halfHeight, double halfDepth) {
+		Vec3d aabbCenter = bounds.getCenter();
+		Vec3d aabbHalf = new Vec3d(
+				(bounds.maxX - bounds.minX) * 0.5D,
+				(bounds.maxY - bounds.minY) * 0.5D,
+				(bounds.maxZ - bounds.minZ) * 0.5D);
+		Vec3d delta = aabbCenter.subtract(center);
+		Vec3d[] worldAxes = {
+				new Vec3d(1.0D, 0.0D, 0.0D),
+				new Vec3d(0.0D, 1.0D, 0.0D),
+				new Vec3d(0.0D, 0.0D, 1.0D)
+		};
+		Vec3d[] boxAxes = {right, up, forward};
+		for (Vec3d axis : worldAxes) {
+			if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+					right, up, forward)) {
+				return false;
+			}
+		}
+		for (Vec3d axis : boxAxes) {
+			if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+					right, up, forward)) {
+				return false;
+			}
+		}
+		for (Vec3d worldAxis : worldAxes) {
+			for (Vec3d boxAxis : boxAxes) {
+				Vec3d axis = worldAxis.crossProduct(boxAxis);
+				if (axis.lengthSquared() < 1.0E-8D) {
+					continue;
+				}
+				if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+						right, up, forward)) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	private static boolean separatedOnAxis(Vec3d delta, Vec3d axis, Vec3d aabbHalf,
+			double halfWidth, double halfHeight, double halfDepth,
+			Vec3d right, Vec3d up, Vec3d forward) {
+		double aabbRadius = aabbHalf.x * Math.abs(axis.x)
+				+ aabbHalf.y * Math.abs(axis.y)
+				+ aabbHalf.z * Math.abs(axis.z);
+		double boxRadius = halfWidth * Math.abs(axis.dotProduct(right))
+				+ halfHeight * Math.abs(axis.dotProduct(up))
+				+ halfDepth * Math.abs(axis.dotProduct(forward));
+		return Math.abs(delta.dotProduct(axis)) > aabbRadius + boxRadius + 1.0E-6D;
+	}
+
 	public static void startAim(ServerPlayerEntity player) {
 		MinecraftServer server = player.getServer();
 		if (server == null) {
 			return;
 		}
 		PState st = state(player);
+		if (!player.isOnGround()) {
+			TkGun.LOGGER.info("[tkgun] aim denied: player is airborne player={}",
+					player.getName().getString());
+			return;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			return;
+		}
 		// 已经架着枪了（例如刚打完一发、或者又点了一次右键）→ **保持**当前姿势，
 		// 别重播 Focus_ready：那段开头是收枪姿势，用户 2026-10-13 明确说"打完不要变成收枪动作"。
 		if (st.deployed && st.shotQueue.isEmpty() && st.state != TkGun.State.FIRE) {
@@ -2276,7 +2837,15 @@ public class TkGunServer implements ModInitializer {
 		if (server == null) {
 			return;
 		}
+		if (!player.isOnGround()) {
+			TkGun.LOGGER.info("[tkgun] slide fast focus denied: player is airborne player={}",
+					player.getName().getString());
+			return;
+		}
 		PState st = state(player);
+		if (st.state == TkGun.State.MELEE) {
+			return;
+		}
 		if (ensureMagazineLoaded(player, st)) {
 			rebroadcast(player);
 		}
@@ -3379,6 +3948,14 @@ public class TkGunServer implements ModInitializer {
 			return false;
 		}
 		PState st = state(player);
+		if (!st.deployed && !player.isOnGround()) {
+			TkGun.LOGGER.info("[tkgun] focus denied: player is airborne player={}",
+					player.getName().getString());
+			return false;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			return false;
+		}
 		if (ensureMagazineLoaded(player, st)) {
 			rebroadcast(player);
 		}
@@ -3666,6 +4243,7 @@ public class TkGunServer implements ModInitializer {
 
 	// ---------------------------------------------------------------- 每 tick
 	private static void tickAll(MinecraftServer server) {
+		MeleeImpactService.tick(server);
 		tickBolts();
 		tickBackpackProjectiles(server);
 		tickBackpackStates(server);
@@ -3676,6 +4254,7 @@ public class TkGunServer implements ModInitializer {
 			long now = player.getWorld().getTime();
 			tickRollFallback(player, st, now);
 			boolean holdingGunNow = TkGun.holdingGun(player);
+			syncBetterCombatAttackFlag(player, holdingGunNow);
 			if (holdingGunNow) {
 				ItemStack held = com.tk.gun.item.GunAmmoData.heldGun(player);
 				if (!held.isEmpty()) {
@@ -3791,6 +4370,7 @@ public class TkGunServer implements ModInitializer {
 			//    现在连发只有一个来源（客户端补包），单击 = 一发，不会再出现"一下两发"。
 			// 过热"不可移动" + 翻滚后的 3 秒加速冲刺（规则都在 GunStateMachine）
 			GunStateMachine.tickImmovable(player, st, now);
+			GunStateMachine.tickAtk3MovementLock(player, st);
 			if (GunStateMachine.tickDash(player, st, now)) {
 				rebroadcast(player);
 			}
@@ -3835,6 +4415,7 @@ public class TkGunServer implements ModInitializer {
 			}
 			st.lastX = player.getX();
 			st.lastZ = player.getZ();
+			tickMelee(player, st, now);
 			// 状态自然结束
 			if (st.stateUntil > 0 && now >= st.stateUntil) {
 				TkGun.State ended = st.state;
@@ -3847,7 +4428,33 @@ public class TkGunServer implements ModInitializer {
 				}
 				// 翻滚收尾：站定播放 `roll_to_idle`；已在移动则直接交给 IDLE/run。
 				// 快速专注只能由翻滚 0.38 秒处的组合输入进入，不再经过额外过渡动作。
-				if (ended == TkGun.State.ROLL) {
+				if (ended == TkGun.State.MELEE) {
+					if (st.meleeDashAttack) {
+						int returnStep = st.meleeCombo;
+						boolean returnToRun = finishDashMelee(player, st);
+						beginMeleeReturn(player, st, returnStep, true, returnToRun);
+					} else if (st.meleeReturning) {
+						st.meleeReturning = false;
+						st.meleeDashReturn = false;
+						st.meleeReturnToRun = false;
+						if (st.meleeQueued) {
+							beginMelee(player, st, now,
+									nextMeleeTap(st.meleeCombo), false);
+						} else {
+							st.meleeInputHeld = false;
+							st.meleeInputPressedAt = 0L;
+							broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+						}
+					} else if (st.meleeCombo == 3) {
+						beginMelee(player, st, now, 4, st.meleeInputHeld);
+					} else if (st.meleeCombo == 2 && isMeleeLongPress(st, now)) {
+						beginMelee(player, st, now, 3, false);
+					} else if (st.meleeQueued) {
+						beginMelee(player, st, now, nextMeleeTap(st.meleeCombo), false);
+					} else {
+						beginMeleeReturn(player, st, st.meleeCombo, false, false);
+					}
+				} else if (ended == TkGun.State.ROLL) {
 					if (holding && wantsMove(player)) {
 						if (now < st.dashUntil) {
 							player.setSprinting(true);
@@ -4299,6 +4906,8 @@ public class TkGunServer implements ModInitializer {
 			PState st = state(player);
 			long now = player.getWorld().getTime();
 			int gameplayTicks = Math.max(1, ticks);
+			int stateTicks = Math.max(gameplayTicks,
+					CombatRollHook.ROLL_STATE_TICKS);
 			// 每次真正开始翻滚都重开预输入。Alt+Z 的组合输入可能比 ROLL 状态先到，
 			// 先把队列里的专注意图转成“0.38s 预输入”；没有组合输入才清空。
 			boolean queuedFocus = st.dodgeFocusQueued
@@ -4311,12 +4920,12 @@ public class TkGunServer implements ModInitializer {
 			// 快速蹲射宽限从"翻滚玩法窗口结束"再往后算。多次路径（combat_roll 事件 / 按键兜底 /
 			// 高速位移兜底）在同一 tick 重复进来也只延长窗口，不会缩短或重复扣奖励。
 			st.rollFocusUntil = Math.max(st.rollFocusUntil,
-					now + gameplayTicks + ROLL_FAST_FOCUS_GRACE_TICKS);
+					now + stateTicks + ROLL_FAST_FOCUS_GRACE_TICKS);
 			if (queuedFocus) {
 				TkGun.LOGGER.info("[tkgun] ROLL 开始，接收 Alt+Z 组合预输入 -> 0.38s 快速蹲射 玩家={}",
 						player.getName().getString());
 			}
-			setState(server, player, TkGun.State.ROLL, ticks);
+			setState(server, player, TkGun.State.ROLL, stateTicks);
 		}
 	}
 

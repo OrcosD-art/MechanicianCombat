@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r450-2026-10-28";
+	public static final String BUILD = "r508-2026-10-30";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -59,7 +59,8 @@ public final class TkGun {
 		 */
 		AIM_ROLL(14),
 		/** 翻滚结束、玩家没有继续移动：播作者的 `roll_to_idle` 过渡，再回 IDLE。 */
-		ROLL_TO_IDLE(15);
+		ROLL_TO_IDLE(15),
+		MELEE(16);
 
 		public static boolean isAiming(State s) {
 			return s == AIM || s == AIM_FAST || s == AIM_ROLL || s == AIM_SLIDE
@@ -102,6 +103,42 @@ public final class TkGun {
 	 * 重算：`python tools\muzzle_offset_new.py`（它会把出伤帧一起打出来）。
 	 */
 	public static final int ATTACK_FRAME_TICKS = 1;
+	/** Close-combat hit frame authored at 0.5 seconds in close_combat.bbmodel. */
+	public static final int MELEE_HIT_TICK = 10;
+	/** ATK_3 holds its main-attack pose at 1.0 s; 1.0-1.25 s is recovery. */
+	public static final int MELEE_ATK3_MAIN_END_TICK = 20;
+	public static final int MELEE_ATK4_CHARGE_TICKS = 10;
+	/** Authored ATK_hold_over is 1.125 s; one extra tick renders its final key. */
+	public static final int MELEE_HOLD_OVER_TICKS =
+			(int) Math.ceil(1.125D * 20.0D) + 1;
+	/** Timelines authored inside ATK_hold_over. */
+	public static final int[] MELEE_HOLD_OVER_HIT_TICKS = {3, 10, 18};
+	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
+	public static final int MELEE_LONG_PRESS_TICKS = 5;
+	public static final int MELEE_DASH_MOVE_TICKS = 10;
+	public static final int MELEE_DASH_STUN_TICKS = 3;
+	/** 0.25 s authored clip plus one tick so its final keyframe is rendered. */
+	public static final int MELEE_RETURN_TICKS = 6;
+	public static final int MELEE_DASH_TOTAL_TICKS =
+			MELEE_HIT_TICK + MELEE_DASH_STUN_TICKS;
+	public static final double MELEE_DASH_DISTANCE = 4.6D;
+	public static final double MELEE_DASH_STUN_SPEED = 0.16D;
+	public static final double MELEE_RANGE = 4.0D;
+	public static final double MELEE_LATERAL_RADIUS = 3.0D;
+	/** Better Combat diamond axe attack damage. */
+	public static final float DIAMOND_AXE_DAMAGE = 9.0F;
+
+	public static String meleeAnimation(int step) {
+		return "ATK_" + Math.max(1, Math.min(4, step));
+	}
+
+	public static String meleeReturnAnimation(int step) {
+		return "ATK_" + Math.max(1, Math.min(4, step)) + "_to_idle";
+	}
+
+	public static int meleeTicks(int step) {
+		return step == 3 ? MELEE_ATK3_MAIN_END_TICK + MELEE_ATK4_CHARGE_TICKS : 20;
+	}
 	/**
 	 * 连发节奏：两发之间隔几 tick（每发都把该发动画从头播一遍 → 后坐/枪口焰/弹壳跟着重播）。
 	 * 12 tick = 0.6s 一发：动画前 0.208s 是四段枪口焰，0.6s 时弹壳正好甩到一半。
@@ -414,6 +451,22 @@ public final class TkGun {
 	public static final Identifier SND_SONIC_SHOT = id("sonic_shot");
 	/** 幽匿弹音爆粒子：素材 `音爆1.ogg`（坚守者 sonic_boom1 原始音效）。 */
 	public static final Identifier SND_SONIC_BOOM = id("sonic_boom");
+	/** Veritas heat vent: source asset `剑_过热.ogg`. */
+	public static final Identifier SND_SWORD_HEAT = id("sword_heat");
+	/** ATK_2 authored broadsword swing (`阔剑挥砍.ogg`). */
+	public static final Identifier SND_CLAYMORE_SWING = id("claymore_swing");
+	/** ATK_1 authored glaive slash (`glaive_slash-02.ogg`). */
+	public static final Identifier SND_GLAIVE_SLASH2 = id("glaive_slash2");
+	/** ATK_2/ATK_3 authored double-axe swing (`double_axe_swing-01.ogg`). */
+	public static final Identifier SND_DOUBLE_AXE_SWING1 = id("double_axe_swing1");
+	/** ATK_4 authored anchor slam (`anchor_slam-01.ogg`). */
+	public static final Identifier SND_ANCHOR_SLAM1 = id("anchor_slam1");
+	/** ATK_3_hold authored mace air swing (`smash_air1.ogg`). */
+	public static final Identifier SND_SMASH_AIR1 = id("smash_air1");
+	/** ATK_3 authored mace ground impact (`smash_ground1.ogg`). */
+	public static final Identifier SND_SMASH_GROUND1 = id("smash_ground1");
+	/** ATK_hold_over authored mace ground impact (`smash_ground3.ogg`). */
+	public static final Identifier SND_SMASH_GROUND3 = id("smash_ground3");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 
@@ -439,7 +492,22 @@ public final class TkGun {
 			Map.entry("mag", new KeyframeSound(SND_MAG, 1.0F, 1.0F)),         // 弹匣.ogg
 			Map.entry("empty", new KeyframeSound(SND_DRY, 1.0F, 1.0F)),       // 空弹仓.ogg
 			Map.entry("roll", new KeyframeSound(SND_ROLL, 0.9F, 1.0F)),       // 翻滚.ogg
-			Map.entry("steam", new KeyframeSound(SND_VENT, 0.6F, 1.2F)));     // 滑铲摩擦
+			Map.entry("steam", new KeyframeSound(SND_VENT, 0.6F, 1.2F)),      // 滑铲摩擦
+			Map.entry("glaive_slash02",
+					new KeyframeSound(SND_GLAIVE_SLASH2, 1.0F, 1.0F)),
+			Map.entry("double_axe_swing01",
+					new KeyframeSound(SND_DOUBLE_AXE_SWING1, 1.0F, 1.0F)),
+			Map.entry("claymore_swing",
+					new KeyframeSound(SND_CLAYMORE_SWING, 1.0F, 1.0F)),
+			Map.entry("imp1", new KeyframeSound(SND_IMPACT, 1.0F, 1.0F)),
+			Map.entry("anchor_slam01",
+					new KeyframeSound(SND_ANCHOR_SLAM1, 1.0F, 1.0F)),
+			Map.entry("smash_air1",
+					new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
+			Map.entry("smash_ground1",
+					new KeyframeSound(SND_SMASH_GROUND1, 1.0F, 1.0F)),
+			Map.entry("smash_ground3",
+					new KeyframeSound(SND_SMASH_GROUND3, 1.0F, 1.0F)));
 
 	/** 一个玩家**同一个 tick 里**最多让服务端放几声关键帧音（防改包刷屏；正常最多 2 声）。 */
 	public static final int KEYFRAME_SOUNDS_PER_TICK = 6;

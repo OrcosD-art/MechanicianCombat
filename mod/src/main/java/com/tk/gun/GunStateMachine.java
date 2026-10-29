@@ -63,7 +63,8 @@ public final class GunStateMachine {
 	 */
 	public static boolean canFire(TkGun.State state) {
 		return switch (state) {
-			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER -> false;
+			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
+					MELEE -> false;
 			default -> true;          // IDLE / AIM* / FIRE / INSPECT
 		};
 	}
@@ -71,6 +72,23 @@ public final class GunStateMachine {
 	/** 返回需要由服务端主动压制移动的状态；专注移动锁由客户端输入 mixin 负责。 */
 	public static boolean movementLocked(TkGun.State state) {
 		return state == TkGun.State.OVERHEAT;
+	}
+
+	/** Only the ATK_3 active swing owns the player. Hold and hold-over stages allow movement. */
+	public static void tickAtk3MovementLock(ServerPlayerEntity player, TkGunServer.PState st) {
+		if (st.state != TkGun.State.MELEE || st.meleeCombo != 3
+				|| st.meleeDashAttack || st.meleeReturning
+				|| st.meleeAtk3MainEnded || st.meleeHoldOver) {
+			return;
+		}
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		if (Math.abs(velocity.x) > 1.0E-7D || Math.abs(velocity.z) > 1.0E-7D) {
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+		}
 	}
 
 	// 缓慢效果只绑定退出专注和过热；专注期间的移动输入由 FocusMovementLockMixin 清零。
@@ -168,7 +186,7 @@ public final class GunStateMachine {
 		if (attr == null) {
 			return;
 		}
-		boolean want = now < st.overheatUntil;
+		boolean want = TkGun.holdingGun(player);
 		boolean has = attr.getModifier(NO_JUMP_MODIFIER) != null;
 		if (want && !has) {
 			attr.addTemporaryModifier(new EntityAttributeModifier(NO_JUMP_MODIFIER, -1.0D,

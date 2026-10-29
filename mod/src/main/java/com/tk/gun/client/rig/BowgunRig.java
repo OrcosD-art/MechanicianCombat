@@ -68,12 +68,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// GeckoLib 4.8 的多控制器语义：所有控制器都往同一批骨骼上写，后注册的覆盖先注册的；
 		// 最后统一把"这一帧没有任何动画碰过的骨骼"拉回绑定姿势（见 AnimationProcessor#tickAnimation）。
 		// 所以上层只写上半身、下层照旧写全身，合并出来的就是"边走边打"。
-		registrar.add(new AnimationController<>(this, "upper", 0, this::pickUpper)
+		registrar.add(new AnimationController<>(this, "upper", 1, this::pickUpper)
+				.setAnimationSpeedHandler(rig -> {
+					AbstractClientPlayerEntity player = CURRENT_PLAYER;
+					return player != null
+							&& com.tk.gun.client.MeleeImpactClientState
+									.freezesAnimation(player.getId()) ? 0.0D : 1.0D;
+				})
 				// 上半身动画是从完整动画派生的，仍带有原动画的声音/timeline/粒子标记。
 				// 这些事件由主 rig 控制器或服务端处理；这里显式吸收，避免重复播放和日志刷屏。
-				.setSoundKeyframeHandler(event -> { })
+				.setSoundKeyframeHandler(BowgunRig::onUpperSoundKeyframe)
 				.setCustomInstructionKeyframeHandler(event -> { })
-				.setParticleKeyframeHandler(event -> { }));
+				.setParticleKeyframeHandler(BowgunRig::onParticleKeyframe));
 		// New guns may only author deploy/stow clips for their own gun subtree. This
 		// overlay keeps the gun at the correct terminal pose while inherited body,
 		// locomotion and shooting animations continue to play.
@@ -114,12 +120,39 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (effect == null || player == null || player.getWorld() == null) {
 			return;
 		}
+		if ("thunder".equals(effect)) {
+			String locatorName = event.getKeyframeData().getLocator();
+			net.minecraft.util.math.Vec3d locator = "aim".equals(locatorName)
+					? BowgunRigRenderer.aimPosition(player.getId())
+					: BowgunRigRenderer.locatorPosition(player.getId());
+			if (locator != null) {
+				player.getWorld().addParticle(TkGunParticles.THUNDER,
+						locator.x, locator.y, locator.z, 0.0D, 0.0D, 0.0D);
+				TkGun.LOGGER.info("[tkgun] ATK_3 thunder particle -> locator（玩家 {}）",
+						player.getName().getString());
+			}
+			return;
+		}
 		if ("particles".equals(effect)) {
 			net.minecraft.util.math.Vec3d locator =
 					BowgunRigRenderer.locatorPosition(player.getId());
 			if (locator != null) {
-				player.getWorld().addParticle(TkGunParticles.HEAT_VENT,
-						locator.x, locator.y, locator.z, 0.0D, 0.02D, 0.0D);
+				boolean quietStorm = TkGun.definition(player).id()
+						.equals(TkGun.id("abyssal_ancient_cannon"));
+				if (quietStorm) {
+					com.tk.gun.client.LocatorShriekBurst.start(player.getId(),
+							com.tk.gun.client.LocatorShriekBurst.Source.GUN, locator);
+				} else if (TkGun.definition(player).id()
+						.equals(TkGun.id("veritas_et_justitia"))) {
+					// Drive Veritas heat audio from the same event that starts
+					// the authored heat animation, rather than a parallel sound key.
+					reportServerSoundKeyframe("vent");
+				} else {
+					if (!com.tk.gun.client.HeatVentParticle.spawnAttached(player, locator)) {
+						player.getWorld().addParticle(TkGunParticles.HEAT_VENT,
+								locator.x, locator.y, locator.z, 0.0D, 0.02D, 0.0D);
+					}
+				}
 				TkGun.LOGGER.info("[tkgun] 动画粒子关键帧 -> locator（玩家 {}）",
 						player.getName().getString());
 			}
@@ -172,6 +205,23 @@ public final class BowgunRig implements GeoReplacedEntity {
 			}
 		}
 	}
+
+	/** Normal melee clips run on the upper controller, so forward only their authored cues. */
+	private static void onUpperSoundKeyframe(
+			software.bernie.geckolib.animation.keyframe.event.SoundKeyframeEvent<BowgunRig> event) {
+		String key = event.getKeyframeData().getSound();
+		if (key == null || upperName == null
+				|| !MELEE_SOUND_ANIMS.contains(upperName)) {
+			return;
+		}
+		AbstractClientPlayerEntity who = CURRENT_PLAYER;
+		if (who == net.minecraft.client.MinecraftClient.getInstance().player) {
+			reportServerSoundKeyframe(key);
+		}
+	}
+
+	private static final Set<String> MELEE_SOUND_ANIMS =
+			Set.of("ATK_1", "ATK_2", "ATK_3", "ATK_4", "ATK_hold_over");
 
 	/** **专注那几段**（"照模型引用的音频放"的动画名，见 {@link #reportFocusSoundKeyframe}）。 */
 	private static final Set<String> FOCUS_SOUND_ANIMS = Set.of(
@@ -229,6 +279,13 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// **报给服务端去放**（用户 2026-10-17："将音频文件加入 mod 中使旁观者也能听见"）：
 		// 时间仍是这里的关键帧时间，但 `ServerWorld#playSound` 会广播给范围内所有玩家 ——
 		// **连自己也会收到那一份**，所以客户端这边不要再补一声（补了就是双份）。
+		return reportServerSoundKeyframe(key);
+	}
+
+	private static boolean reportServerSoundKeyframe(String key) {
+		if (!TkGun.KEYFRAME_SOUNDS.containsKey(key)) {
+			return false;
+		}
 		TkGunClient.sendSoundKeyframe(key);
 		return true;
 	}
@@ -251,6 +308,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 			names.add(upperName);
 		}
 		return names;
+	}
+
+	public static String currentUpperAnimation() {
+		return upperName;
 	}
 	private static String lastLogged = "";
 	/** 演示模式（`-Dtkgun.demo=1`）才打这类诊断日志。 */
@@ -285,6 +346,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 		AbstractClientPlayerEntity player = CURRENT_PLAYER;
 		if (player == null) {
 			return 1.0D;
+		}
+		if (com.tk.gun.client.MeleeImpactClientState
+				.freezesAnimation(player.getId())) {
+			return 0.0D;
 		}
 		if (currentAnimationName != null && currentAnimationName.startsWith("walk_")) {
 			return TkGunClient.walkAnimationSpeed(player.getId());
@@ -333,6 +398,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	private PlayState pickUpper(AnimationState<BowgunRig> state) {
 		Entity entity = entityOf(state);
 		String name = entity == null ? null : upperAnimationFor(entity);
+		state.setControllerSpeed(1.0F);
 		// 诊断（用户 2026-10-17："蹲射结束 / 冲刺窗口 + 疾跑 + 装填时上半身换弹动作不完整"）：
 		// 换弹还没结束时上层就离开 `reload_upper` = 动画被切断。正常这段里名字应该一直是它。
 		if (entity != null && "reload_upper".equals(upperName) && !"reload_upper".equals(name)) {
@@ -358,16 +424,23 @@ public final class BowgunRig implements GeoReplacedEntity {
 		String play = name;
 		GunClientState.Entry e = GunClientState.get(entity.getId());
 		boolean firing = e != null && e.active() && e.state == TkGun.State.FIRE;
+		boolean meleeing = e != null && e.active() && e.state == TkGun.State.MELEE;
 		// 打一行日志（变化时才打）：验收"举枪/开火时上半身叠 stand_shooting"看这一行
 		String tag = play + (firing ? "(开火)" : "(保持)");
 		if (!tag.equals(lastLoggedUpper)) {
 			lastLoggedUpper = tag;
 			TkGun.LOGGER.info("[tkgun] upper -> {}（腿在 walk_*/run/idle 上，上下分层）", tag);
 		}
+		if (e != null && GunClientState.meleeGraceActive(entity.getId())
+				&& play.equals(e.lastMeleeAnimation)) {
+			// Hold the exact attack pose across the client/server packet boundary.
+			return PlayState.CONTINUE;
+		}
 		// 换段 / 开火那一发：给一份新实例从头播（GeckoLib 认"同一份 RawAnimation"就会不重播）
 		// ⚠️ 2026-10-17：重播信号从"包刚到（elapsed <= 1）"改成**射击序号变化**（`shotSeq`）——
 		// 点按快的时候两包挨在一起，旧判据会漏掉一次重播（用户报"点按过快射击动画丢失"）。
-		boolean newShot = firing && e != null && e.shotSeq != lastUpperShotSeq;
+		boolean newShot = (firing || meleeing) && e != null
+				&& e.shotSeq != lastUpperShotSeq;
 		if (newShot) {
 			lastUpperShotSeq = e.shotSeq;
 		}
@@ -513,11 +586,41 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return null;
 		}
 		boolean firing = e.active() && e.state == TkGun.State.FIRE;
+		if (e.state == TkGun.State.MELEE) {
+			if (e.shotIndex == 2 && e.total == TkGun.MELEE_DASH_TOTAL_TICKS) {
+				// ATK_run owns the complete dash attack and hard-stop. The main
+				// controller also owns the direct cut to recovery.
+				e.lastMeleeAnimation = e.meleeReturning
+						? (e.dashMeleeReturnRun
+								? "ATK_2_dash_to_run" : "ATK_2_dash_to_idle")
+						: "ATK_run";
+				return null;
+			}
+			if (!e.active()) {
+				return e.lastMeleeAnimation == null ? "ATK_2_end" : e.lastMeleeAnimation;
+			}
+			String meleeAnimation;
+			if (e.meleeReturning) {
+				meleeAnimation = TkGun.meleeReturnAnimation(e.shotIndex);
+			} else if (e.meleeHoldOver) {
+				meleeAnimation = "ATK_hold_over";
+			} else if (e.shotIndex == 3
+					&& e.elapsed >= TkGun.MELEE_ATK3_MAIN_END_TICK) {
+				meleeAnimation = "ATK_3_hold";
+			} else {
+				meleeAnimation = TkGun.meleeAnimation(e.shotIndex);
+			}
+			e.lastMeleeAnimation = meleeAnimation;
+			return meleeAnimation;
+		}
+		if (GunClientState.meleeGraceActive(entity.getId())) {
+			return e.lastMeleeAnimation;
+		}
 		// 翻滚回待机时如果人已经在移动，收势只占上半身；腿继续走 `*_lower`，不跟着
 		// `roll_to_idle` 站定。静止时仍用作者的完整 `roll_to_idle`。
 		if (e.active() && e.state == TkGun.State.ROLL_TO_IDLE
 				&& TkGunClient.hasMovementInput(entity.getId())) {
-			return "roll_to_idle_upper";
+			return null;
 		}
 		// **腰射开火一旦起手，就播完整段**（用户 2026-10-18："瞄准腰射时松开右键射击动画
 		// 会被强制结束"）。旧逻辑把 `holdingGunUp()` 当成 FIRE 层是否存在的条件；右键一松，
@@ -574,6 +677,12 @@ public final class BowgunRig implements GeoReplacedEntity {
 		boolean holding = holdingGunUp(entity);
 		String moveAnim = TkGunClient.walkAnimation(entity.getId());
 		boolean moving = TkGunClient.isMoving(entity.getId());
+		boolean veritas = TkGun.definition((net.minecraft.entity.player.PlayerEntity) entity)
+				.id().equals(TkGun.id("veritas_et_justitia"));
+		if (veritas && !holding && moving && moveAnim != null
+				&& moveAnim.startsWith("walk_")) {
+			return "idle_upper";
+		}
 		// 奔跑时让作者完整 run 的上半身动作播放，不被 stand_shooting_hold 覆盖。
 		if ("run".equals(moveAnim) || ((net.minecraft.entity.player.PlayerEntity) entity).isSprinting()) {
 			return null;
@@ -586,9 +695,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 			// 腰射：开火那一遍整段重播；只是举着枪 → 端枪静姿（别空放一发后坐）
 			return firing ? "stand_shooting" : "stand_shooting_hold";
 		}
+		if (veritas) {
+			// Veritas must return to the full idle/walk/run upper-body clip
+			// immediately after right-click aiming is released.
+			return null;
+		}
 		// 停止操作后先保持上半身端枪姿势 5 秒，再让完整 idle 的上半身动作接管。
 		long last = LAST_UPPER_OPERATION.getOrDefault(entity.getId(), Long.MIN_VALUE);
 		if (last >= 0 && now - last <= UPPER_IDLE_DELAY_TICKS) {
+			if (TkGun.definition((net.minecraft.entity.player.PlayerEntity) entity).id()
+					.equals(TkGun.id("veritas_et_justitia"))) {
+				return null;
+			}
 			return "stand_shooting_hold";
 		}
 		return null;
@@ -706,6 +824,25 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (e != null && e.airborneIdle) {
 			return play(state, "idle");
 		}
+		if (e != null && (e.active() || e.meleeAwaitUntil > 0)
+				&& e.state == TkGun.State.MELEE
+				&& e.shotIndex == 2
+				&& e.total == TkGun.MELEE_DASH_TOTAL_TICKS) {
+			if (!e.meleeReturning) {
+				// Allow the initial entry from locomotion to blend, but never
+				// blend away from or back into the authored ATK_run timeline.
+				state.getController().transitionLength(
+						"ATK_run".equals(currentAnimationName) ? 0 : 1);
+				e.lastMeleeAnimation = "ATK_run";
+				return play(state, "ATK_run");
+			}
+			String recovery = e.dashMeleeReturnRun
+					? "ATK_2_dash_to_run" : "ATK_2_dash_to_idle";
+			e.lastMeleeAnimation = recovery;
+			state.getController().transitionLength(0);
+			return play(state, recovery);
+		}
+		state.getController().transitionLength(1);
 		// **上半身叠层模式**（腰射举枪 / 架枪走动 / 换弹走动）：这条控制器只负责腿，
 		// 上身交给 `upper` 那条（GeckoLib 里后注册的控制器覆盖先注册的，按骨骼生效）——
 		// 这样"架枪走路""边走边换弹"都是"上身保持姿势 + 腿在走"，见 upperAnimationFor 的表。
@@ -822,6 +959,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 					return play(state, "roll");
 				case ROLL_TO_IDLE:
 					return play(state, "roll_to_idle");
+				case MELEE:
+					return play(state, walkOrIdle(entity));
 				case IDLE:
 					// 待机 / 四方向走动 / 跑：全都看"有没有真在动、往哪个方向动"
 					return play(state, walkOrIdle(entity));
@@ -877,7 +1016,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * 其余全是"播一次、停在最后一帧"。
 	 */
 	private static final Set<String> LOOPING = new HashSet<>(Set.of(
-			"idle", "run", "walk_front", "walk_back", "walk_left", "walk_right", "Focus_hold"));
+			"idle", "run", "walk_front", "walk_back", "walk_left", "walk_right",
+			"Focus_hold", "ATK_3_hold", "idle_upper"));
 	private static final Map<String, RawAnimation> RAW = new HashMap<>();
 
 	private static RawAnimation rawFor(String name) {

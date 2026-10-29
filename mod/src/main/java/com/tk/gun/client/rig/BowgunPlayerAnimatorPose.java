@@ -34,7 +34,8 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 	private static final Map<Integer, PoseSnapshot> POSES = new ConcurrentHashMap<>();
 	private static ClientWorld cachedWorld;
 	private static long lastPruneTime = Long.MIN_VALUE;
-	private static Map<String, Set<String>> animationChannels;
+	private static final Map<Identifier, Map<String, Set<String>>> ANIMATION_CHANNELS =
+			new ConcurrentHashMap<>();
 
 	private final AbstractClientPlayerEntity player;
 
@@ -53,7 +54,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		TkGun.LOGGER.info("[tkgun] 已注册 PlayerAnimator 原版玩家姿势桥接");
 	}
 
-	public static void capture(int playerId,
+	public static void capture(int playerId, Identifier animationResource,
 			Map<String, BonePose> pose) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (cachedWorld != client.world) {
@@ -69,7 +70,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		}
 		Set<String> activeAnimations = BowgunRig.currentPlayerPoseAnimations();
 		Set<String> channels = new HashSet<>();
-		Map<String, Set<String>> knownChannels = channels();
+		Map<String, Set<String>> knownChannels = channels(animationResource);
 		for (String animation : activeAnimations) {
 			channels.addAll(knownChannels.getOrDefault(animation, Set.of()));
 		}
@@ -236,13 +237,12 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 				player.getId(), part, type, active);
 	}
 
-	private static synchronized Map<String, Set<String>> channels() {
-		if (animationChannels != null) {
-			return animationChannels;
-		}
+	private static Map<String, Set<String>> channels(Identifier id) {
+		return ANIMATION_CHANNELS.computeIfAbsent(id, BowgunPlayerAnimatorPose::parseChannels);
+	}
+
+	private static Map<String, Set<String>> parseChannels(Identifier id) {
 		Map<String, Set<String>> parsed = new HashMap<>();
-		Identifier id = TkGun.id(
-				"animations/entity/bowgun_rig.animation.json");
 		try (var resource = MinecraftClient.getInstance().getResourceManager()
 				.getResource(id).orElseThrow().getInputStream();
 			 var reader = new InputStreamReader(resource, StandardCharsets.UTF_8)) {
@@ -268,8 +268,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 			TkGun.LOGGER.error("[tkgun] 读取 PlayerAnimator 姿势通道失败：{}",
 					id, exception);
 		}
-		animationChannels = Map.copyOf(parsed);
-		return animationChannels;
+		return Map.copyOf(parsed);
 	}
 
 	@Override

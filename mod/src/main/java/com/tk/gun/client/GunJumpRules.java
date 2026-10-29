@@ -10,20 +10,7 @@ public final class GunJumpRules {
 				|| !TkGun.holdingGun(client.player)) {
 			return true;
 		}
-		GunClientState.Entry entry = GunClientState.get(client.player.getId());
-		if (entry != null && (entry.state == TkGun.State.IDLE
-				|| entry.state == TkGun.State.RUN)) {
-			return !client.player.isSprinting() && !client.player.isUsingItem()
-					&& !GunClientState.dashing(client.player.getId())
-					&& !GunClientState.overheated(client.player.getId());
-		}
-		if (client.player.isSprinting() || client.player.isUsingItem()
-				|| GunClientState.dashing(client.player.getId())
-				|| GunClientState.focusish(client.player.getId())
-				|| GunClientState.overheated(client.player.getId())) {
-			return false;
-		}
-		return entry == null;
+		return false;
 	}
 
 	private GunJumpRules() {

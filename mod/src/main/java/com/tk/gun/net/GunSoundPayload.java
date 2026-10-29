@@ -18,12 +18,13 @@ import net.minecraft.network.packet.CustomPayload;
  * 而且手里必须拿着破垒重炮。
  */
 public record GunSoundPayload(String sound) implements CustomPayload {
+	private static final int MAX_SOUND_KEY_LENGTH = 64;
 	public static final CustomPayload.Id<GunSoundPayload> ID =
 			new CustomPayload.Id<>(TkGun.id("sound_key"));
 
 	public static final PacketCodec<RegistryByteBuf, GunSoundPayload> CODEC = PacketCodec.of(
-			(value, buf) -> buf.writeString(value.sound(), 16),
-			buf -> new GunSoundPayload(buf.readString(16)));
+			(value, buf) -> buf.writeString(value.sound(), MAX_SOUND_KEY_LENGTH),
+			buf -> new GunSoundPayload(buf.readString(MAX_SOUND_KEY_LENGTH)));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

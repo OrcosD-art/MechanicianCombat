@@ -10,6 +10,12 @@ public final class CombatRollHook {
 			(int) Math.ceil(ROLL_FAST_FOCUS_SECONDS * 20.0D);
 	public static final int ROLL_DURATION =
 			animationTicks("roll", ROLL_FALLBACK_TICKS) + ANIMATION_END_HOLD_TICKS;
+	/**
+	 * Holds the roll animation tail for one extra tick so vanilla has time to
+	 * expose resumed movement input before the recovery branch is selected.
+	 */
+	public static final int ROLL_END_MOVE_PROBE_TICKS = 1;
+	public static final int ROLL_STATE_TICKS = ROLL_DURATION + ROLL_END_MOVE_PROBE_TICKS;
 	public static final int ROLL_TO_IDLE_TICKS =
 			animationTicks("roll_to_idle", 3) + ANIMATION_END_HOLD_TICKS;
 

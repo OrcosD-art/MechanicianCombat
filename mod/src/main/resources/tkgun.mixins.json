@@ -11,10 +11,14 @@
     "OffhandPlacementGuardMixin",
     "BackpackFireworkSelfDamageMixin",
     "PlayerFallDamageMixin",
+    "GunCrouchPoseGuardMixin",
     "OffhandUseGuardMixin"
   ],
   "client": [
-    "PlayerEntityRendererRigMixin"
+    "PlayerEntityRendererRigMixin",
+    "GunMeleeAttackGuardMixin",
+    "GunVanillaAttackGuardMixin",
+    "ClientPlayerCrouchGuardMixin"
   ],
   "injectors": {
     "defaultRequire": 1

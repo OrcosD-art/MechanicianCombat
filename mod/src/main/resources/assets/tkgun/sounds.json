@@ -103,6 +103,62 @@
                                 }
                             ]
              },
+    "smash_air1":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:smash_air1",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_ground1":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:smash_ground1",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "smash_ground3":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:smash_ground3",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "claymore_swing":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "tkgun:claymore_swing",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "glaive_slash2":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:glaive_slash2",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "double_axe_swing1":  {
+                              "sounds":  [
+                                             {
+                                                 "name":  "tkgun:double_axe_swing1",
+                                                 "stream":  false
+                                             }
+                                         ]
+                          },
+    "anchor_slam1":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "tkgun:anchor_slam1",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
     "cutting1":  {
                      "sounds":  [
                                     {
@@ -139,6 +195,14 @@
                        "sounds":  [
                                       {
                                           "name":  "tkgun:sonic_boom",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "sword_heat":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:sword_heat",
                                           "stream":  false
                                       }
                                   ]

@@ -1,5 +1,6 @@
 package com.tk.gun.client;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.particle.ParticleFactory;
 import net.minecraft.client.particle.ParticleTextureSheet;
 import net.minecraft.client.particle.SpriteBillboardParticle;
@@ -19,6 +20,8 @@ public class HeatVentParticle extends SpriteBillboardParticle {
 	/** 寿命（tick）：作者源里 {@code max_lifetime: 1} = 1 秒 = 20 tick。 */
 	private static final int LIFETIME = 20;
 	private final SpriteProvider provider;
+	private static volatile SpriteProvider activeProvider;
+	private int attachedPlayerId = -1;
 
 	protected HeatVentParticle(ClientWorld world, double x, double y, double z,
 							   double vx, double vy, double vz, SpriteProvider provider) {
@@ -51,6 +54,13 @@ public class HeatVentParticle extends SpriteBillboardParticle {
 
 	@Override
 	public void tick() {
+		if (attachedPlayerId >= 0) {
+			net.minecraft.util.math.Vec3d locator =
+					com.tk.gun.client.rig.BowgunRigRenderer.locatorPosition(attachedPlayerId);
+			if (locator != null) {
+				setPos(locator.x, locator.y, locator.z);
+			}
+		}
 		super.tick();
 		this.setSpriteForAge(this.provider);
 		float life = (float) this.age / (float) this.maxAge;
@@ -76,11 +86,30 @@ public class HeatVentParticle extends SpriteBillboardParticle {
 	}
 
 	public record Factory(SpriteProvider provider) implements ParticleFactory<SimpleParticleType> {
+		public Factory {
+			activeProvider = provider;
+		}
+
 		@Override
 		public HeatVentParticle createParticle(SimpleParticleType type, ClientWorld world,
 											   double x, double y, double z,
 											   double vx, double vy, double vz) {
 			return new HeatVentParticle(world, x, y, z, vx, vy, vz, this.provider);
 		}
+	}
+
+	/** Starts one heat-vent particle that follows the rendered muzzle for its full lifetime. */
+	public static boolean spawnAttached(net.minecraft.entity.Entity player,
+										net.minecraft.util.math.Vec3d position) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		SpriteProvider provider = activeProvider;
+		if (player == null || position == null || client.world == null || provider == null) {
+			return false;
+		}
+		HeatVentParticle particle = new HeatVentParticle(client.world,
+				position.x, position.y, position.z, 0.0D, 0.02D, 0.0D, provider);
+		particle.attachedPlayerId = player.getId();
+		client.particleManager.addParticle(particle);
+		return true;
 	}
 }

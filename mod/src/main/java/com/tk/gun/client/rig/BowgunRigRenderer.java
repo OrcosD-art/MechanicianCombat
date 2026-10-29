@@ -52,6 +52,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	private static Vec3d lastMuzzlePos;
 	/** Recent animated locator position for each rendered player. */
 	private static final Map<Integer, LocatorSample> LOCATOR_POSITIONS = new HashMap<>();
+	/** Recent animated near-end aim locator for each rendered player. */
+	private static final Map<Integer, LocatorSample> AIM_POSITIONS = new HashMap<>();
 	private record LocatorSample(Vec3d position, long worldTime) {
 	}
 	/** 弹匣相关骨骼：打空后整组隐藏。 */
@@ -152,6 +154,12 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		Entity renderedEntity = getCurrentEntity();
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
+		if ("body".equals(name)
+				&& "ATK_3_hold".equals(BowgunRig.currentUpperAnimation())) {
+			// ATK_3_hold has no body channel. Keep its inherited horizontal yaw,
+			// but remove the run animation's 27.5-degree parent-bone pitch.
+			bone.setRotX(0.0F);
+		}
 		if (currentFrame && ROOT_BONE.equals(name)) {
 			lastAimPos = null;
 			lastMuzzlePos = null;
@@ -173,7 +181,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				poseEntity == null ? null : com.tk.gun.client.GunClientState.get(poseEntity.getId());
 		boolean bodyLocked = upper && poseEntity != null
 				&& !com.tk.gun.client.GunClientState.focusish(poseEntity.getId())
-				&& !isFullBodyState(upperState);
+				&& !isFullBodyState(upperState)
+				&& (upperState == null || upperState.state != TkGun.State.MELEE);
 		// idle_lower 保留了作者完整 idle 的 body.rotation.y=45°。它只适合全身 idle；
 		// 和 stand_shooting_hold 叠层时会把整个上半身一起拧右约 45°。
 		if (bodyLocked && "body".equals(name)) {
@@ -373,7 +382,12 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 					bone.getPivotX(), bone.getPivotY(), bone.getPivotZ()));
 		}
 		if (currentFrame && ROOT_BONE.equals(name)) {
-			BowgunPlayerAnimatorPose.capture(renderedEntity.getId(), playerPose);
+			net.minecraft.util.Identifier animationResource =
+					renderedEntity instanceof net.minecraft.entity.player.PlayerEntity player
+							? TkGun.definition(player).animationResource()
+							: TkGun.id("animations/entity/bowgun_rig.animation.json");
+			BowgunPlayerAnimatorPose.capture(
+					renderedEntity.getId(), animationResource, playerPose);
 		}
 		if (chestBobTransform) {
 			poseStack.pop();
@@ -384,6 +398,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				&& lastAimPos != null && lastMuzzlePos != null) {
 			LOCATOR_POSITIONS.put(renderedEntity.getId(),
 					new LocatorSample(lastMuzzlePos, renderedEntity.getWorld().getTime()));
+			AIM_POSITIONS.put(renderedEntity.getId(),
+					new LocatorSample(lastAimPos, renderedEntity.getWorld().getTime()));
 			Vec3d dir = lastMuzzlePos.subtract(lastAimPos);
 			if (local && dir.lengthSquared() > 1.0E-8D) {
 				TkGunClient.captureMuzzle(lastAimPos, lastMuzzlePos, dir.normalize());
@@ -395,6 +411,17 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	public static Vec3d locatorPosition(int playerId) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		LocatorSample sample = LOCATOR_POSITIONS.get(playerId);
+		if (client.world == null || sample == null
+				|| Math.abs(client.world.getTime() - sample.worldTime()) > 3L) {
+			return null;
+		}
+		return sample.position;
+	}
+
+	/** Latest rendered near-end aim locator, rejected when stale. */
+	public static Vec3d aimPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		LocatorSample sample = AIM_POSITIONS.get(playerId);
 		if (client.world == null || sample == null
 				|| Math.abs(client.world.getTime() - sample.worldTime()) > 3L) {
 			return null;

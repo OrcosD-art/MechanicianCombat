@@ -1,0 +1,38 @@
+MechanicianCombat 更新日志
+版本：r508
+日期：2026-10-29 至 2026-10-30
+
+一、枢德之裁近战攻击
+
+1. 新增 ATK1、ATK2、ATK3、ATK4、ATK_hold_over 近战连段。
+2. 点按连段为 ATK1 -> ATK2 -> ATK4；ATK2 后继续按住攻击键会进入 ATK3 蓄力。
+3. 新增冲刺攻击 ATK_run、攻击收势与待机过渡动画。
+4. ATK1、ATK2、ATK4 使用前方攻击范围；ATK3 使用以玩家为中心的圆形范围。
+5. ATK_hold_over 包含三次出伤，用于强化长按终结攻击。
+6. ATK3 主动作阶段固定玩家位置；进入 ATK_3_hold 与 ATK_hold_over 后允许移动。
+
+二、命中反馈
+
+1. 新增与实际伤害结果绑定的打击停顿。
+2. ATK1、ATK2 为 3 Tick；ATK3 为 4 Tick；ATK4 为 5 Tick；ATK_hold_over 每次为 4 Tick。
+3. 强化 ATK4 与 ATK_hold_over 按暴击处理，额外增加 2 Tick。
+4. 受击实体会短暂定格并沿命中方向轻微抖动。
+5. 击退延迟到停顿结束后释放，避免停顿期间目标提前飞离。
+6. 屏幕震动仅保留在 ATK3 出伤帧和 ATK_hold_over 最后一次出伤。
+7. 空气挥击不会触发打击停顿、目标定格或屏幕震动。
+
+三、音效与粒子
+
+1. 实装 ATK1、ATK2、ATK3、ATK4、ATK3_hold 与 ATK_hold_over 对应的挥砍和命中音效。
+2. 实装 Minecraft 1.21.1 原版重锤的 smash_air1、smash_ground1、smash_ground3。
+3. 修复阔剑挥砍资源实际为 MP3 数据的问题，模组内改为标准 Vorbis OGG。
+4. 更新 thunder 雷电粒子图集，并按 96x96、共 7 帧重新切分。
+5. 雷电粒子保持仅 Y 轴旋转，并仅在实际命中时生成。
+
+四、稳定性
+
+1. 修复近战时间轴与服务端状态机不同步的问题。
+2. 修复 ATK_hold_over 多段出伤在停顿期间被提前推进的问题。
+3. 修复新增 Mixin 在启动阶段因 Mixin 包隔离而崩溃的问题。
+4. 当前构建：r508-2026-10-30。
+

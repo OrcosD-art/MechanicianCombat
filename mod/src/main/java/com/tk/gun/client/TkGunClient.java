@@ -42,6 +42,7 @@ public class TkGunClient implements ClientModInitializer {
 	public static final KeyBinding BACKPACK_ACTION_KEY = KeyBindingHelper.registerKeyBinding(
 			new KeyBinding("key.tkgun.backpack_action", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.tkgun"));
 	private static boolean attackWasDown = false;
+	private static boolean meleeAttackDown = false;
 	private static boolean backpackActionDown = false;
 	/** 左键已经连着按了多少 tick（用来区分"轻点"和"按住连发"）。 */
 	private static int attackHeldTicks = 0;
@@ -588,6 +589,20 @@ public class TkGunClient implements ClientModInitializer {
 		return e != null && e.active() && e.state == TkGun.State.ROLL;
 	}
 
+	private static boolean canUseStandingMelee(MinecraftClient client) {
+		if (client.player == null || client.currentScreen != null
+				|| client.player.isUsingItem()
+				|| !TkGun.isGun(client.player.getMainHandStack())
+				|| !TkGun.definition(client.player.getMainHandStack()).id()
+						.equals(TkGun.id("veritas_et_justitia"))
+				|| GunClientState.focusish(client.player.getId())) {
+			return false;
+		}
+		// Server-authoritative state validation avoids falling back to a fire packet
+		// merely because a state packet has not arrived in the same client tick.
+		return true;
+	}
+
 	public static void sendSoundKeyframe(String key) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.getNetworkHandler() == null) {
@@ -693,6 +708,8 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.ROSE_QUARTZ_TRAIL, GlowingRoseTrailParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.THUNDER, ThunderParticle.Factory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.GOLEM_ENERGY_CONVERGE,
 						GolemEnergyParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -710,6 +727,10 @@ public class TkGunClient implements ClientModInitializer {
 				(context, tickCounter) -> GunReticle.render(context));
 		ClientPlayNetworking.registerGlobalReceiver(GunStatePayload.ID,
 				(payload, context) -> context.client().execute(() -> GunClientState.apply(payload)));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.MeleeImpactPayload.ID,
+				(payload, context) -> context.client().execute(() ->
+						MeleeImpactClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunHitMarkerPayload.ID,
 				(payload, context) -> context.client().execute(GunReticle::triggerHitMarker));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunDemoPayload.ID,
@@ -747,12 +768,15 @@ public class TkGunClient implements ClientModInitializer {
 						.getRenderer(com.tk.gun.TkGunServer.COMBAT_BACKPACK).getClass().getSimpleName());
 
 		ClientTickEvents.END_CLIENT_TICK.register(TkGunClient::tick);
+		ClientTickEvents.END_CLIENT_TICK.register(
+				client -> MeleeImpactClientState.tick());
 		TkGun.LOGGER.info("[tkgun] 客户端就绪: GeckoLib 玩家动画 rig");
 	}
 
 	private static void tick(MinecraftClient client) {
 		GunClientState.tickAll();
 		CombatBackpackClientState.tick(client);
+		LocatorShriekBurst.tick(client);
 		AmmoSwitchHud.tick(client);
 		ticks++;
 		// 第一次自检可能正好撞在资源重载中间（会误报 0/8），所以隔几秒再打两次
@@ -772,6 +796,9 @@ public class TkGunClient implements ClientModInitializer {
 		// state-specific input so those input locks cannot consume or suppress it.
 		handleBackpackActionKey(client);
 		boolean holdingGunNow = TkGun.holdingGun(client.player);
+		if (holdingGunNow && client.player.isSneaking()) {
+			client.player.setSneaking(false);
+		}
 		if (!holdingGunNow && heldGunLastTick) {
 			// Leaving the gun must discard every stale client-side gun state so
 			// vanilla first-person camera/action logic takes over immediately.
@@ -839,7 +866,9 @@ public class TkGunClient implements ClientModInitializer {
 			// —— 要装填就松开 Z 退出专注再按。
 			if (GunClientState.focusish(client.player.getId())) {
 				TkGun.LOGGER.info("[tkgun] F：专注期间屏蔽装填（松开 Z 再按）");
-			} else if (isRolling(client)) {
+			} else if (isRolling(client)
+					|| (GunClientState.get(client.player.getId()) != null
+					&& GunClientState.get(client.player.getId()).state == TkGun.State.MELEE)) {
 				// **翻滚期间屏蔽装填**（用户 2026-10-17）：F 会把 ROLL 顶成 RELOAD，翻滚动画只播一半。
 				TkGun.LOGGER.info("[tkgun] F：翻滚中，等翻滚动画播完再装填");
 			} else {
@@ -922,10 +951,25 @@ public class TkGunClient implements ClientModInitializer {
 		//    因为之前是为了测试你到底能不能定位到 locator"）。枪口点/枪管方向照旧每帧从
 		//    `locator` 骨骼上量（TkGunClient.captureMuzzle），只是不再在那儿放白色亮点、也不再刷日志。
 		boolean down = client.options.attackKey.isPressed();
+		if (!down && attackWasDown && meleeAttackDown) {
+			ClientPlayNetworking.send(new com.tk.gun.net.GunMeleePayload(false, false));
+			meleeAttackDown = false;
+		}
 		if (down && !attackWasDown) {
 			boolean holding = TkGun.holdingGun(client.player);
 			boolean noScreen = client.currentScreen == null;
 			if (holding && noScreen) {
+				if (canUseStandingMelee(client)) {
+					boolean movingForward = client.options.forwardKey.isPressed()
+							&& (TkGunClient.isMoving(client.player.getId())
+							|| Math.abs(client.player.forwardSpeed) > 0.01F);
+					ClientPlayNetworking.send(new com.tk.gun.net.GunMeleePayload(
+							true, movingForward));
+					meleeAttackDown = true;
+					TkGun.LOGGER.info("[tkgun] 左键 -> Veritas close combat");
+					attackWasDown = down;
+					return;
+				}
 				// ⚠️ 2026-10-15 用户："**正常按左键是不能开火的** —— 行走射击也得先瞄准，然后播
 				//    行走射击的动画，然后才能开火"：扣扳机的**前提是右键举着枪**（瞄准）。
 				//    所以这里先拦一道（不发包），服务端还会用 `isUsingItem()` 再权威判一次。

@@ -1,7 +1,9 @@
 package com.tk.gun.mixin;
 
+import com.tk.gun.TkGun;
 import com.tk.gun.client.rig.BowgunRigClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
+import net.minecraft.client.render.entity.model.PlayerEntityModel;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.EntityRendererFactory;
 import net.minecraft.client.render.entity.PlayerEntityRenderer;
@@ -30,5 +32,22 @@ public abstract class PlayerEntityRendererRigMixin {
 	private void tkgun$renderRig(AbstractClientPlayerEntity player, float yaw, float tickDelta,
 								 MatrixStack matrices, VertexConsumerProvider consumers, int light, CallbackInfo ci) {
 		BowgunRigClient.renderIfHolding(player, yaw, tickDelta, matrices, consumers, light);
+	}
+
+	/**
+	 * The gun rig already contains the authored crouch/focus pose. Letting the
+	 * vanilla player model also enable its sneak pose applies two crouch rotations
+	 * and body offsets to the same limbs.
+	 */
+	@Inject(method = "method_4218(Lnet/minecraft/class_742;)V", at = @At("TAIL"))
+	private void tkgun$suppressStackedVanillaCrouch(AbstractClientPlayerEntity player,
+													CallbackInfo ci) {
+		if (!TkGun.holdingGun(player)) {
+			return;
+		}
+		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
+		if (renderer.getModel() instanceof PlayerEntityModel model) {
+			model.sneaking = false;
+		}
 	}
 }

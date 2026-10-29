@@ -16,8 +16,17 @@ public abstract class FocusMovementLockMixin {
 	@Inject(method = "method_3129(ZF)V", at = @At("TAIL"))
 	private void tkgun$lockFocusMovement(boolean slowDown, float slowDownFactor, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player == null || !TkGun.holdingGun(client.player)
-				|| !GunClientState.focusish(client.player.getId())) {
+		if (client.player == null || !TkGun.holdingGun(client.player)) {
+			return;
+		}
+		int playerId = client.player.getId();
+		boolean focusLock = GunClientState.focusish(playerId);
+		GunClientState.Entry entry = GunClientState.get(playerId);
+		boolean dashMeleeHold = entry != null && entry.active()
+				&& entry.dashMeleeActive;
+		boolean atk3Lock = entry != null && entry.state == TkGun.State.MELEE
+				&& entry.shotIndex == 3 && !entry.meleeReturning;
+		if (!focusLock && !dashMeleeHold && !atk3Lock) {
 			return;
 		}
 		KeyboardInput self = (KeyboardInput) (Object) this;

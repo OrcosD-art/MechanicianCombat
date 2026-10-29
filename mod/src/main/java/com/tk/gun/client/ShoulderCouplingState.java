@@ -40,6 +40,12 @@ public final class ShoulderCouplingState {
 				== net.minecraft.client.option.Perspective.THIRD_PERSON_FRONT) {
 			return false;
 		}
+		GunClientState.Entry state = GunClientState.get(client.player.getId());
+		// Close combat owns the camera direction for the full authored attack,
+		// including movement and sprint. Do not fall through to sprint decoupling.
+		if (state != null && state.state == TkGun.State.MELEE) {
+			return true;
+		}
 		// 右键瞄准由 aim→locator 中心线闭环控制身体 yaw；ShoulderSurfing 继续解耦，
 		// 否则它会和中心线控制器同时写 yaw。使用其它物品时同样不接管。
 		if (client.player.isUsingItem()) {
@@ -54,16 +60,15 @@ public final class ShoulderCouplingState {
 		if (GunClientState.focusish(id) || GunClientState.aimLocked(id)) {
 			return false;
 		}
-		GunClientState.Entry e = GunClientState.get(id);
-		if (e == null) {
+		if (state == null) {
 			return true;
 		}
 		// Standing idle is decoupled so the camera can look around without
 		// rotating the stationary body. Walking in IDLE state remains coupled.
-		if (e.state == TkGun.State.IDLE && !TkGunClient.isMoving(id)) {
+		if (state.state == TkGun.State.IDLE && !TkGunClient.isMoving(id)) {
 			return false;
 		}
-		return switch (e.state) {
+		return switch (state.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
 					OVERHEAT, OVER, INSPECT -> false;
 			default -> true;
@@ -89,17 +94,20 @@ public final class ShoulderCouplingState {
 			return 0;
 		}
 		int id = client.player.getId();
+		GunClientState.Entry state = GunClientState.get(id);
+		if (state != null && state.state == TkGun.State.MELEE) {
+			return 0;
+		}
 		if (usesDecoupledSprint(client)) {
 			return client.player.isSprinting() ? 1 : 2;
 		}
 		if (GunClientState.focusish(id)) {
 			return 3;
 		}
-		GunClientState.Entry e = GunClientState.get(id);
-		if (e == null) {
+		if (state == null) {
 			return GunClientState.aimLocked(id) ? 12 : 0;
 		}
-		return switch (e.state) {
+		return switch (state.state) {
 			case ROLL -> 4;
 			case ROLL_TO_IDLE -> 5;
 			case SLIDE -> 7;

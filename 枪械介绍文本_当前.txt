@@ -1,0 +1,40 @@
+MechanicianCombat 枪械介绍文本
+版本：r455-2026-10-28
+
+说明：
+1. 每把枪的介绍由对应语言文件中的 description 文本读取。
+2. 游戏内会按换行符、中文分号和英文分号拆分为多行。
+3. 可直接修改下方“中文介绍”或“英文介绍”的内容。
+
+------------------------------------------------------------
+枪械 ID：tkgun:bowgun
+中文名称：破垒重炮
+英文名称：Fortress Destroyer Gun
+
+中文介绍：
+以攻打大型堡垒的器械为原型改造的武器，经由训练后的人能够以极强的机动性使用这门威力强大的攻城武器穿梭战场
+
+英文介绍：
+A weapon rebuilt from siege engines used against great fortresses. A trained wielder can use this powerful siege weapon with extreme mobility to traverse the battlefield.
+
+------------------------------------------------------------
+枪械 ID：tkgun:abyssal_ancient_cannon
+中文名称：静谧风暴
+英文名称：Silent Storm
+
+中文介绍：
+运用幽暗遗迹中发掘的古式技术与材料，经机械师装配改造而制成的强大巨炮
+
+英文介绍：
+An ancient cannon recovered from a lightless ruin and rebuilt to fire the Mechanician's ammunition.
+
+------------------------------------------------------------
+枪械 ID：tkgun:veritas_et_justitia
+中文名称：枢德之裁
+英文名称：Veritas_et_Justitia
+
+中文介绍：
+运用以裁决与正义为附魔的刀刃，经机械师装配改造而制成的强大巨炮。
+
+英文介绍：
+A siege weapon named for truth and justice, unfolding to pass judgment on its targets.

@@ -41,6 +41,8 @@ public final class TkGunParticles {
 	public static final SimpleParticleType ROSE_QUARTZ_IMPACT = FabricParticleTypes.simple(true);
 	/** Full-bright rose quartz guidance trail. */
 	public static final SimpleParticleType ROSE_QUARTZ_TRAIL = FabricParticleTypes.simple(true);
+	/** Veritas ATK_3 authored thunder flash. */
+	public static final SimpleParticleType THUNDER = FabricParticleTypes.simple(true);
 	/** Molten golem convergence particle that follows its rendered locator bone. */
 	public static final SimpleParticleType GOLEM_ENERGY_CONVERGE = FabricParticleTypes.simple(true);
 	/** Second-stage convergence authored as a distinct six-frame texture strip. */
@@ -59,14 +61,15 @@ public final class TkGunParticles {
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("grapeshot_impact"), GRAPESHOT_IMPACT);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_explo"), ROSE_QUARTZ_IMPACT);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_trail"), ROSE_QUARTZ_TRAIL);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("thunder"), THUNDER);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("golem_energy_converge"),
 				GOLEM_ENERGY_CONVERGE);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("golem_energy_converge_2"),
 				GOLEM_ENERGY_CONVERGE_2);
-		TkGun.LOGGER.info("[tkgun] 粒子已注册: {} / {} / {} / {} / {} / {} / {} / {} / {}", TkGun.id("heat_vent"),
+		TkGun.LOGGER.info("[tkgun] 粒子已注册: {} / {} / {} / {} / {} / {} / {} / {} / {} / {}", TkGun.id("heat_vent"),
 				TkGun.id("energy_converge"), TkGun.id("energy_xplo"), TkGun.id("shell_boost"),
 				TkGun.id("muzzle_glow"), TkGun.id("sonic_boom"), TkGun.id("grapeshot_impact"),
-				TkGun.id("rose_quartz_explo"), TkGun.id("rose_quartz_trail"));
+				TkGun.id("rose_quartz_explo"), TkGun.id("rose_quartz_trail"), TkGun.id("thunder"));
 	}
 
 	private TkGunParticles() {

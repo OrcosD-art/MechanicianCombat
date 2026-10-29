@@ -43,6 +43,15 @@ public final class GunClientState {
 	 * （用户："疾跑与翻滚加速状态下不允许进行右键瞄准"）。
 	 */
 	public boolean dashing;
+		public boolean dashMeleeActive;
+		public boolean meleeReturning;
+		public boolean dashMeleeReturn;
+		public boolean dashMeleeReturnRun;
+		public boolean meleeHoldOver;
+		public String lastMeleeAnimation;
+		public int meleeGraceUntil;
+		/** Local melee lifetime ended; wait briefly for the authoritative server state. */
+		public int meleeAwaitUntil;
 		public String magAmmo = "";
 	/**
 	 * 翻滚 / 滑铲结束后继续屏蔽右键瞄准的客户端截止 tick（和服务端 `aimLockUntil` 对齐）。
@@ -104,6 +113,11 @@ public final class GunClientState {
 		TkGun.State previousState = e.state;
 		boolean newShotFrame = e.shotSeq != payload.shotSeq();
 		boolean sameFrame = e.state == newState && !newShotFrame;
+		if (newState == TkGun.State.MELEE) {
+			e.meleeGraceUntil = 0;
+		} else if (previousState == TkGun.State.MELEE) {
+			e.meleeGraceUntil = Math.max(e.meleeGraceUntil, ticks + 2);
+		}
 		if (!sameFrame) {
 			e.state = newState;
 			e.total = payload.ticks();
@@ -115,6 +129,14 @@ public final class GunClientState {
 		e.focusMagazineCapacity = Math.max(1, payload.focusMagazineCapacity());
 		e.maxShotIndex = Math.max(1, payload.maxShotIndex());
 		e.airborneIdle = payload.airborneIdle();
+		e.dashMeleeActive = payload.dashMelee();
+		e.meleeReturning = payload.meleeReturning();
+		e.dashMeleeReturn = payload.dashMeleeReturn();
+		e.dashMeleeReturnRun = payload.dashMeleeReturnRun();
+		e.meleeHoldOver = payload.meleeHoldOver();
+		if (newState != TkGun.State.MELEE || payload.meleeReturning()) {
+			e.meleeAwaitUntil = 0;
+		}
 		e.shotIndex = Math.max(1, Math.min(e.maxShotIndex, payload.shotIndex()));
 		e.mag = Math.max(0,
 				Math.min(payload.focus() ? e.focusMagazineCapacity : e.hipMagazineCapacity, payload.mag()));
@@ -180,6 +202,14 @@ public final class GunClientState {
 		return ENTRIES.get(entityId);
 	}
 
+	/** Extend the client-side melee mirror while the server pauses its timeline. */
+	public static void extendMelee(int entityId, int ticks) {
+		Entry entry = ENTRIES.get(entityId);
+		if (entry != null && entry.state == TkGun.State.MELEE && ticks > 0) {
+			entry.total += ticks;
+		}
+	}
+
 	/** Whether an Alt press may start a real roll or the roll-to-slide follow-up. */
 	public static boolean canTriggerDodge(int entityId) {
 		Entry e = ENTRIES.get(entityId);
@@ -192,8 +222,14 @@ public final class GunClientState {
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
 			return false;
 		}
+		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
+			return false;
+		}
 		if (ticks < e.localDodgeLockUntil) {
 			return false;
+		}
+		if (dashMeleeRecovery(e)) {
+			return true;
 		}
 		boolean slideWindowOpen = e.nextDodgeSlide && !e.focus && ticks < e.dashUntil;
 		return slideWindowOpen || ticks >= e.nativeRollReadyAt;
@@ -211,16 +247,26 @@ public final class GunClientState {
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
 			return;
 		}
+		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
+			return;
+		}
 		// Alt enters slide only while the roll movement bonus is still active.
 		boolean slideWindowOpen = e.nextDodgeSlide && !e.focus && ticks < e.dashUntil;
-		if (slideWindowOpen || ticks < e.localDodgeLockUntil || ticks < e.nativeRollReadyAt) {
+		boolean dashRecovery = dashMeleeRecovery(e);
+		if (slideWindowOpen || ticks < e.localDodgeLockUntil
+				|| (!dashRecovery && ticks < e.nativeRollReadyAt)) {
 			return;
 		}
 		e.nextDodgeSlide = false;
 		e.dashing = false;
+		e.dashMeleeActive = false;
+		e.meleeReturning = false;
+		e.dashMeleeReturn = false;
+		e.dashMeleeReturnRun = false;
+		e.meleeHoldOver = false;
 		e.dashUntil = 0;
 		e.state = TkGun.State.ROLL;
-		e.total = CombatRollHook.ROLL_DURATION;
+		e.total = CombatRollHook.ROLL_STATE_TICKS;
 		e.elapsed = 0;
 		e.predictedRoll = true;
 		e.predictedRollTicks = 0;
@@ -228,9 +274,13 @@ public final class GunClientState {
 
 	public static void tickAll() {
 		ticks++;
-		ENTRIES.values().forEach(e -> {
+		ENTRIES.forEach((entityId, e) -> {
 			if (e.active()) {
-				e.elapsed++;
+				if (!(e.state == TkGun.State.MELEE
+						&& com.tk.gun.client.MeleeImpactClientState
+								.freezesAnimation(entityId))) {
+					e.elapsed++;
+				}
 				if (e.predictedRoll && ++e.predictedRollTicks > 4) {
 					// 服务端迟迟没有回 ROLL（例如闪避冷却拒绝）：撤销预测，避免模型空滚。
 					e.predictedRoll = false;
@@ -250,6 +300,20 @@ public final class GunClientState {
 				e.state = TkGun.State.IDLE;
 				e.total = 0;
 				e.elapsed = 0;
+			} else if (e.state == TkGun.State.MELEE) {
+				// Server packets own the attack-to-recovery handoff. Keep the
+				// authored final pose until that packet arrives rather than
+				// exposing idle_upper for one or more local ticks.
+				if (e.meleeAwaitUntil == 0) {
+					e.meleeAwaitUntil = ticks + 6;
+					e.meleeGraceUntil = ticks + 6;
+				}
+				if (ticks >= e.meleeAwaitUntil) {
+					e.state = TkGun.State.IDLE;
+					e.total = 0;
+					e.elapsed = 0;
+					e.meleeAwaitUntil = 0;
+				}
 			} else if (e.state != TkGun.State.IDLE) {
 				e.state = TkGun.State.IDLE;
 				e.total = 0;
@@ -282,6 +346,14 @@ public final class GunClientState {
 		e.elapsed = 0;
 		e.focus = false;
 		e.dashing = false;
+		e.dashMeleeActive = false;
+		e.meleeReturning = false;
+		e.dashMeleeReturn = false;
+		e.dashMeleeReturnRun = false;
+		e.meleeHoldOver = false;
+		e.lastMeleeAnimation = null;
+		e.meleeGraceUntil = 0;
+		e.meleeAwaitUntil = 0;
 		e.reloading = false;
 		e.aimLockUntil = 0;
 		e.nativeRollReadyAt = 0;
@@ -337,6 +409,14 @@ public final class GunClientState {
 						? null : "roll";
 			case ROLL_TO_IDLE:
 				return "roll_to_idle";
+			case MELEE:
+				if (e.meleeReturning) {
+					return TkGun.meleeReturnAnimation(e.shotIndex);
+				}
+				if (e.meleeHoldOver) {
+					return "ATK_hold_over";
+				}
+				return TkGun.meleeAnimation(e.shotIndex);
 			default:
 				return null;
 		}
@@ -396,6 +476,14 @@ public final class GunClientState {
 		return e != null && e.dashing && ticks < e.dashUntil;
 	}
 
+	public static boolean meleeGraceActive(int entityId) {
+		Entry e = ENTRIES.get(entityId);
+		return e != null && e.state == TkGun.State.IDLE && ticks < e.meleeGraceUntil
+				&& e.lastMeleeAnimation != null && !e.lastMeleeAnimation.isBlank()
+				&& !e.lastMeleeAnimation.endsWith("_to_idle")
+				&& !e.lastMeleeAnimation.endsWith("_to_run");
+	}
+
 	/** 这位玩家现在是否处于翻滚 / 滑铲及其结束后的右键瞄准锁里。 */
 	public static boolean aimLocked(int entityId) {
 		Entry e = ENTRIES.get(entityId);
@@ -406,7 +494,7 @@ public final class GunClientState {
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT || e.state == TkGun.State.OVER
-				|| e.state == TkGun.State.INSPECT
+				|| e.state == TkGun.State.INSPECT || e.state == TkGun.State.MELEE
 				|| ticks < e.aimLockUntil;
 	}
 
@@ -483,8 +571,15 @@ public final class GunClientState {
 		return switch (e.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
 					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE -> true;
+			case MELEE -> !dashMeleeRecovery(e);
 			default -> false;
 		};
+	}
+
+	/** Dash attack is rollable only after its authored hit-stop has ended. */
+	private static boolean dashMeleeRecovery(Entry e) {
+		return e != null && e.state == TkGun.State.MELEE
+				&& e.meleeReturning && e.dashMeleeReturn;
 	}
 
 	/** 弹夹里还剩几发（HUD 用；没数据时当满弹夹）。 */

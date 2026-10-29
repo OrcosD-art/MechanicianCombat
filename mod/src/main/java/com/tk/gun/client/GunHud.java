@@ -57,7 +57,6 @@ public final class GunHud {
 			context.drawText(client.textRenderer, focusTag, bx, y - 10, 0xFF9BE0FF, true);
 		}
 		AmmoSwitchHud.render(context);
-		GunWarningHud.render(context);
 	}
 
 	private static String loadedMagazineText(int entityId, int left) {

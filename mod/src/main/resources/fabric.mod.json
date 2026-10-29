@@ -23,6 +23,7 @@
 	},
 	"recommends": {
 		"combat_roll": ">=2.0.6+1.21.1",
-		"shouldersurfing": ">=4.21.0"
+		"shouldersurfing": ">=4.21.0",
+		"bettercombat": ">=2.4.0"
 	}
 }
