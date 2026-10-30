@@ -214,6 +214,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 				|| !MELEE_SOUND_ANIMS.contains(upperName)) {
 			return;
 		}
+		// ATK_hold_over audio is driven by the authoritative server timeline.
+		if ("ATK_hold_over".equals(upperName)) {
+			return;
+		}
 		AbstractClientPlayerEntity who = CURRENT_PLAYER;
 		if (who == net.minecraft.client.MinecraftClient.getInstance().player) {
 			reportServerSoundKeyframe(key);
@@ -582,6 +586,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (e == null) {
 			return null;
 		}
+		if (e.state == TkGun.State.SKILL_JUMP) {
+			return null;
+		}
 		if (e.airborneIdle) {
 			return null;
 		}
@@ -649,7 +656,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (e.active()) {
 			switch (e.state) {
 				case OVERHEAT, ROLL, ROLL_TO_IDLE,
-						SLIDE, SLIDE_READY, OVER, INSPECT -> {
+						SLIDE, SLIDE_READY, OVER, INSPECT, SKILL_JUMP -> {
 					return null;
 				}
 				default -> { }
@@ -931,6 +938,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 					return e == null
 							? play(state, "Focus_hold")
 							: play(state, TkGun.focusHoldAnimation(e.shotIndex, e.maxShotIndex));
+				case SKILL_JUMP:
+					return play(state, GunClientState.skillJumpAnimation(entity.getId()));
 				case OVER:
 					// 进入强化：作者新做的 `Focus_over`（1 秒，把炮抬到肩上）
 					return play(state, "Focus_over");

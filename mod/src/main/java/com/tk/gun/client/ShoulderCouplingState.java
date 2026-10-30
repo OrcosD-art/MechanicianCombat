@@ -44,7 +44,7 @@ public final class ShoulderCouplingState {
 		// Close combat owns the camera direction for the full authored attack,
 		// including movement and sprint. Do not fall through to sprint decoupling.
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return true;
+			return !state.meleeHoldOver;
 		}
 		// 右键瞄准由 aim→locator 中心线闭环控制身体 yaw；ShoulderSurfing 继续解耦，
 		// 否则它会和中心线控制器同时写 yaw。使用其它物品时同样不接管。
@@ -70,7 +70,7 @@ public final class ShoulderCouplingState {
 		}
 		return switch (state.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
-					OVERHEAT, OVER, INSPECT -> false;
+					OVERHEAT, OVER, INSPECT, SKILL_JUMP -> false;
 			default -> true;
 		};
 	}
@@ -96,7 +96,7 @@ public final class ShoulderCouplingState {
 		int id = client.player.getId();
 		GunClientState.Entry state = GunClientState.get(id);
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return 0;
+			return state.meleeHoldOver ? 13 : 0;
 		}
 		if (usesDecoupledSprint(client)) {
 			return client.player.isSprinting() ? 1 : 2;
@@ -115,6 +115,7 @@ public final class ShoulderCouplingState {
 			case OVERHEAT -> 9;
 			case OVER -> 10;
 			case INSPECT -> 11;
+			case SKILL_JUMP -> 15;
 			default -> GunClientState.aimLocked(id) ? 12 : 0;
 		};
 	}

@@ -1,5 +1,6 @@
 package com.tk.gun.client;
 
+import com.tk.gun.TkGun;
 import io.wispforest.accessories.api.client.AccessoryRenderer;
 import io.wispforest.accessories.api.slot.SlotReference;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -18,6 +19,12 @@ public final class CombatBackpackAccessoryRenderer implements AccessoryRenderer 
 												 VertexConsumerProvider consumers, int light,
 												 float limbAngle, float limbDistance, float tickDelta,
 												 float animationProgress, float headYaw, float headPitch) {
+		// Holding a gun renders the backpack from CombatBackpackRigLayer.
+		// Rendering the Accessories copy as well causes a second antenna C3.
+		if (reference.entity() instanceof net.minecraft.entity.player.PlayerEntity player
+				&& TkGun.holdingGun(player)) {
+			return;
+		}
 		if (!(model instanceof PlayerEntityModel playerModel)) {
 			return;
 		}

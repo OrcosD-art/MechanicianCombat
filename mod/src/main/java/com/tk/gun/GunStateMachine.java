@@ -64,7 +64,7 @@ public final class GunStateMachine {
 	public static boolean canFire(TkGun.State state) {
 		return switch (state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
-					MELEE -> false;
+					MELEE, SKILL_JUMP -> false;
 			default -> true;          // IDLE / AIM* / FIRE / INSPECT
 		};
 	}
@@ -78,7 +78,8 @@ public final class GunStateMachine {
 	public static void tickAtk3MovementLock(ServerPlayerEntity player, TkGunServer.PState st) {
 		if (st.state != TkGun.State.MELEE || st.meleeCombo != 3
 				|| st.meleeDashAttack || st.meleeReturning
-				|| st.meleeAtk3MainEnded || st.meleeHoldOver) {
+				|| st.meleeAtk3MainEnded || st.meleeHoldOver
+				|| st.meleeInputHeld) {
 			return;
 		}
 		player.setSprinting(false);

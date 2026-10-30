@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r508-2026-10-30";
+	public static final String BUILD = "r519-2026-10-30";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -60,7 +60,9 @@ public final class TkGun {
 		AIM_ROLL(14),
 		/** 翻滚结束、玩家没有继续移动：播作者的 `roll_to_idle` 过渡，再回 IDLE。 */
 		ROLL_TO_IDLE(15),
-		MELEE(16);
+		MELEE(16),
+		/** Silent Storm accelerated jump; jump/fall animation follows vertical velocity. */
+		SKILL_JUMP(17);
 
 		public static boolean isAiming(State s) {
 			return s == AIM || s == AIM_FAST || s == AIM_ROLL || s == AIM_SLIDE
@@ -113,6 +115,19 @@ public final class TkGun {
 			(int) Math.ceil(1.125D * 20.0D) + 1;
 	/** Timelines authored inside ATK_hold_over. */
 	public static final int[] MELEE_HOLD_OVER_HIT_TICKS = {3, 10, 18};
+	/** Reach four blocks by the second authored hit frame. */
+	public static final double MELEE_HOLD_OVER_MOVE_DISTANCE = 4.0D;
+	/** Additional decaying momentum between the second and third hit frames. */
+	public static final double MELEE_HOLD_OVER_INERTIA_DISTANCE = 2.0D;
+	public static final double MELEE_HOLD_OVER_PHASE_VELOCITY = 0.5D;
+	public static final int MELEE_HOLD_OVER_MOVE_END_TICK =
+			MELEE_HOLD_OVER_HIT_TICKS[1];
+	public static final int MELEE_HOLD_OVER_INERTIA_END_TICK =
+			MELEE_HOLD_OVER_HIT_TICKS[2];
+	public static final int[] MELEE_HOLD_OVER_SOUND_TICKS = {3, 10, 16, 18};
+	public static final String[] MELEE_HOLD_OVER_SOUND_KEYS = {
+			"glaive_slash02", "imp1", "smash_ground3", "imp1"
+	};
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
 	public static final int MELEE_DASH_MOVE_TICKS = 10;
@@ -127,6 +142,11 @@ public final class TkGun {
 	public static final double MELEE_LATERAL_RADIUS = 3.0D;
 	/** Better Combat diamond axe attack damage. */
 	public static final float DIAMOND_AXE_DAMAGE = 9.0F;
+	/** Silent Storm accelerated jump: approximately six blocks up and twelve forward. */
+	public static final double SKILL_JUMP_HORIZONTAL_SPEED = 1.31D;
+	public static final double SKILL_JUMP_VERTICAL_SPEED = 1.11D;
+	/** Safety lifetime; normal landing ends the state earlier. */
+	public static final int SKILL_JUMP_MAX_TICKS = 40;
 
 	public static String meleeAnimation(int step) {
 		return "ATK_" + Math.max(1, Math.min(4, step));

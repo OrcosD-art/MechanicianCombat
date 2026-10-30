@@ -464,7 +464,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				|| e.state == TkGun.State.SLIDE
 				|| e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT
-				|| e.state == TkGun.State.OVER);
+				|| e.state == TkGun.State.OVER
+				|| e.state == TkGun.State.SKILL_JUMP);
 	}
 
 	// 2026-10-17：**第四十二/四十三轮的 chest 俯仰补偿整段撤销**（用户："撤销 42 与 43 轮俯仰角的修正"）。

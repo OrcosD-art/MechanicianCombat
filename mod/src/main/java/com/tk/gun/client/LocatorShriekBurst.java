@@ -15,6 +15,7 @@ import java.util.Map;
  * once, which leaves late particles behind when a moving gun or antenna is used.
  */
 public final class LocatorShriekBurst {
+	private static final int PARTICLE_COUNT = 10;
 	public enum Source {
 		GUN,
 		SUMMON_ANTENNA
@@ -68,11 +69,11 @@ public final class LocatorShriekBurst {
 			Burst burst = entry.getValue();
 			Entity entity = client.world.getEntityById(key.playerId());
 			long age = now - burst.startedAt;
-			if (entity == null || age > 50L) {
+			if (entity == null || age > (long) PARTICLE_COUNT * 5L) {
 				iterator.remove();
 				continue;
 			}
-			int targetCount = (int) Math.min(10L, age / 5L + 1L);
+			int targetCount = (int) Math.min(PARTICLE_COUNT, age / 5L + 1L);
 			while (burst.spawned < targetCount) {
 				Vec3d locator = key.source() == Source.GUN
 						? com.tk.gun.client.rig.BowgunRigRenderer.locatorPosition(key.playerId())

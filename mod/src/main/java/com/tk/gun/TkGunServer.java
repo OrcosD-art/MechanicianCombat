@@ -160,6 +160,9 @@ public class TkGunServer implements ModInitializer {
 		public boolean airborneIdle;
 		/** The landing has met the vanilla raw fall-damage condition. */
 		public boolean landingRollArmed;
+		/** Silent Storm skill launch bookkeeping. */
+		public long skillJumpStartedAt;
+		public boolean skillJumpAirborne;
 		/**
 		 * **翻滚后的快速蹲射宽限窗**（截止 tick）。
 		 *
@@ -326,6 +329,11 @@ public class TkGunServer implements ModInitializer {
 		public boolean meleeAtk4Empowered;
 		public boolean meleeHoldOver;
 		public int meleeHoldOverHits;
+		public int meleeHoldOverSoundIndex;
+		public double meleeHoldOverDirX;
+		public double meleeHoldOverDirZ;
+		public double meleeHoldOverFromX;
+		public double meleeHoldOverFromZ;
 		public boolean meleeDashAttack;
 		public boolean meleeDashMoving;
 		public boolean meleeReturning;
@@ -393,6 +401,7 @@ public class TkGunServer implements ModInitializer {
 				|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
 				|| st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER
 				|| st.state == TkGun.State.INSPECT || st.state == TkGun.State.MELEE
+				|| st.state == TkGun.State.SKILL_JUMP
 				|| now < st.aimLockUntil || now < st.dashUntil
 				|| now < st.overheatUntil;
 	}
@@ -743,7 +752,12 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.CombatBackpackStatusPayload.ID,
 				com.tk.gun.net.CombatBackpackStatusPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.CombatBackpackParticlePayload.ID,
+				com.tk.gun.net.CombatBackpackParticlePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(GunFirePayload.ID, GunFirePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
+				com.tk.gun.net.GunJumpPayload.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(GunFirePayload.ID, (payload, context) ->
 				context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
@@ -769,6 +783,9 @@ public class TkGunServer implements ModInitializer {
 						tryFire(p, false);
 					}
 				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunJumpPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						startSkillJump(context.player())));
 		// —— Z 键（按住 = 专注）/ F 键（装填）（2026-10-17 改）——
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunFocusPayload.ID,
 				com.tk.gun.net.GunFocusPayload.CODEC);
@@ -837,7 +854,8 @@ public class TkGunServer implements ModInitializer {
 					long now = p.getWorld().getTime();
 					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
 							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
-							|| st.state == TkGun.State.MELEE) {
+							|| st.state == TkGun.State.MELEE
+							|| st.state == TkGun.State.SKILL_JUMP) {
 						return;
 					}
 					if (now < st.reloadUntil) {
@@ -871,6 +889,11 @@ public class TkGunServer implements ModInitializer {
 					st.rollRequestZ = payload.directionZ();
 					long rollNow = p.getWorld().getTime();
 					if (st.rollFallbackPending) {
+						return;
+					}
+					if (st.state == TkGun.State.SKILL_JUMP) {
+						TkGun.LOGGER.info("[tkgun] skill jump active, this Alt press ignored player={}",
+								p.getName().getString());
 						return;
 					}
 					if (st.dodgeFocusQueued
@@ -1529,16 +1552,23 @@ public class TkGunServer implements ModInitializer {
 		state.summonZ = destination.z;
 		state.summonCastUntil = now + SUMMON_ANTENNA_CAST_TICKS;
 		state.summonReadyUntil = 0;
-		playSummonAntennaTrigger(player.getServerWorld(), origin);
+		playSummonAntennaTrigger(player, origin);
 	}
 
-	private static void playSummonAntennaTrigger(ServerWorld world,
+	private static void playSummonAntennaTrigger(ServerPlayerEntity player,
 			Vec3d origin) {
+		ServerWorld world = player.getServerWorld();
 		// Three simultaneous triggers form the stronger antenna activation cue.
 		for (int i = 0; i < 3; i++) {
 			world.playSound(null, origin.x, origin.y, origin.z,
 					SoundEvents.BLOCK_SCULK_SENSOR_CLICKING,
 					SoundCategory.BLOCKS, TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+		}
+		com.tk.gun.net.CombatBackpackParticlePayload payload =
+				new com.tk.gun.net.CombatBackpackParticlePayload(
+						player.getId(), origin.x, origin.y, origin.z);
+		for (ServerPlayerEntity viewer : world.getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
 		}
 	}
 
@@ -2414,6 +2444,11 @@ public class TkGunServer implements ModInitializer {
 		st.meleeAtk4Empowered = st.meleeCombo == 4 && empowered;
 		st.meleeHoldOver = false;
 		st.meleeHoldOverHits = 0;
+		st.meleeHoldOverSoundIndex = 0;
+		st.meleeHoldOverDirX = 0.0D;
+		st.meleeHoldOverDirZ = 0.0D;
+		st.meleeHoldOverFromX = 0.0D;
+		st.meleeHoldOverFromZ = 0.0D;
 		st.meleeDashAttack = false;
 		st.meleeDashMoving = false;
 		st.meleeReturning = false;
@@ -2447,6 +2482,12 @@ public class TkGunServer implements ModInitializer {
 		st.meleeAtk4Empowered = true;
 		st.meleeHoldOver = true;
 		st.meleeHoldOverHits = 0;
+		st.meleeHoldOverSoundIndex = 0;
+		double yaw = Math.toRadians(player.getYaw());
+		st.meleeHoldOverDirX = -Math.sin(yaw);
+		st.meleeHoldOverDirZ = Math.cos(yaw);
+		st.meleeHoldOverFromX = player.getX();
+		st.meleeHoldOverFromZ = player.getZ();
 		st.meleeDashAttack = false;
 		st.meleeDashMoving = false;
 		st.meleeReturning = false;
@@ -2455,6 +2496,12 @@ public class TkGunServer implements ModInitializer {
 		st.meleeDashResumeSprint = false;
 		st.lastMeleeAt = now;
 		st.deployed = false;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
 		setState(player.getServer(), player, TkGun.State.MELEE,
 				TkGun.MELEE_HOLD_OVER_TICKS);
 	}
@@ -2609,6 +2656,17 @@ public class TkGunServer implements ModInitializer {
 
 	private static void tickMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
 		long elapsed = now - st.stateStarted;
+		tickMeleeHoldOverMovement(player, st, elapsed);
+		while (st.meleeHoldOverSoundIndex < TkGun.MELEE_HOLD_OVER_SOUND_TICKS.length
+				&& elapsed >= TkGun.MELEE_HOLD_OVER_SOUND_TICKS[
+						st.meleeHoldOverSoundIndex]) {
+			String key = TkGun.MELEE_HOLD_OVER_SOUND_KEYS[
+					st.meleeHoldOverSoundIndex++];
+			TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(key);
+			if (sound != null) {
+				playSound(player, sound.id(), sound.volume(), sound.pitch());
+			}
+		}
 		while (st.meleeHoldOverHits < TkGun.MELEE_HOLD_OVER_HIT_TICKS.length
 				&& elapsed >= TkGun.MELEE_HOLD_OVER_HIT_TICKS[st.meleeHoldOverHits]) {
 			st.meleeHoldOverHits++;
@@ -2617,6 +2675,75 @@ public class TkGunServer implements ModInitializer {
 			// next authored hit cannot fire during the same server tick.
 			elapsed = now - st.stateStarted;
 		}
+	}
+
+	private static void tickMeleeHoldOverMovement(ServerPlayerEntity player,
+			PState st, long elapsed) {
+		double dx = player.getX() - st.meleeHoldOverFromX;
+		double dz = player.getZ() - st.meleeHoldOverFromZ;
+		double travelled = dx * st.meleeHoldOverDirX + dz * st.meleeHoldOverDirZ;
+
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		if (elapsed >= TkGun.MELEE_HOLD_OVER_INERTIA_END_TICK) {
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			return;
+		}
+
+		double targetDistance;
+		if (elapsed < TkGun.MELEE_HOLD_OVER_MOVE_END_TICK) {
+			long steps = TkGun.MELEE_HOLD_OVER_MOVE_END_TICK;
+			double progress = (elapsed + 1.0D) / steps;
+			targetDistance = holdOverSmoothDistance(progress,
+					0.0D, TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE, steps,
+					0.0D, TkGun.MELEE_HOLD_OVER_PHASE_VELOCITY);
+		} else {
+			long steps = TkGun.MELEE_HOLD_OVER_INERTIA_END_TICK
+					- TkGun.MELEE_HOLD_OVER_MOVE_END_TICK;
+			double progress = (elapsed
+					- TkGun.MELEE_HOLD_OVER_MOVE_END_TICK + 1.0D) / steps;
+			targetDistance = holdOverSmoothDistance(progress,
+					TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE,
+					TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE
+							+ TkGun.MELEE_HOLD_OVER_INERTIA_DISTANCE,
+					steps, TkGun.MELEE_HOLD_OVER_PHASE_VELOCITY, 0.0D);
+		}
+		double speed = Math.max(0.0D, targetDistance - travelled)
+				/ holdOverMovementFriction(player);
+		player.setVelocity(st.meleeHoldOverDirX * speed, velocity.y,
+				st.meleeHoldOverDirZ * speed);
+		player.velocityModified = true;
+	}
+
+	/** Cubic Hermite trajectory with matching position and velocity endpoints. */
+	private static double holdOverSmoothDistance(double progress,
+			double startDistance, double endDistance, long steps,
+			double startVelocity, double endVelocity) {
+		double u = Math.max(0.0D, Math.min(1.0D, progress));
+		double u2 = u * u;
+		double u3 = u2 * u;
+		double h00 = 2.0D * u3 - 3.0D * u2 + 1.0D;
+		double h10 = u3 - 2.0D * u2 + u;
+		double h01 = -2.0D * u3 + 3.0D * u2;
+		double h11 = u3 - u2;
+		return h00 * startDistance
+				+ h10 * steps * startVelocity
+				+ h01 * endDistance
+				+ h11 * steps * endVelocity;
+	}
+
+	/** Match the horizontal multiplier applied by LivingEntity#travel next tick. */
+	private static double holdOverMovementFriction(ServerPlayerEntity player) {
+		double friction = 0.91D;
+		if (player.isOnGround()) {
+			friction = player.getSteppingBlockState().getBlock()
+					.getSlipperiness() * 0.91D;
+		}
+		return Math.max(0.05D, friction);
 	}
 
 	private static boolean finishDashMelee(ServerPlayerEntity player, PState st) {
@@ -2693,8 +2820,10 @@ public class TkGunServer implements ModInitializer {
 			boolean cameraShake = step == 3 && !st.meleeHoldOver
 					|| st.meleeHoldOver
 					&& st.meleeHoldOverHits == TkGun.MELEE_HOLD_OVER_HIT_TICKS.length;
+			boolean lockAttacker = !st.meleeInputHeld && !st.meleeHoldOver;
 			MeleeImpactService.apply(player, st, hitTargets, forward,
-					MeleeImpactService.ticksForStep(step), critical, true, cameraShake);
+					MeleeImpactService.ticksForStep(step), critical, lockAttacker,
+					cameraShake);
 		}
 		if (step != 2) {
 			player.getServerWorld().spawnParticles(
@@ -3564,6 +3693,16 @@ public class TkGunServer implements ModInitializer {
 			// Play at the shooter so long-range hits always produce a confirmation.
 			world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_HIT,
 					SoundCategory.MASTER, 1.0F, 2.0F);
+			Identifier effectSound = sculk ? TkGun.SND_SONIC_BOOM
+					: (explosive ? TkGun.SND_EXPLOSION1
+					: (cutting ? TkGun.SND_CUTTING1 : null));
+			if (effectSound != null) {
+				world.playSound(null,
+						net.minecraft.util.math.BlockPos.ofFloored(
+								hitPos.x, hitPos.y, hitPos.z),
+						net.minecraft.sound.SoundEvent.of(effectSound),
+						SoundCategory.MASTER, 1.0F, 1.0F);
+			}
 		} else {
 			Identifier impactSound = sculk ? TkGun.SND_SONIC_BOOM
 					: (explosive ? TkGun.SND_EXPLOSION1
@@ -3940,6 +4079,89 @@ public class TkGunServer implements ModInitializer {
 		st.rollFallbackPending = false;
 		st.rollFallbackAt = 0;
 		st.rollInputAccepted = false;
+	}
+
+	/** A successful Silent Storm landing refreshes the next manual dodge. */
+	private static void completeDodgeCooldownAfterSkillJump(PState st) {
+		st.fallbackRollReadyAt = 0;
+		st.dodgeLockUntil = 0;
+		st.dodgeBlockUntil = 0;
+		st.slideCooldownUntil = 0;
+		st.lastDodgeAt = 0;
+		st.lastDodgeKind = 0;
+		st.rollFallbackPending = false;
+		st.rollFallbackAt = 0;
+		st.rollInputAccepted = false;
+		st.dodgeFocusQueued = false;
+		st.dodgeFocusQueuedAt = 0;
+	}
+
+	/**
+	 * Silent Storm consumes its active acceleration for a fixed-height,
+	 * fixed-distance leap. All eligibility checks are server-authoritative.
+	 */
+	private static void startSkillJump(ServerPlayerEntity player) {
+		if (player.getServer() == null || !player.isAlive()
+				|| !TkGun.holdingGun(player) || !player.isOnGround()) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		boolean accelerated = now < st.dashUntil || now < st.speedBoostUntil;
+		if (!accelerated || (st.state != TkGun.State.IDLE
+				&& st.state != TkGun.State.FIRE
+				&& st.state != TkGun.State.RUN)) {
+			return;
+		}
+		if (!TkGun.definition(player).id()
+				.equals(TkGun.id("abyssal_ancient_cannon"))) {
+			return;
+		}
+
+		clearPendingShots(player, st, "静谧风暴跳跃技能");
+		player.stopUsingItem();
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.dashSyncActive = false;
+		st.skillJumpStartedAt = now;
+		st.skillJumpAirborne = false;
+		GunStateMachine.clearDash(player);
+
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		player.setVelocity(
+				forward.x * TkGun.SKILL_JUMP_HORIZONTAL_SPEED,
+				TkGun.SKILL_JUMP_VERTICAL_SPEED,
+				forward.z * TkGun.SKILL_JUMP_HORIZONTAL_SPEED);
+		player.velocityModified = true;
+		// Use air friction for the launch tick instead of ground friction.
+		player.setOnGround(false);
+		player.fallDistance = 0.0F;
+
+		setState(player.getServer(), player, TkGun.State.SKILL_JUMP,
+				TkGun.SKILL_JUMP_MAX_TICKS);
+		ServerWorld world = player.getServerWorld();
+		world.spawnParticles(TkGunParticles.SONIC_BOOM,
+				player.getX(), player.getY() + 0.05D, player.getZ(),
+				1, 0.0D, 0.0D, 0.0D, 0.0D);
+		world.playSound(null,
+				net.minecraft.util.math.BlockPos.ofFloored(
+						player.getX(), player.getY(), player.getZ()),
+				net.minecraft.sound.SoundEvent.of(TkGun.SND_SONIC_BOOM),
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+		TkGun.LOGGER.info("[tkgun] Silent Storm skill jump: vertical={}, horizontal={}, "
+						+ "dir=({}, {}) player={}",
+				TkGun.SKILL_JUMP_VERTICAL_SPEED,
+				TkGun.SKILL_JUMP_HORIZONTAL_SPEED,
+				round3(forward.x), round3(forward.z), player.getName().getString());
 	}
 
 	public static boolean startFocus(ServerPlayerEntity player) {
@@ -4501,11 +4723,34 @@ public class TkGunServer implements ModInitializer {
 			tickSlide(player, st, now);
 			tickSlideReady(player, st, now);
 			tickAimSlow(player, st);
+			tickSkillJump(player, st, now);
 			tickLongAirborne(player, st, now);
 		}
 	}
 
-	/** 推进已经由 Alt 循环启动的滑铲；不再把潜行键（Z）本身当成滑铲触发键。 */
+	/** Maintains the Silent Storm leap until the first landing after takeoff. */
+	private static void tickSkillJump(ServerPlayerEntity player, PState st, long now) {
+		if (st.state != TkGun.State.SKILL_JUMP) {
+			return;
+		}
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		if (!player.isOnGround()) {
+			st.skillJumpAirborne = true;
+		} else if (st.skillJumpAirborne
+				|| now >= st.skillJumpStartedAt + 2L) {
+			completeDodgeCooldownAfterSkillJump(st);
+			st.stateUntil = now;
+			TkGun.LOGGER.info("[tkgun] Silent Storm landing -> dodge cooldown complete player={}",
+					player.getName().getString());
+		}
+		if (now >= st.skillJumpStartedAt + TkGun.SKILL_JUMP_MAX_TICKS) {
+			st.stateUntil = now;
+		}
+	}
+
+	/** Handles ordinary long-airborne idle and the landing-roll fallback. */
 	private static void tickLongAirborne(ServerPlayerEntity player, PState st, long now) {
 		if (player.isOnGround()) {
 			boolean landingRoll = player.isAlive() && TkGun.holdingGun(player)
@@ -4562,7 +4807,8 @@ public class TkGunServer implements ModInitializer {
 		return state == TkGun.State.ROLL || state == TkGun.State.ROLL_TO_IDLE
 				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY
 				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE
-				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER;
+				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER
+				|| state == TkGun.State.SKILL_JUMP;
 	}
 
 	private static void startAirborneLandingRoll(ServerPlayerEntity player, PState st, long now) {

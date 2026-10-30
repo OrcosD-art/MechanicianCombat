@@ -5,6 +5,7 @@ import com.tk.gun.CombatRollHook;
 import com.tk.gun.TkGunParticles;
 import com.tk.gun.net.GunFocusPayload;
 import com.tk.gun.net.GunFirePayload;
+import com.tk.gun.net.GunJumpPayload;
 import com.tk.gun.net.GunReloadPayload;
 import com.tk.gun.net.GunRollPayload;
 import com.tk.gun.net.GunStatePayload;
@@ -48,6 +49,7 @@ public class TkGunClient implements ClientModInitializer {
 	private static int attackHeldTicks = 0;
 	/** Z（或改键后的那个键）上一 tick 是否按着 —— 自己做边沿检测，不依赖原版 KeyBinding。 */
 	private static boolean focusKeyDown = false;
+	private static boolean jumpKeyDown = false;
 	/** 连发补包是否已经打过日志（一次按住只打一行，别刷屏）。 */
 	private static boolean autoFireLogged = false;
 	/** F 键上一 tick 是否按着（自己做边沿检测）。 */
@@ -753,6 +755,14 @@ public class TkGunClient implements ClientModInitializer {
 								payload.phase(),
 								payload.charges(),
 								payload.remainingTicks())));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.CombatBackpackParticlePayload.ID,
+				(payload, context) -> context.client().execute(() ->
+						LocatorShriekBurst.start(
+								payload.playerId(),
+								LocatorShriekBurst.Source.SUMMON_ANTENNA,
+								new net.minecraft.util.math.Vec3d(
+										payload.x(), payload.y(), payload.z()))));
 
 
 		com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
@@ -787,6 +797,7 @@ public class TkGunClient implements ClientModInitializer {
 		if (client.world == null || client.player == null) {
 			thirdPersonForced = false;
 			heldGunLastTick = false;
+			jumpKeyDown = false;
 			MOVES.clear();
 			backpackActionDown = false;
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
@@ -796,6 +807,16 @@ public class TkGunClient implements ClientModInitializer {
 		// state-specific input so those input locks cannot consume or suppress it.
 		handleBackpackActionKey(client);
 		boolean holdingGunNow = TkGun.holdingGun(client.player);
+		boolean jumpDown = client.currentScreen == null
+				&& client.options.jumpKey.isPressed();
+		boolean silentStorm = holdingGunNow
+				&& TkGun.definition(client.player).id()
+						.equals(TkGun.id("abyssal_ancient_cannon"));
+		if (jumpDown && !jumpKeyDown && silentStorm) {
+			ClientPlayNetworking.send(new GunJumpPayload());
+			TkGun.LOGGER.info("[tkgun] jump key -> request Silent Storm skill jump");
+		}
+		jumpKeyDown = jumpDown;
 		if (holdingGunNow && client.player.isSneaking()) {
 			client.player.setSneaking(false);
 		}

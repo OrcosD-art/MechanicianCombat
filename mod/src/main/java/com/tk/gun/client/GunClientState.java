@@ -169,6 +169,13 @@ public final class GunClientState {
 				? ticks + payload.heatLockTicks() : 0;
 		e.nativeRollReadyAt = !e.focus && payload.rollCooldownTicks() > 0
 				? ticks + payload.rollCooldownTicks() : 0;
+		if (newState == TkGun.State.SKILL_JUMP
+				|| previousState == TkGun.State.SKILL_JUMP
+						&& newState == TkGun.State.IDLE) {
+			e.localDodgeLockUntil = 0;
+			e.nativeRollReadyAt = 0;
+			e.nextDodgeSlide = false;
+		}
 		e.predictedRoll = false;
 		e.predictedRollTicks = 0;
 		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE) {
@@ -219,7 +226,8 @@ public final class GunClientState {
 		if (e.state == TkGun.State.AIM || e.state == TkGun.State.AIM_FAST
 				|| e.state == TkGun.State.AIM_ROLL || e.state == TkGun.State.AIM_SLIDE
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
-				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
+				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
+				|| e.state == TkGun.State.SKILL_JUMP) {
 			return false;
 		}
 		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
@@ -244,7 +252,8 @@ public final class GunClientState {
 			return;
 		}
 		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
-				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
+				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
+				|| e.state == TkGun.State.SKILL_JUMP) {
 			return;
 		}
 		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
@@ -375,6 +384,8 @@ public final class GunClientState {
 			return "idle";
 		}
 		switch (e.state) {
+			case SKILL_JUMP:
+				return skillJumpAnimation(entityId);
 			case IDLE:
 				return "idle";                       // 待机（作者新做的 idle）
 			case AIM:
@@ -427,6 +438,17 @@ public final class GunClientState {
 	 * {@link TkGun#AIM_TICKS_SLIDE} 是同一套数：普通右键慢（1.2s）、滑铲后/蹲着快（0.5s）、
 	 * 滑铲里抢架枪最快（0.35s）。
 	 */
+	/** The authored jump clip covers ascent; fall covers the descent. */
+	public static String skillJumpAnimation(int entityId) {
+		net.minecraft.client.MinecraftClient client =
+				net.minecraft.client.MinecraftClient.getInstance();
+		if (client.world == null) {
+			return "jump";
+		}
+		net.minecraft.entity.Entity entity = client.world.getEntityById(entityId);
+		return entity != null && entity.getVelocity().y > 0.01D ? "jump" : "fall";
+	}
+
 	public static double speedFor(int entityId) {
 		Entry e = ENTRIES.get(entityId);
 		if (e == null) {
@@ -495,6 +517,7 @@ public final class GunClientState {
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT || e.state == TkGun.State.OVER
 				|| e.state == TkGun.State.INSPECT || e.state == TkGun.State.MELEE
+				|| e.state == TkGun.State.SKILL_JUMP
 				|| ticks < e.aimLockUntil;
 	}
 
@@ -570,7 +593,7 @@ public final class GunClientState {
 		}
 		return switch (e.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
-					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE -> true;
+					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE, SKILL_JUMP -> true;
 			case MELEE -> !dashMeleeRecovery(e);
 			default -> false;
 		};

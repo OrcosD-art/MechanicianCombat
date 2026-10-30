@@ -141,7 +141,6 @@ public final class CombatBackpackClientState {
 	public static void applyStatus(int ownerEntityId, int targetEntityId, int phase,
 								   int charges, int remainingTicks) {
 		Entry entry = ENTRIES.computeIfAbsent(ownerEntityId, ignored -> new Entry());
-		int previousPhase = entry.phase;
 		entry.targetEntityId = Math.max(-1, targetEntityId);
 		entry.phase = Math.max(CombatBackpackStatusPayload.PHASE_READY,
 				Math.min(CombatBackpackStatusPayload.PHASE_SUMMON_CAST, phase));
@@ -151,14 +150,6 @@ public final class CombatBackpackClientState {
 				instanceof net.minecraft.entity.LivingEntity owner) {
 			entry.launcherType = BackpackUpgradeData.launcherType(
 					CombatBackpackItem.equippedStack(owner));
-			if (entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_CAST
-					&& previousPhase != CombatBackpackStatusPayload.PHASE_SUMMON_CAST
-					&& entry.launcherType
-							== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
-				LocatorShriekBurst.start(ownerEntityId,
-						LocatorShriekBurst.Source.SUMMON_ANTENNA,
-						CombatBackpackGeoRenderer.summonLocatorPosition(ownerEntityId));
-			}
 		}
 		entry.charges = Math.max(0, Math.min(MAX_CHARGES, charges));
 		entry.remainingTicks = Math.max(0, remainingTicks);

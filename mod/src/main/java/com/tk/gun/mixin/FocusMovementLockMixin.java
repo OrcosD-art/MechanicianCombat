@@ -25,8 +25,15 @@ public abstract class FocusMovementLockMixin {
 		boolean dashMeleeHold = entry != null && entry.active()
 				&& entry.dashMeleeActive;
 		boolean atk3Lock = entry != null && entry.state == TkGun.State.MELEE
-				&& entry.shotIndex == 3 && !entry.meleeReturning;
-		if (!focusLock && !dashMeleeHold && !atk3Lock) {
+				&& entry.shotIndex == 3 && !entry.meleeReturning
+				&& !entry.meleeHoldOver
+				&& entry.elapsed < TkGun.MELEE_ATK3_MAIN_END_TICK;
+		boolean holdOverLock = entry != null && entry.state == TkGun.State.MELEE
+				&& entry.meleeHoldOver && !entry.meleeReturning;
+		boolean skillJumpLock = entry != null
+				&& entry.state == TkGun.State.SKILL_JUMP;
+		if (!focusLock && !dashMeleeHold && !atk3Lock && !holdOverLock
+				&& !skillJumpLock) {
 			return;
 		}
 		KeyboardInput self = (KeyboardInput) (Object) this;

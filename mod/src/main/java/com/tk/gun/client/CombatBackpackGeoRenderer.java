@@ -218,7 +218,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
 		Quaternionf aimRotation = null;
-		if (currentEntity != null && launcherInstalled
+		if (currentEntity != null && launcherInstalled && !summonLauncher
 				&& CombatBackpackAnimation.phase(currentEntity.getId())
 				== CombatBackpackAnimation.Phase.AIM) {
 			if (autoLauncher && "C3".equals(bone.getName())) {
@@ -236,7 +236,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		}
 		switch (bone.getName()) {
 			case "core" -> bone.setHidden(!coreInstalled);
-			case "C1", "C2", "C3" -> bone.setHidden(!launcherInstalled);
+			case "C1", "C2", "C3" ->
+					bone.setHidden(!launcherInstalled || autoLauncher || summonLauncher);
 			case "auto_C1" -> bone.setHidden(!autoLauncher);
 			case "auto_ejector", "auto_box", "auto_sight", "auto_barrel" ->
 					bone.setHidden(!autoLauncher);
