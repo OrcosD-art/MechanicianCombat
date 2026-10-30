@@ -64,7 +64,9 @@ public final class GunStateMachine {
 	public static boolean canFire(TkGun.State state) {
 		return switch (state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
-					MELEE, SKILL_JUMP -> false;
+					MELEE, SKILL_JUMP, FORTRESS_SKILL_LOAD,
+					FORTRESS_SKILL_GATHER, FORTRESS_SKILL_READY_HIT,
+					FORTRESS_SKILL_HIT -> false;
 			default -> true;          // IDLE / AIM* / FIRE / INSPECT
 		};
 	}

@@ -77,6 +77,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	private static final Set<String> SHELL_BONES = Set.of(
 			SHELL_PARENT_BONE,
 			"shell", "shell2", "shell3", "shell4", "shell5", "shell6", "shell7");
+	private static final Set<String> SKILL_PART_BONES =
+			Set.of("skill_1", "skill_2");
 	/**
 	 * **只在真开火那一发才显形的"特效平面"**：枪口焰（fire1..4）、速度线（dash1..4）。
 	 * 举枪（`stand_shooting` 的"持枪停帧"）那一遍要把它们压掉，否则等于空放一发（见 renderRecursively）。
@@ -179,6 +181,14 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		boolean upper = BowgunRig.upperLayerActive(poseEntity);
 		com.tk.gun.client.GunClientState.Entry upperState =
 				poseEntity == null ? null : com.tk.gun.client.GunClientState.get(poseEntity.getId());
+		boolean fortressSkillVisual = upperState != null
+				&& (upperState.state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| upperState.state == TkGun.State.FORTRESS_SKILL_GATHER
+						|| upperState.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+						|| upperState.state == TkGun.State.FORTRESS_SKILL_HIT);
+		if (SKILL_PART_BONES.contains(name) && !fortressSkillVisual) {
+			hide(bone);
+		}
 		boolean bodyLocked = upper && poseEntity != null
 				&& !com.tk.gun.client.GunClientState.focusish(poseEntity.getId())
 				&& !isFullBodyState(upperState)
@@ -465,7 +475,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				|| e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT
 				|| e.state == TkGun.State.OVER
-				|| e.state == TkGun.State.SKILL_JUMP);
+				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| e.state == TkGun.State.FORTRESS_SKILL_HIT);
 	}
 
 	// 2026-10-17：**第四十二/四十三轮的 chest 俯仰补偿整段撤销**（用户："撤销 42 与 43 轮俯仰角的修正"）。

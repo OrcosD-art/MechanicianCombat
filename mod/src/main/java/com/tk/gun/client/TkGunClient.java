@@ -630,7 +630,15 @@ public class TkGunClient implements ClientModInitializer {
 		double dy = muzzleDy;
 		double dz = muzzleDz;
 		net.minecraft.util.math.Vec3d aimDir = GunCamera.shotDirection(client);
-		if (aimDir != null) {
+		GunClientState.Entry skillState = GunClientState.get(client.player.getId());
+		boolean fortressGather = skillState != null
+				&& skillState.state == TkGun.State.FORTRESS_SKILL_GATHER;
+		if (fortressGather) {
+			double yaw = Math.toRadians(GunCamera.lookYaw());
+			dx = -Math.sin(yaw);
+			dy = 0.0D;
+			dz = Math.cos(yaw);
+		} else if (aimDir != null) {
 			dx = aimDir.x;
 			dy = aimDir.y;
 			dz = aimDir.z;
@@ -812,9 +820,11 @@ public class TkGunClient implements ClientModInitializer {
 		boolean silentStorm = holdingGunNow
 				&& TkGun.definition(client.player).id()
 						.equals(TkGun.id("abyssal_ancient_cannon"));
-		if (jumpDown && !jumpKeyDown && silentStorm) {
+		boolean fortress = holdingGunNow
+				&& TkGun.definition(client.player).id().equals(TkGun.id("bowgun"));
+		if (jumpDown && !jumpKeyDown && (silentStorm || fortress)) {
 			ClientPlayNetworking.send(new GunJumpPayload());
-			TkGun.LOGGER.info("[tkgun] jump key -> request Silent Storm skill jump");
+			TkGun.LOGGER.info("[tkgun] jump key -> request held gun skill");
 		}
 		jumpKeyDown = jumpDown;
 		if (holdingGunNow && client.player.isSneaking()) {

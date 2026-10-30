@@ -19,6 +19,9 @@ import net.minecraft.particle.SimpleParticleType;
 public class EnergyParticle extends SpriteBillboardParticle {
 	private final SpriteProvider provider;
 	private final boolean fade;
+	private int attachedPlayerId = -1;
+	private String attachedLocator = "aim";
+	private static volatile SpriteProvider activeProvider;
 
 	protected EnergyParticle(ClientWorld world, double x, double y, double z,
 							 SpriteProvider provider, int maxAge, float scale, boolean fade) {
@@ -37,6 +40,17 @@ public class EnergyParticle extends SpriteBillboardParticle {
 
 	@Override
 	public void tick() {
+		if (attachedPlayerId >= 0) {
+			net.minecraft.util.math.Vec3d locator =
+					"aim".equals(attachedLocator)
+							? com.tk.gun.client.rig.BowgunRigRenderer
+									.aimPosition(attachedPlayerId)
+							: com.tk.gun.client.rig.BowgunRigRenderer
+									.locatorPosition(attachedPlayerId);
+			if (locator != null) {
+				setPos(locator.x, locator.y, locator.z);
+			}
+		}
 		super.tick();
 		this.setSpriteForAge(this.provider);      // 逐帧翻页（寿命归一化）
 		if (this.fade) {
@@ -57,12 +71,35 @@ public class EnergyParticle extends SpriteBillboardParticle {
 
 	/** 枪口：短促一团能量。 */
 	public record MuzzleFactory(SpriteProvider provider) implements ParticleFactory<SimpleParticleType> {
+		public MuzzleFactory {
+			activeProvider = provider;
+		}
+
 		@Override
 		public EnergyParticle createParticle(SimpleParticleType type, ClientWorld world,
 											 double x, double y, double z,
 											 double vx, double vy, double vz) {
 			return new EnergyParticle(world, x, y, z, this.provider, 7, 1.1F, false);
 		}
+	}
+
+	/** Spawn a convergence effect that follows the rendered gun locator. */
+	public static boolean spawnAttached(net.minecraft.entity.Entity player,
+										net.minecraft.util.math.Vec3d position,
+										String locator) {
+		net.minecraft.client.MinecraftClient client =
+				net.minecraft.client.MinecraftClient.getInstance();
+		SpriteProvider provider = activeProvider;
+		if (player == null || position == null || client.world == null
+				|| provider == null) {
+			return false;
+		}
+		EnergyParticle particle = new EnergyParticle(client.world,
+				position.x, position.y, position.z, provider, 10, 1.25F, true);
+		particle.attachedPlayerId = player.getId();
+		particle.attachedLocator = locator == null ? "locator" : locator;
+		client.particleManager.addParticle(particle);
+		return true;
 	}
 
 	/** 命中：大一圈、带淡出。 */

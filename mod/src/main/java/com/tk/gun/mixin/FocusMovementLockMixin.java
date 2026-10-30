@@ -32,12 +32,21 @@ public abstract class FocusMovementLockMixin {
 				&& entry.meleeHoldOver && !entry.meleeReturning;
 		boolean skillJumpLock = entry != null
 				&& entry.state == TkGun.State.SKILL_JUMP;
-		if (!focusLock && !dashMeleeHold && !atk3Lock && !holdOverLock
-				&& !skillJumpLock) {
+		boolean skillLoadLock = entry != null
+				&& (entry.state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| entry.state == TkGun.State.FORTRESS_SKILL_GATHER);
+		boolean skillHitLock = entry != null
+				&& entry.state == TkGun.State.FORTRESS_SKILL_HIT;
+		boolean skillReadyHitLock = entry != null
+				&& entry.state == TkGun.State.FORTRESS_SKILL_READY_HIT;
+		boolean movementLock = focusLock || dashMeleeHold || atk3Lock
+				|| holdOverLock || skillJumpLock || skillHitLock
+				|| skillReadyHitLock;
+		if (!movementLock && !skillLoadLock) {
 			return;
 		}
 		KeyboardInput self = (KeyboardInput) (Object) this;
-		if (!TkGunClient.isRollTriggerTick(client)) {
+		if (movementLock && !TkGunClient.isRollTriggerTick(client)) {
 			self.movementForward = 0.0F;
 			self.movementSideways = 0.0F;
 		}

@@ -111,6 +111,30 @@
                                       }
                                   ]
                    },
+    "smash_air2":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:smash_air2",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_air3":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "tkgun:smash_air3",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_ground_heavy":  {
+                               "sounds":  [
+                                              {
+                                                  "name":  "tkgun:smash_ground_heavy",
+                                                  "stream":  false
+                                              }
+                                          ]
+                           },
     "smash_ground1":  {
                           "sounds":  [
                                          {
@@ -151,6 +175,14 @@
                                              }
                                          ]
                           },
+    "current":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "tkgun:current",
+                                       "stream":  false
+                                   }
+                               ]
+                },
     "anchor_slam1":  {
                          "sounds":  [
                                         {

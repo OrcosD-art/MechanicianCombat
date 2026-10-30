@@ -36,9 +36,7 @@ import java.util.Set;
 public final class BowgunRig implements GeoReplacedEntity {
 	public static final BowgunRig INSTANCE = new BowgunRig();
 	/** 无操作后继续保留腰射上半身姿势的 tick 数（3 秒）。 */
-	private static final long UPPER_IDLE_DELAY_TICKS = 60;
 	/** playerId → 最近一次持枪/移动/开火操作的 world tick。 */
-	private static final Map<Integer, Long> LAST_UPPER_OPERATION = new HashMap<>();
 
 	private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
@@ -120,6 +118,33 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (effect == null || player == null || player.getWorld() == null) {
 			return;
 		}
+		if ("energy_converge".equals(effect)) {
+			String locatorName = event.getKeyframeData().getLocator();
+			String attachedLocator = locatorName == null ? "aim" : locatorName;
+			net.minecraft.util.math.Vec3d locator = "aim".equals(attachedLocator)
+					? BowgunRigRenderer.aimPosition(player.getId())
+					: BowgunRigRenderer.locatorPosition(player.getId());
+			if (locator != null) {
+				if (!com.tk.gun.client.EnergyParticle.spawnAttached(
+						player, locator, attachedLocator)) {
+					player.getWorld().addParticle(TkGunParticles.ENERGY_CONVERGE,
+							locator.x, locator.y, locator.z,
+							0.0D, 0.0D, 0.0D);
+				}
+			}
+			return;
+		}
+		if ("energy_xplo".equals(effect)) {
+			String locatorName = event.getKeyframeData().getLocator();
+			net.minecraft.util.math.Vec3d locator = "aim".equals(locatorName)
+					? BowgunRigRenderer.aimPosition(player.getId())
+					: BowgunRigRenderer.locatorPosition(player.getId());
+			if (locator != null) {
+				player.getWorld().addParticle(TkGunParticles.ENERGY_XPLO,
+						locator.x, locator.y, locator.z, 0.0D, 0.0D, 0.0D);
+			}
+			return;
+		}
 		if ("thunder".equals(effect)) {
 			String locatorName = event.getKeyframeData().getLocator();
 			net.minecraft.util.math.Vec3d locator = "aim".equals(locatorName)
@@ -195,6 +220,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (reportFocusSoundKeyframe(key)) {
 			return;
 		}
+		if (SKILL_SOUND_ANIMS.contains(currentAnimationName)) {
+			reportServerSoundKeyframe(key);
+			return;
+		}
 		switch (key) {
 			case "roll" -> TkGunClient.sendSoundKeyframe(key);
 			case "steam" -> TkGunClient.sendSoundKeyframe(key);
@@ -210,8 +239,20 @@ public final class BowgunRig implements GeoReplacedEntity {
 	private static void onUpperSoundKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.SoundKeyframeEvent<BowgunRig> event) {
 		String key = event.getKeyframeData().getSound();
-		if (key == null || upperName == null
-				|| !MELEE_SOUND_ANIMS.contains(upperName)) {
+		if (key == null || upperName == null) {
+			return;
+		}
+		String upperBase = upperName.endsWith("_upper")
+				? upperName.substring(0, upperName.length() - "_upper".length())
+				: upperName;
+		if (SKILL_SOUND_ANIMS.contains(upperBase)) {
+			if (CURRENT_PLAYER == net.minecraft.client.MinecraftClient
+					.getInstance().player) {
+				reportServerSoundKeyframe(key);
+			}
+			return;
+		}
+		if (!MELEE_SOUND_ANIMS.contains(upperName)) {
 			return;
 		}
 		// ATK_hold_over audio is driven by the authoritative server timeline.
@@ -225,7 +266,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	private static final Set<String> MELEE_SOUND_ANIMS =
-			Set.of("ATK_1", "ATK_2", "ATK_3", "ATK_4", "ATK_hold_over");
+			Set.of("ATK_1", "ATK_2", "ATK_3", "ATK_3_hold", "ATK_4", "ATK_hold_over");
+	private static final Set<String> SKILL_SOUND_ANIMS =
+			Set.of("skill_load", "gather", "ready_hit", "hit");
 
 	/** **专注那几段**（"照模型引用的音频放"的动画名，见 {@link #reportFocusSoundKeyframe}）。 */
 	private static final Set<String> FOCUS_SOUND_ANIMS = Set.of(
@@ -592,6 +635,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (e.airborneIdle) {
 			return null;
 		}
+		if (e.active() && isFortressUpperLayeredSkillState(e.state)) {
+			return fortressSkillUpperAnimation(e.state);
+		}
 		boolean firing = e.active() && e.state == TkGun.State.FIRE;
 		if (e.state == TkGun.State.MELEE) {
 			if (e.shotIndex == 2 && e.total == TkGun.MELEE_DASH_TOTAL_TICKS) {
@@ -636,7 +682,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// `stand_shooting` 又会被当成"新一段"从头播 —— 看起来就是重复播放上一次开火动画。
 		// 因此 FIRE 不依赖右键是否仍按着，等状态自然结束再切 `stand_shooting_hold`/STOP。
 		if (firing && !GunClientState.focusish(entity.getId())) {
-			LAST_UPPER_OPERATION.put(entity.getId(), entity.getWorld().getTime());
 			return "stand_shooting";
 		}
 		if (GunClientState.focusish(entity.getId())) {
@@ -656,7 +701,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (e.active()) {
 			switch (e.state) {
 				case OVERHEAT, ROLL, ROLL_TO_IDLE,
-						SLIDE, SLIDE_READY, OVER, INSPECT, SKILL_JUMP -> {
+						SLIDE, SLIDE_READY, OVER, INSPECT, SKILL_JUMP,
+						FORTRESS_SKILL_LOAD, FORTRESS_SKILL_GATHER,
+						FORTRESS_SKILL_READY_HIT, FORTRESS_SKILL_HIT -> {
 					return null;
 				}
 				default -> { }
@@ -678,15 +725,12 @@ public final class BowgunRig implements GeoReplacedEntity {
 		//    `total`，服务端那一 tick 还是 RELOAD）。之前用 `active()` 卡着，那一拍上层会掉到
 		//    `stand_shooting_hold` —— 表现就是"换弹动画断在半截"。状态包一到就会改写 state，所以只认它。
 		if (e.state == TkGun.State.RELOAD) {
-			LAST_UPPER_OPERATION.put(entity.getId(), entity.getWorld().getTime());
 			return "reload_upper";
 		}
 		boolean holding = holdingGunUp(entity);
 		String moveAnim = TkGunClient.walkAnimation(entity.getId());
 		boolean moving = TkGunClient.isMoving(entity.getId());
-		boolean veritas = TkGun.definition((net.minecraft.entity.player.PlayerEntity) entity)
-				.id().equals(TkGun.id("veritas_et_justitia"));
-		if (veritas && !holding && moving && moveAnim != null
+		if (!holding && moving && moveAnim != null
 				&& moveAnim.startsWith("walk_")) {
 			return "idle_upper";
 		}
@@ -694,32 +738,32 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if ("run".equals(moveAnim) || ((net.minecraft.entity.player.PlayerEntity) entity).isSprinting()) {
 			return null;
 		}
-		long now = entity.getWorld().getTime();
-		if (holding || moving) {
-			LAST_UPPER_OPERATION.put(entity.getId(), now);
-		}
 		if (holding) {
 			// 腰射：开火那一遍整段重播；只是举着枪 → 端枪静姿（别空放一发后坐）
 			return firing ? "stand_shooting" : "stand_shooting_hold";
 		}
-		if (veritas) {
-			// Veritas must return to the full idle/walk/run upper-body clip
-			// immediately after right-click aiming is released.
-			return null;
-		}
 		// 停止操作后先保持上半身端枪姿势 5 秒，再让完整 idle 的上半身动作接管。
-		long last = LAST_UPPER_OPERATION.getOrDefault(entity.getId(), Long.MIN_VALUE);
-		if (last >= 0 && now - last <= UPPER_IDLE_DELAY_TICKS) {
-			if (TkGun.definition((net.minecraft.entity.player.PlayerEntity) entity).id()
-					.equals(TkGun.id("veritas_et_justitia"))) {
-				return null;
-			}
-			return "stand_shooting_hold";
-		}
 		return null;
 	}
 
 	/** 上半身叠层出场了吗（`pick` 那条只管腿；渲染器也用它决定特效骨显隐）。 */
+	private static boolean isFortressUpperLayeredSkillState(TkGun.State state) {
+		return state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| state == TkGun.State.FORTRESS_SKILL_HIT;
+	}
+
+	private static String fortressSkillUpperAnimation(TkGun.State state) {
+		return switch (state) {
+			case FORTRESS_SKILL_LOAD -> "skill_load_upper";
+			case FORTRESS_SKILL_GATHER -> "gather_upper";
+			case FORTRESS_SKILL_READY_HIT -> "ready_hit_upper";
+			case FORTRESS_SKILL_HIT -> "hit_upper";
+			default -> null;
+		};
+	}
+
 	public static boolean upperLayerActive(Entity entity) {
 		return upperAnimationFor(entity) != null;
 	}
@@ -940,8 +984,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 							: play(state, TkGun.focusHoldAnimation(e.shotIndex, e.maxShotIndex));
 				case SKILL_JUMP:
 					return play(state, GunClientState.skillJumpAnimation(entity.getId()));
+				case FORTRESS_SKILL_LOAD:
+					return play(state, "skill_load");
+				case FORTRESS_SKILL_GATHER:
+					return play(state, "gather");
+				case FORTRESS_SKILL_READY_HIT:
+					return play(state, "ready_hit");
+				case FORTRESS_SKILL_HIT:
+					return play(state, "hit");
 				case OVER:
-					// 进入强化：作者新做的 `Focus_over`（1 秒，把炮抬到肩上）
+					// Focus_over starts from the crouched posture. A blended
+					// transition from idle_lower briefly shows a standing pose.
+					state.getController().transitionLength(0);
 					return play(state, "Focus_over");
 				case RELOAD:
 					// **腿那一半**（上身那半由 `upper` 控制器全程播 `reload_upper`，不重播）：
@@ -1026,7 +1080,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 */
 	private static final Set<String> LOOPING = new HashSet<>(Set.of(
 			"idle", "run", "walk_front", "walk_back", "walk_left", "walk_right",
-			"Focus_hold", "ATK_3_hold", "idle_upper"));
+			"Focus_hold", "idle_upper"));
 	private static final Map<String, RawAnimation> RAW = new HashMap<>();
 
 	private static RawAnimation rawFor(String name) {

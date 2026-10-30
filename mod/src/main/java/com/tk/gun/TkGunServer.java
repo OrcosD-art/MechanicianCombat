@@ -163,6 +163,8 @@ public class TkGunServer implements ModInitializer {
 		/** Silent Storm skill launch bookkeeping. */
 		public long skillJumpStartedAt;
 		public boolean skillJumpAirborne;
+		public boolean skillJumpFalling;
+		public boolean skillJumpResumeSprint;
 		/**
 		 * **翻滚后的快速蹲射宽限窗**（截止 tick）。
 		 *
@@ -325,6 +327,14 @@ public class TkGunServer implements ModInitializer {
 		public boolean meleeQueued;
 		public boolean meleeInputHeld;
 		public long meleeInputPressedAt;
+		/** Fortress Destroyer active skill state. */
+		public long fortressSkillReadyAt;
+		public int fortressSkillLevel;
+		public double fortressSkillHitDirX;
+		public double fortressSkillHitDirZ;
+		public double fortressSkillHitFromX;
+		public double fortressSkillHitFromZ;
+		public boolean fortressSkillDirectionLocked;
 		public boolean meleeAtk3MainEnded;
 		public boolean meleeAtk4Empowered;
 		public boolean meleeHoldOver;
@@ -332,8 +342,6 @@ public class TkGunServer implements ModInitializer {
 		public int meleeHoldOverSoundIndex;
 		public double meleeHoldOverDirX;
 		public double meleeHoldOverDirZ;
-		public double meleeHoldOverFromX;
-		public double meleeHoldOverFromZ;
 		public boolean meleeDashAttack;
 		public boolean meleeDashMoving;
 		public boolean meleeReturning;
@@ -402,6 +410,10 @@ public class TkGunServer implements ModInitializer {
 				|| st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER
 				|| st.state == TkGun.State.INSPECT || st.state == TkGun.State.MELEE
 				|| st.state == TkGun.State.SKILL_JUMP
+				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
 				|| now < st.aimLockUntil || now < st.dashUntil
 				|| now < st.overheatUntil;
 	}
@@ -764,8 +776,11 @@ public class TkGunServer implements ModInitializer {
 					if (TkGun.holdingGun(p)) {
 						// 客户端量的枪口/朝向（渲染 locator 骨骼拿到的那个点）：合理性校验一次再用
 						PState st = state(p);
-						Vec3d pos = new Vec3d(payload.x(), payload.y(), payload.z());
 						Vec3d dir = new Vec3d(payload.dx(), payload.dy(), payload.dz());
+						if (handleFortressSkillAttack(p, dir)) {
+							return;
+						}
+						Vec3d pos = new Vec3d(payload.x(), payload.y(), payload.z());
 						double dist = pos.distanceTo(p.getPos());
 						if (dir.lengthSquared() > 1.0E-6D && dist <= 6.0D) {
 							st.fireMx = pos.x;
@@ -785,7 +800,7 @@ public class TkGunServer implements ModInitializer {
 				}));
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunJumpPayload.ID,
 				(payload, context) -> context.server().execute(() ->
-						startSkillJump(context.player())));
+						startGunJumpAction(context.player())));
 		// —— Z 键（按住 = 专注）/ F 键（装填）（2026-10-17 改）——
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunFocusPayload.ID,
 				com.tk.gun.net.GunFocusPayload.CODEC);
@@ -855,7 +870,11 @@ public class TkGunServer implements ModInitializer {
 					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
 							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
 							|| st.state == TkGun.State.MELEE
-							|| st.state == TkGun.State.SKILL_JUMP) {
+							|| st.state == TkGun.State.SKILL_JUMP
+							|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+							|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
 						return;
 					}
 					if (now < st.reloadUntil) {
@@ -895,6 +914,20 @@ public class TkGunServer implements ModInitializer {
 						TkGun.LOGGER.info("[tkgun] skill jump active, this Alt press ignored player={}",
 								p.getName().getString());
 						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_HIT
+							&& rollNow - st.stateStarted
+									< TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
+						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+						st.overheatUntil = 0;
+						st.heat = TkGun.HEAT_MAX * 0.4F;
 					}
 					if (st.dodgeFocusQueued
 							&& rollNow > st.dodgeFocusQueuedAt + DODGE_COMBO_BUFFER_TICKS) {
@@ -2344,7 +2377,13 @@ public class TkGunServer implements ModInitializer {
 		if (!pressed) {
 			if (st.state == TkGun.State.MELEE && st.meleeCombo == 3
 					&& st.meleeAtk3MainEnded) {
-				beginMelee(player, st, now, 4, false);
+				long holdElapsed = now - st.stateStarted
+						- TkGun.MELEE_ATK3_MAIN_END_TICK;
+				if (holdElapsed >= TkGun.MELEE_ATK3_HOLD_RELEASE_TICKS) {
+					beginMeleeHoldOver(player, st, now);
+				} else {
+					beginMelee(player, st, now, 4, false);
+				}
 			}
 			return;
 		}
@@ -2362,7 +2401,7 @@ public class TkGunServer implements ModInitializer {
 				return;
 			}
 			if (st.meleeCombo != 3
-					&& now >= st.stateStarted + TkGun.MELEE_HIT_TICK) {
+					&& now >= st.stateStarted + TkGun.meleeHitTick(st.meleeCombo)) {
 				st.meleeQueued = true;
 			}
 			return;
@@ -2447,8 +2486,6 @@ public class TkGunServer implements ModInitializer {
 		st.meleeHoldOverSoundIndex = 0;
 		st.meleeHoldOverDirX = 0.0D;
 		st.meleeHoldOverDirZ = 0.0D;
-		st.meleeHoldOverFromX = 0.0D;
-		st.meleeHoldOverFromZ = 0.0D;
 		st.meleeDashAttack = false;
 		st.meleeDashMoving = false;
 		st.meleeReturning = false;
@@ -2486,8 +2523,6 @@ public class TkGunServer implements ModInitializer {
 		double yaw = Math.toRadians(player.getYaw());
 		st.meleeHoldOverDirX = -Math.sin(yaw);
 		st.meleeHoldOverDirZ = Math.cos(yaw);
-		st.meleeHoldOverFromX = player.getX();
-		st.meleeHoldOverFromZ = player.getZ();
 		st.meleeDashAttack = false;
 		st.meleeDashMoving = false;
 		st.meleeReturning = false;
@@ -2592,7 +2627,8 @@ public class TkGunServer implements ModInitializer {
 			tickMeleeHoldOver(player, st, now);
 			return;
 		}
-		if (!st.meleeHitDone && now >= st.stateStarted + TkGun.MELEE_HIT_TICK) {
+		if (!st.meleeHitDone
+				&& now >= st.stateStarted + TkGun.meleeHitTick(st.meleeCombo)) {
 			st.meleeHitDone = true;
 			performMeleeHit(player, st, st.meleeCombo);
 		}
@@ -2610,8 +2646,9 @@ public class TkGunServer implements ModInitializer {
 					player.getName().getString());
 		}
 		if (st.meleeAtk3MainEnded
-				&& now >= st.stateStarted + TkGun.meleeTicks(3)) {
-			TkGun.LOGGER.info("[tkgun] ATK_3 charge complete -> ATK_hold_over player={}",
+				&& now >= st.stateStarted + TkGun.MELEE_ATK3_MAIN_END_TICK
+						+ TkGun.MELEE_ATK3_HOLD_MAX_TICKS) {
+			TkGun.LOGGER.info("[tkgun] ATK_3 0.75 s charge complete -> ATK_hold_over player={}",
 					player.getName().getString());
 			beginMeleeHoldOver(player, st, now);
 		}
@@ -2679,61 +2716,55 @@ public class TkGunServer implements ModInitializer {
 
 	private static void tickMeleeHoldOverMovement(ServerPlayerEntity player,
 			PState st, long elapsed) {
-		double dx = player.getX() - st.meleeHoldOverFromX;
-		double dz = player.getZ() - st.meleeHoldOverFromZ;
-		double travelled = dx * st.meleeHoldOverDirX + dz * st.meleeHoldOverDirZ;
-
 		player.setSprinting(false);
 		player.forwardSpeed = 0.0F;
 		player.sidewaysSpeed = 0.0F;
 		player.upwardSpeed = 0.0F;
 		Vec3d velocity = player.getVelocity();
-		if (elapsed >= TkGun.MELEE_HOLD_OVER_INERTIA_END_TICK) {
+		if (elapsed >= TkGun.MELEE_HOLD_OVER_MOTION_END_TICK) {
 			player.setVelocity(0.0D, velocity.y, 0.0D);
 			player.velocityModified = true;
 			return;
 		}
 
-		double targetDistance;
-		if (elapsed < TkGun.MELEE_HOLD_OVER_MOVE_END_TICK) {
-			long steps = TkGun.MELEE_HOLD_OVER_MOVE_END_TICK;
-			double progress = (elapsed + 1.0D) / steps;
-			targetDistance = holdOverSmoothDistance(progress,
-					0.0D, TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE, steps,
-					0.0D, TkGun.MELEE_HOLD_OVER_PHASE_VELOCITY);
-		} else {
-			long steps = TkGun.MELEE_HOLD_OVER_INERTIA_END_TICK
-					- TkGun.MELEE_HOLD_OVER_MOVE_END_TICK;
-			double progress = (elapsed
-					- TkGun.MELEE_HOLD_OVER_MOVE_END_TICK + 1.0D) / steps;
-			targetDistance = holdOverSmoothDistance(progress,
-					TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE,
-					TkGun.MELEE_HOLD_OVER_MOVE_DISTANCE
-							+ TkGun.MELEE_HOLD_OVER_INERTIA_DISTANCE,
-					steps, TkGun.MELEE_HOLD_OVER_PHASE_VELOCITY, 0.0D);
+		double speedFactorTotal = 0.0D;
+		for (long tick = 0;
+				tick < TkGun.MELEE_HOLD_OVER_MOTION_END_TICK; tick++) {
+			speedFactorTotal += holdOverStrikeEnvelope(tick + 0.5D);
 		}
-		double speed = Math.max(0.0D, targetDistance - travelled)
+		double peakSpeed = TkGun.MELEE_HOLD_OVER_TOTAL_DISTANCE
+				/ speedFactorTotal;
+		double speed = peakSpeed
+				* holdOverStrikeEnvelope(elapsed + 0.5D)
 				/ holdOverMovementFriction(player);
 		player.setVelocity(st.meleeHoldOverDirX * speed, velocity.y,
 				st.meleeHoldOverDirZ * speed);
 		player.velocityModified = true;
 	}
 
-	/** Cubic Hermite trajectory with matching position and velocity endpoints. */
-	private static double holdOverSmoothDistance(double progress,
-			double startDistance, double endDistance, long steps,
-			double startVelocity, double endVelocity) {
-		double u = Math.max(0.0D, Math.min(1.0D, progress));
-		double u2 = u * u;
-		double u3 = u2 * u;
-		double h00 = 2.0D * u3 - 3.0D * u2 + 1.0D;
-		double h10 = u3 - 2.0D * u2 + u;
-		double h01 = -2.0D * u3 + 3.0D * u2;
-		double h11 = u3 - u2;
-		return h00 * startDistance
-				+ h10 * steps * startVelocity
-				+ h01 * endDistance
-				+ h11 * steps * endVelocity;
+	private static double holdOverStrikeEnvelope(double tick) {
+		double fadeStart = TkGun.MELEE_HOLD_OVER_STRIKE_FADE_START_TICK;
+		double start = TkGun.MELEE_HOLD_OVER_STRIKE_START_TICK;
+		double end = TkGun.MELEE_HOLD_OVER_STRIKE_END_TICK;
+		double fadeEnd = TkGun.MELEE_HOLD_OVER_STRIKE_FADE_END_TICK;
+		if (tick <= fadeStart) {
+			return 0.0D;
+		}
+		if (tick <= start) {
+			return smoothStep((tick - fadeStart) / (start - fadeStart));
+		}
+		if (tick <= end) {
+			return 1.0D;
+		}
+		if (tick >= fadeEnd) {
+			return 0.0D;
+		}
+		return smoothStep((fadeEnd - tick) / (fadeEnd - end));
+	}
+
+	private static double smoothStep(double value) {
+		double t = Math.max(0.0D, Math.min(1.0D, value));
+		return t * t * (3.0D - 2.0D * t);
 	}
 
 	/** Match the horizontal multiplier applied by LivingEntity#travel next tick. */
@@ -4096,6 +4127,215 @@ public class TkGunServer implements ModInitializer {
 		st.dodgeFocusQueuedAt = 0;
 	}
 
+	private static void startGunJumpAction(ServerPlayerEntity player) {
+		if (!TkGun.holdingGun(player)) {
+			return;
+		}
+		Identifier gunId = TkGun.definition(player).id();
+		if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
+			startSkillJump(player);
+		} else if (gunId.equals(TkGun.id("bowgun"))) {
+			startFortressSkill(player);
+		}
+	}
+
+	private static boolean isDodgeActionState(TkGun.State state) {
+		return state == TkGun.State.ROLL || state == TkGun.State.ROLL_TO_IDLE
+				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY;
+	}
+
+	private static boolean holdingFortressDestroyer(ServerPlayerEntity player) {
+		return TkGun.holdingGun(player)
+				&& TkGun.definition(player).id().equals(TkGun.id("bowgun"));
+	}
+
+	private static void startFortressSkill(ServerPlayerEntity player) {
+		if (player.getServer() == null || !player.isAlive() || !player.isOnGround()
+				|| !holdingFortressDestroyer(player)) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		if (isDodgeActionState(st.state)
+				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
+				|| now < st.fortressSkillReadyAt) {
+			return;
+		}
+
+		clearPendingShots(player, st, "破垒重炮技能启动");
+		player.stopUsingItem();
+		player.removeStatusEffect(StatusEffects.SLOWNESS);
+		player.setSprinting(false);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.overheatUntil = 0;
+		st.dashUntil = 0;
+		st.speedBoostUntil = 0;
+		st.dashSyncActive = false;
+		st.meleeHoldOver = false;
+		st.meleeReturning = false;
+		st.meleeDashAttack = false;
+		st.fortressSkillLevel = 0;
+		st.fortressSkillHitDirX = 0.0D;
+		st.fortressSkillHitDirZ = 0.0D;
+		st.fortressSkillDirectionLocked = false;
+		GunStateMachine.clearDash(player);
+		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_LOAD,
+				TkGun.FORTRESS_SKILL_LOAD_TICKS);
+		TkGun.LOGGER.info("[tkgun] Fortress skill load started player={}",
+				player.getName().getString());
+	}
+
+	private static int fortressGatherLevel(long elapsed) {
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_3_TICK) {
+			return 3;
+		}
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_2_TICK) {
+			return 2;
+		}
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_1_TICK) {
+			return 1;
+		}
+		return 0;
+	}
+
+	/** Returns true when a click belongs to the Fortress skill and must not fire. */
+	private static boolean handleFortressSkillAttack(ServerPlayerEntity player,
+													 Vec3d attackDirection) {
+		if (!holdingFortressDestroyer(player)) {
+			return false;
+		}
+		PState st = state(player);
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			return true;
+		}
+		if (st.state != TkGun.State.FORTRESS_SKILL_GATHER) {
+			return false;
+		}
+		long elapsed = player.getWorld().getTime() - st.stateStarted;
+		int level = fortressGatherLevel(elapsed);
+		if (level > 0) {
+			beginFortressSkillReadyHit(player, st, level, attackDirection);
+		}
+		return true;
+	}
+
+	private static void beginFortressSkillReadyHit(ServerPlayerEntity player,
+													PState st, int level,
+													Vec3d attackDirection) {
+		if (player.getServer() == null) {
+			return;
+		}
+		int clampedLevel = Math.max(1, Math.min(3, level));
+		st.fortressSkillLevel = clampedLevel;
+		Vec3d forward;
+		if (attackDirection != null
+				&& attackDirection.horizontalLengthSquared() > 1.0E-6D) {
+			forward = new Vec3d(attackDirection.x, 0.0D,
+					attackDirection.z).normalize();
+		} else {
+			double yaw = Math.toRadians(player.getYaw());
+			forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		}
+		st.fortressSkillHitDirX = -forward.x;
+		st.fortressSkillHitDirZ = -forward.z;
+		st.fortressSkillHitFromX = player.getX();
+		st.fortressSkillHitFromZ = player.getZ();
+		st.fortressSkillDirectionLocked = true;
+		float lockedYaw = (float) Math.toDegrees(
+				Math.atan2(-forward.x, forward.z));
+		player.setYaw(lockedYaw);
+		player.setHeadYaw(lockedYaw);
+		player.setBodyYaw(lockedYaw);
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		clearPendingShots(player, st, "破垒重炮 ready_hit");
+		setState(player.getServer(), player,
+				TkGun.State.FORTRESS_SKILL_READY_HIT,
+				TkGun.FORTRESS_SKILL_READY_HIT_TICKS);
+		TkGun.LOGGER.info("[tkgun] Fortress ready_hit level={} player={}",
+				clampedLevel, player.getName().getString());
+	}
+
+	private static void startFortressSkillHit(ServerPlayerEntity player,
+											 PState st, int level) {
+		if (player.getServer() == null) {
+			return;
+		}
+		int clampedLevel = Math.max(1, Math.min(3, level));
+		st.fortressSkillLevel = clampedLevel;
+		if (!st.fortressSkillDirectionLocked) {
+			double yaw = Math.toRadians(player.getYaw());
+			st.fortressSkillHitDirX = Math.sin(yaw);
+			st.fortressSkillHitDirZ = -Math.cos(yaw);
+			st.fortressSkillHitFromX = player.getX();
+			st.fortressSkillHitFromZ = player.getZ();
+			st.fortressSkillDirectionLocked = true;
+		}
+		long now = player.getWorld().getTime();
+		st.heat = TkGun.HEAT_MAX;
+		st.overheatUntil = now + TkGun.FORTRESS_SKILL_HIT_TICKS;
+		st.fortressSkillReadyAt =
+				now + TkGun.FORTRESS_SKILL_COOLDOWN_TICKS;
+		player.getItemCooldownManager().set(
+				player.getMainHandStack().getItem(),
+				TkGun.FORTRESS_SKILL_COOLDOWN_TICKS);
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		clearPendingShots(player, st, "破垒重炮技能释放");
+		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_HIT,
+				TkGun.FORTRESS_SKILL_HIT_TICKS);
+		performFortressSkillDamage(player, st, clampedLevel);
+		TkGun.LOGGER.info("[tkgun] Fortress skill hit level={} damage={} player={}",
+				clampedLevel,
+				TkGun.FORTRESS_SKILL_BASE_DAMAGE
+						* Math.pow(TkGun.FORTRESS_SKILL_LEVEL_MULTIPLIER,
+								clampedLevel - 1),
+				player.getName().getString());
+	}
+
+	private static void performFortressSkillDamage(ServerPlayerEntity player,
+													PState st, int level) {
+		Vec3d forward = new Vec3d(-st.fortressSkillHitDirX, 0.0D,
+				-st.fortressSkillHitDirZ).normalize();
+		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		double side = 3.0D;
+		double halfHeight = 3.0D;
+		double halfDepth = 3.0D;
+		Vec3d center = player.getPos().add(0.0D, halfHeight, 0.0D)
+				.add(forward.multiply(halfDepth));
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(6.0D, 6.0D, 6.0D);
+		float damage = TkGun.FORTRESS_SKILL_BASE_DAMAGE
+				* (float) Math.pow(TkGun.FORTRESS_SKILL_LEVEL_MULTIPLIER,
+						level - 1);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator()
+						&& CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), center,
+					right, up, forward, side, halfHeight, halfDepth)) {
+				continue;
+			}
+			entity.damage(player.getDamageSources().playerAttack(player), damage);
+		}
+	}
+
 	/**
 	 * Silent Storm consumes its active acceleration for a fixed-height,
 	 * fixed-distance leap. All eligibility checks are server-authoritative.
@@ -4129,6 +4369,8 @@ public class TkGunServer implements ModInitializer {
 		st.dashSyncActive = false;
 		st.skillJumpStartedAt = now;
 		st.skillJumpAirborne = false;
+		st.skillJumpFalling = false;
+		st.skillJumpResumeSprint = player.isSprinting();
 		GunStateMachine.clearDash(player);
 
 		double yaw = Math.toRadians(player.getYaw());
@@ -4635,6 +4877,7 @@ public class TkGunServer implements ModInitializer {
 				TkGun.LOGGER.info("[tkgun] 翻滚收势期间出现移动输入 -> 立即切回行走/奔跑 玩家={}",
 						player.getName().getString());
 			}
+			tickFortressSkill(player, st, now);
 			st.lastX = player.getX();
 			st.lastZ = player.getZ();
 			tickMelee(player, st, now);
@@ -4650,7 +4893,28 @@ public class TkGunServer implements ModInitializer {
 				}
 				// 翻滚收尾：站定播放 `roll_to_idle`；已在移动则直接交给 IDLE/run。
 				// 快速专注只能由翻滚 0.38 秒处的组合输入进入，不再经过额外过渡动作。
-				if (ended == TkGun.State.MELEE) {
+				if (ended == TkGun.State.FORTRESS_SKILL_LOAD) {
+					if (holdingFortressDestroyer(player)) {
+						st.fortressSkillLevel = 0;
+						setState(server, player,
+								TkGun.State.FORTRESS_SKILL_GATHER,
+								TkGun.FORTRESS_SKILL_GATHER_TICKS);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_GATHER) {
+					beginFortressSkillReadyHit(player, st, 3, null);
+				} else if (ended == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+					if (holdingFortressDestroyer(player)) {
+						startFortressSkillHit(player, st, st.fortressSkillLevel);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_HIT) {
+					st.overheatUntil = 0;
+					st.heat = TkGun.HEAT_MAX * 0.4F;
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				} else if (ended == TkGun.State.MELEE) {
 					if (st.meleeDashAttack) {
 						int returnStep = st.meleeCombo;
 						boolean returnToRun = finishDashMelee(player, st);
@@ -4728,6 +4992,74 @@ public class TkGunServer implements ModInitializer {
 		}
 	}
 
+	private static void tickFortressSkill(ServerPlayerEntity player, PState st,
+										  long now) {
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD) {
+			player.setSprinting(false);
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+			}
+			return;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
+			player.setSprinting(false);
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+				return;
+			}
+			long elapsed = now - st.stateStarted;
+			if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_TICKS - 1L) {
+				beginFortressSkillReadyHit(player, st, 3, null);
+			}
+			return;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+				return;
+			}
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			if (now - st.stateStarted
+					>= TkGun.FORTRESS_SKILL_READY_HIT_TICKS - 1L) {
+				startFortressSkillHit(player, st, st.fortressSkillLevel);
+			}
+			return;
+		}
+		if (st.state != TkGun.State.FORTRESS_SKILL_HIT) {
+			return;
+		}
+		long elapsed = now - st.stateStarted;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		if (elapsed >= TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS) {
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			return;
+		}
+		double dx = player.getX() - st.fortressSkillHitFromX;
+		double dz = player.getZ() - st.fortressSkillHitFromZ;
+		double travelled = dx * st.fortressSkillHitDirX
+				+ dz * st.fortressSkillHitDirZ;
+		double remainingTicks = TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS - elapsed;
+		double left = Math.max(0.0D,
+				TkGun.FORTRESS_SKILL_HIT_DISTANCE - travelled);
+		double speed = left / Math.max(1.0D, remainingTicks)
+				/ holdOverMovementFriction(player);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.fortressSkillHitDirX * speed, velocity.y,
+				st.fortressSkillHitDirZ * speed);
+		player.velocityModified = true;
+	}
+
 	/** Maintains the Silent Storm leap until the first landing after takeoff. */
 	private static void tickSkillJump(ServerPlayerEntity player, PState st, long now) {
 		if (st.state != TkGun.State.SKILL_JUMP) {
@@ -4738,9 +5070,25 @@ public class TkGunServer implements ModInitializer {
 		player.sidewaysSpeed = 0.0F;
 		if (!player.isOnGround()) {
 			st.skillJumpAirborne = true;
+			Vec3d velocity = player.getVelocity();
+			if (!st.skillJumpFalling && velocity.y <= 0.01D) {
+				st.skillJumpFalling = true;
+				player.setVelocity(
+						velocity.x * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+						velocity.y,
+						velocity.z * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER);
+				player.velocityModified = true;
+				TkGun.LOGGER.info("[tkgun] Silent Storm fall inertia x{} player={}",
+						TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+						player.getName().getString());
+			}
 		} else if (st.skillJumpAirborne
 				|| now >= st.skillJumpStartedAt + 2L) {
 			completeDodgeCooldownAfterSkillJump(st);
+			if (st.skillJumpResumeSprint) {
+				player.setSprinting(true);
+			}
+			st.skillJumpResumeSprint = false;
 			st.stateUntil = now;
 			TkGun.LOGGER.info("[tkgun] Silent Storm landing -> dodge cooldown complete player={}",
 					player.getName().getString());
@@ -4808,7 +5156,11 @@ public class TkGunServer implements ModInitializer {
 				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY
 				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE
 				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER
-				|| state == TkGun.State.SKILL_JUMP;
+				|| state == TkGun.State.SKILL_JUMP
+				|| state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| state == TkGun.State.FORTRESS_SKILL_HIT;
 	}
 
 	private static void startAirborneLandingRoll(ServerPlayerEntity player, PState st, long now) {
@@ -5183,6 +5535,18 @@ public class TkGunServer implements ModInitializer {
 	public static void onRollStarted(ServerPlayerEntity player) {
 		PState st = state(player);
 		long now = player.getWorld().getTime();
+		if (st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			if (now - st.stateStarted < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
+				return;
+			}
+			st.overheatUntil = 0;
+			st.heat = TkGun.HEAT_MAX * 0.4F;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			return;
+		}
 		// 滑铲/收势不能被 combat_roll 的翻滚事件半路顶掉；滑铲结束后的 1 秒锁由 dodgeBlockUntil 管。
 		if (st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY) {
 			TkGun.LOGGER.info("[tkgun] 滑铲/收势中 -> 忽略翻滚事件 玩家={}", player.getName().getString());

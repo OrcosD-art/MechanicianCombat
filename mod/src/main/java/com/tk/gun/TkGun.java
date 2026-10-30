@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r519-2026-10-30";
+	public static final String BUILD = "r540-2026-10-31";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -62,7 +62,11 @@ public final class TkGun {
 		ROLL_TO_IDLE(15),
 		MELEE(16),
 		/** Silent Storm accelerated jump; jump/fall animation follows vertical velocity. */
-		SKILL_JUMP(17);
+		SKILL_JUMP(17),
+		FORTRESS_SKILL_LOAD(18),
+		FORTRESS_SKILL_GATHER(19),
+		FORTRESS_SKILL_HIT(20),
+		FORTRESS_SKILL_READY_HIT(21);
 
 		public static boolean isAiming(State s) {
 			return s == AIM || s == AIM_FAST || s == AIM_ROLL || s == AIM_SLIDE
@@ -105,25 +109,61 @@ public final class TkGun {
 	 * 重算：`python tools\muzzle_offset_new.py`（它会把出伤帧一起打出来）。
 	 */
 	public static final int ATTACK_FRAME_TICKS = 1;
-	/** Close-combat hit frame authored at 0.5 seconds in close_combat.bbmodel. */
+	/** Default close-combat hit frame for ATK_2/3/4 and dash attack. */
 	public static final int MELEE_HIT_TICK = 10;
-	/** ATK_3 holds its main-attack pose at 1.0 s; 1.0-1.25 s is recovery. */
+	/** Updated ATK_1 damage marker at 0.1667 s. */
+	public static final int MELEE_ATK1_HIT_TICK =
+			(int) Math.ceil(0.16667D * 20.0D);
+	/** Updated ATK_1 clip is 0.625 s; one extra tick renders its final key. */
+	public static final int MELEE_ATK1_TICKS =
+			(int) Math.ceil(0.625D * 20.0D) + 1;
+	/** ATK_3 main hit ends at 1.0 s; held input branches into ATK_3_hold. */
 	public static final int MELEE_ATK3_MAIN_END_TICK = 20;
-	public static final int MELEE_ATK4_CHARGE_TICKS = 10;
-	/** Authored ATK_hold_over is 1.125 s; one extra tick renders its final key. */
+	public static final int MELEE_ATK3_HOLD_RELEASE_TICKS = 10;
+	public static final int MELEE_ATK3_HOLD_MAX_TICKS =
+			(int) Math.ceil(0.75D * 20.0D);
+	/** One additional rendered tick keeps the authored 0.75 s final pose. */
+	public static final int MELEE_ATK3_HOLD_RENDER_TICKS =
+			MELEE_ATK3_HOLD_MAX_TICKS + 1;
+	/** Authored ATK_hold_over is 1.25 s; one extra tick renders its final key. */
 	public static final int MELEE_HOLD_OVER_TICKS =
-			(int) Math.ceil(1.125D * 20.0D) + 1;
+			(int) Math.ceil(1.25D * 20.0D) + 1;
 	/** Timelines authored inside ATK_hold_over. */
 	public static final int[] MELEE_HOLD_OVER_HIT_TICKS = {3, 10, 18};
 	/** Reach four blocks by the second authored hit frame. */
 	public static final double MELEE_HOLD_OVER_MOVE_DISTANCE = 4.0D;
 	/** Additional decaying momentum between the second and third hit frames. */
 	public static final double MELEE_HOLD_OVER_INERTIA_DISTANCE = 2.0D;
-	public static final double MELEE_HOLD_OVER_PHASE_VELOCITY = 0.5D;
-	public static final int MELEE_HOLD_OVER_MOVE_END_TICK =
-			MELEE_HOLD_OVER_HIT_TICKS[1];
-	public static final int MELEE_HOLD_OVER_INERTIA_END_TICK =
-			MELEE_HOLD_OVER_HIT_TICKS[2];
+	public static final double MELEE_HOLD_OVER_TOTAL_DISTANCE =
+			MELEE_HOLD_OVER_MOVE_DISTANCE + MELEE_HOLD_OVER_INERTIA_DISTANCE;
+	/** Timeline strike markers in ATK_hold_over: fade-in, peak window, fade-out. */
+	public static final int MELEE_HOLD_OVER_STRIKE_FADE_START_TICK =
+			0;
+	public static final int MELEE_HOLD_OVER_STRIKE_START_TICK =
+			(int) Math.ceil(0.375D * 20.0D);
+	public static final int MELEE_HOLD_OVER_STRIKE_END_TICK =
+			(int) Math.ceil(1.0D * 20.0D);
+	public static final int MELEE_HOLD_OVER_STRIKE_FADE_END_TICK =
+			(int) Math.ceil(1.25D * 20.0D);
+	public static final int MELEE_HOLD_OVER_MOTION_END_TICK =
+			MELEE_HOLD_OVER_STRIKE_FADE_END_TICK;
+	public static final int FORTRESS_SKILL_COOLDOWN_TICKS = 100;
+	public static final int FORTRESS_SKILL_LOAD_TICKS =
+			(int) Math.ceil(0.875D * 20.0D) + 1;
+	public static final int FORTRESS_SKILL_GATHER_TICKS =
+			(int) Math.ceil(1.75D * 20.0D) + 1;
+	public static final int FORTRESS_SKILL_GATHER_LEVEL_1_TICK = 10;
+	public static final int FORTRESS_SKILL_GATHER_LEVEL_2_TICK = 20;
+	public static final int FORTRESS_SKILL_GATHER_LEVEL_3_TICK = 30;
+	public static final int FORTRESS_SKILL_HIT_TICKS =
+			(int) Math.ceil(2.25D * 20.0D) + 1;
+	public static final int FORTRESS_SKILL_READY_HIT_TICKS =
+			(int) Math.ceil(0.5D * 20.0D) + 1;
+	public static final int FORTRESS_SKILL_HIT_DODGE_TICK = 10;
+	public static final int FORTRESS_SKILL_HIT_MOVE_TICKS = 10;
+	public static final double FORTRESS_SKILL_HIT_DISTANCE = 5.0D;
+	public static final float FORTRESS_SKILL_BASE_DAMAGE = 10.0F;
+	public static final float FORTRESS_SKILL_LEVEL_MULTIPLIER = 1.5F;
 	public static final int[] MELEE_HOLD_OVER_SOUND_TICKS = {3, 10, 16, 18};
 	public static final String[] MELEE_HOLD_OVER_SOUND_KEYS = {
 			"glaive_slash02", "imp1", "smash_ground3", "imp1"
@@ -142,9 +182,11 @@ public final class TkGun {
 	public static final double MELEE_LATERAL_RADIUS = 3.0D;
 	/** Better Combat diamond axe attack damage. */
 	public static final float DIAMOND_AXE_DAMAGE = 9.0F;
-	/** Silent Storm accelerated jump: approximately six blocks up and twelve forward. */
+	/** Silent Storm launch arc: six blocks upward and roughly twelve forward. */
 	public static final double SKILL_JUMP_HORIZONTAL_SPEED = 1.31D;
 	public static final double SKILL_JUMP_VERTICAL_SPEED = 1.11D;
+	/** Horizontal inertia is doubled once when ascent changes to descent. */
+	public static final double SKILL_JUMP_FALL_INERTIA_MULTIPLIER = 2.0D;
 	/** Safety lifetime; normal landing ends the state earlier. */
 	public static final int SKILL_JUMP_MAX_TICKS = 40;
 
@@ -157,7 +199,15 @@ public final class TkGun {
 	}
 
 	public static int meleeTicks(int step) {
-		return step == 3 ? MELEE_ATK3_MAIN_END_TICK + MELEE_ATK4_CHARGE_TICKS : 20;
+		return switch (step) {
+			case 1 -> MELEE_ATK1_TICKS;
+			case 3 -> MELEE_ATK3_MAIN_END_TICK + MELEE_ATK3_HOLD_RENDER_TICKS;
+			default -> 20;
+		};
+	}
+
+	public static int meleeHitTick(int step) {
+		return step == 1 ? MELEE_ATK1_HIT_TICK : MELEE_HIT_TICK;
 	}
 	/**
 	 * 连发节奏：两发之间隔几 tick（每发都把该发动画从头播一遍 → 后坐/枪口焰/弹壳跟着重播）。
@@ -479,12 +529,16 @@ public final class TkGun {
 	public static final Identifier SND_GLAIVE_SLASH2 = id("glaive_slash2");
 	/** ATK_2/ATK_3 authored double-axe swing (`double_axe_swing-01.ogg`). */
 	public static final Identifier SND_DOUBLE_AXE_SWING1 = id("double_axe_swing1");
+	public static final Identifier SND_CURRENT = id("current");
 	/** ATK_4 authored anchor slam (`anchor_slam-01.ogg`). */
 	public static final Identifier SND_ANCHOR_SLAM1 = id("anchor_slam1");
 	/** ATK_3_hold authored mace air swing (`smash_air1.ogg`). */
 	public static final Identifier SND_SMASH_AIR1 = id("smash_air1");
+	public static final Identifier SND_SMASH_AIR2 = id("smash_air2");
+	public static final Identifier SND_SMASH_AIR3 = id("smash_air3");
 	/** ATK_3 authored mace ground impact (`smash_ground1.ogg`). */
 	public static final Identifier SND_SMASH_GROUND1 = id("smash_ground1");
+	public static final Identifier SND_SMASH_GROUND_HEAVY = id("smash_ground_heavy");
 	/** ATK_hold_over authored mace ground impact (`smash_ground3.ogg`). */
 	public static final Identifier SND_SMASH_GROUND3 = id("smash_ground3");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
@@ -517,6 +571,8 @@ public final class TkGun {
 					new KeyframeSound(SND_GLAIVE_SLASH2, 1.0F, 1.0F)),
 			Map.entry("double_axe_swing01",
 					new KeyframeSound(SND_DOUBLE_AXE_SWING1, 1.0F, 1.0F)),
+			Map.entry("current",
+					new KeyframeSound(SND_CURRENT, 1.0F, 1.0F)),
 			Map.entry("claymore_swing",
 					new KeyframeSound(SND_CLAYMORE_SWING, 1.0F, 1.0F)),
 			Map.entry("imp1", new KeyframeSound(SND_IMPACT, 1.0F, 1.0F)),
@@ -524,10 +580,16 @@ public final class TkGun {
 					new KeyframeSound(SND_ANCHOR_SLAM1, 1.0F, 1.0F)),
 			Map.entry("smash_air1",
 					new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
+			Map.entry("smash_air2",
+					new KeyframeSound(SND_SMASH_AIR2, 1.0F, 1.0F)),
+			Map.entry("smash_air3",
+					new KeyframeSound(SND_SMASH_AIR3, 1.0F, 1.0F)),
 			Map.entry("smash_ground1",
 					new KeyframeSound(SND_SMASH_GROUND1, 1.0F, 1.0F)),
 			Map.entry("smash_ground3",
-					new KeyframeSound(SND_SMASH_GROUND3, 1.0F, 1.0F)));
+					new KeyframeSound(SND_SMASH_GROUND3, 1.0F, 1.0F)),
+			Map.entry("smash_ground_heavy",
+					new KeyframeSound(SND_SMASH_GROUND_HEAVY, 1.0F, 1.0F)));
 
 	/** 一个玩家**同一个 tick 里**最多让服务端放几声关键帧音（防改包刷屏；正常最多 2 声）。 */
 	public static final int KEYFRAME_SOUNDS_PER_TICK = 6;

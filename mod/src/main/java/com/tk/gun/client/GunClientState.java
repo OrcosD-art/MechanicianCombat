@@ -95,6 +95,8 @@ public final class GunClientState {
 		public int nativeRollReadyAt;
 		/** 滑铲结束后客户端本地屏蔽 Alt 的截止 tick（与服务器 1 秒锁对齐）。 */
 		public int localDodgeLockUntil;
+		/** Keep the final skill-hit pose until the authoritative follow-up arrives. */
+		public int fortressSkillAwaitUntil;
 
 		public boolean active() {
 			return total > 0 && elapsed < total;
@@ -136,6 +138,9 @@ public final class GunClientState {
 		e.meleeHoldOver = payload.meleeHoldOver();
 		if (newState != TkGun.State.MELEE || payload.meleeReturning()) {
 			e.meleeAwaitUntil = 0;
+		}
+		if (newState != TkGun.State.FORTRESS_SKILL_HIT) {
+			e.fortressSkillAwaitUntil = 0;
 		}
 		e.shotIndex = Math.max(1, Math.min(e.maxShotIndex, payload.shotIndex()));
 		e.mag = Math.max(0,
@@ -227,7 +232,14 @@ public final class GunClientState {
 				|| e.state == TkGun.State.AIM_ROLL || e.state == TkGun.State.AIM_SLIDE
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
-				|| e.state == TkGun.State.SKILL_JUMP) {
+				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			return false;
+		}
+		if (e.state == TkGun.State.FORTRESS_SKILL_HIT
+				&& e.elapsed < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
 			return false;
 		}
 		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
@@ -253,7 +265,14 @@ public final class GunClientState {
 		}
 		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
-				|| e.state == TkGun.State.SKILL_JUMP) {
+				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			return;
+		}
+		if (e.state == TkGun.State.FORTRESS_SKILL_HIT
+				&& e.elapsed < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
 			return;
 		}
 		if (e.state == TkGun.State.MELEE && !dashMeleeRecovery(e)) {
@@ -299,11 +318,34 @@ public final class GunClientState {
 						e.elapsed = 0;
 					}
 				}
+				if (e.state == TkGun.State.FORTRESS_SKILL_LOAD && !e.active()) {
+					e.state = TkGun.State.FORTRESS_SKILL_GATHER;
+					e.total = TkGun.FORTRESS_SKILL_GATHER_TICKS;
+					e.elapsed = 0;
+				}
 				if (e.state == TkGun.State.FIRE && !e.active()) {
 					// ⚠️ 必须在"刚刚过期"这一 tick 就把余韵挂上：晚一 tick 的话，
 					//    那一帧 pick() 会掉进 idle 兜底 → 后面 AIM_HOLD 的 CONTINUE 保住的就成了 idle
 					//    （2026-10-13 实测过一次，日志里能看到打完紧跟一行 `rig -> idle`）。
 					e.holdUntil = ticks + FIRE_HOLD_GRACE;
+				}
+			} else if (e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
+				e.state = TkGun.State.FORTRESS_SKILL_READY_HIT;
+				e.total = TkGun.FORTRESS_SKILL_READY_HIT_TICKS;
+				e.elapsed = 0;
+			} else if (e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+				e.state = TkGun.State.FORTRESS_SKILL_HIT;
+				e.total = TkGun.FORTRESS_SKILL_HIT_TICKS;
+				e.elapsed = 0;
+			} else if (e.state == TkGun.State.FORTRESS_SKILL_HIT) {
+				if (e.fortressSkillAwaitUntil == 0) {
+					e.fortressSkillAwaitUntil = ticks + 6;
+				}
+				if (ticks >= e.fortressSkillAwaitUntil) {
+					e.state = TkGun.State.IDLE;
+					e.total = 0;
+					e.elapsed = 0;
+					e.fortressSkillAwaitUntil = 0;
 				}
 			} else if (e.state == TkGun.State.FIRE) {
 				e.state = TkGun.State.IDLE;
@@ -363,6 +405,7 @@ public final class GunClientState {
 		e.lastMeleeAnimation = null;
 		e.meleeGraceUntil = 0;
 		e.meleeAwaitUntil = 0;
+		e.fortressSkillAwaitUntil = 0;
 		e.reloading = false;
 		e.aimLockUntil = 0;
 		e.nativeRollReadyAt = 0;
@@ -384,6 +427,14 @@ public final class GunClientState {
 			return "idle";
 		}
 		switch (e.state) {
+			case FORTRESS_SKILL_LOAD:
+				return "skill_load";
+			case FORTRESS_SKILL_GATHER:
+				return "gather";
+			case FORTRESS_SKILL_HIT:
+				return "hit";
+			case FORTRESS_SKILL_READY_HIT:
+				return "ready_hit";
 			case SKILL_JUMP:
 				return skillJumpAnimation(entityId);
 			case IDLE:
@@ -518,6 +569,10 @@ public final class GunClientState {
 				|| e.state == TkGun.State.OVERHEAT || e.state == TkGun.State.OVER
 				|| e.state == TkGun.State.INSPECT || e.state == TkGun.State.MELEE
 				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+				|| e.state == TkGun.State.FORTRESS_SKILL_HIT
 				|| ticks < e.aimLockUntil;
 	}
 
@@ -590,6 +645,14 @@ public final class GunClientState {
 		}
 		if (ticks < e.localDodgeLockUntil) {
 			return true;
+		}
+		if (e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			return true;
+		}
+		if (e.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			return e.elapsed < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK;
 		}
 		return switch (e.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,

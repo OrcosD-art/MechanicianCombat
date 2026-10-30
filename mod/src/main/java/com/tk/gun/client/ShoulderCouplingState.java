@@ -36,11 +36,14 @@ public final class ShoulderCouplingState {
 			return client.options.getPerspective()
 					== net.minecraft.client.option.Perspective.THIRD_PERSON_BACK;
 		}
+		GunClientState.Entry state = GunClientState.get(client.player.getId());
+		if (isFortressCoupledSkillState(state)) {
+			return true;
+		}
 		if (client.options.getPerspective()
 				== net.minecraft.client.option.Perspective.THIRD_PERSON_FRONT) {
 			return false;
 		}
-		GunClientState.Entry state = GunClientState.get(client.player.getId());
 		// Close combat owns the camera direction for the full authored attack,
 		// including movement and sprint. Do not fall through to sprint decoupling.
 		if (state != null && state.state == TkGun.State.MELEE) {
@@ -95,6 +98,14 @@ public final class ShoulderCouplingState {
 		}
 		int id = client.player.getId();
 		GunClientState.Entry state = GunClientState.get(id);
+		if (state != null
+				&& (state.state == TkGun.State.FORTRESS_SKILL_READY_HIT
+						|| state.state == TkGun.State.FORTRESS_SKILL_HIT)) {
+			return state.state == TkGun.State.FORTRESS_SKILL_READY_HIT ? 16 : 17;
+		}
+		if (isFortressCoupledSkillState(state)) {
+			return 0;
+		}
 		if (state != null && state.state == TkGun.State.MELEE) {
 			return state.meleeHoldOver ? 13 : 0;
 		}
@@ -127,6 +138,12 @@ public final class ShoulderCouplingState {
 	 */
 	private static boolean usesDecoupledSprint(MinecraftClient client) {
 		return isSprintDirectionActive(client);
+	}
+
+	private static boolean isFortressCoupledSkillState(GunClientState.Entry state) {
+		return state != null
+				&& (state.state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| state.state == TkGun.State.FORTRESS_SKILL_GATHER);
 	}
 
 	/** Sprint, roll acceleration, or a held sprint key with active movement input. */
