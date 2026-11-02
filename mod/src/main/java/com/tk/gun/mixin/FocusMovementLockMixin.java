@@ -32,17 +32,27 @@ public abstract class FocusMovementLockMixin {
 				&& entry.meleeHoldOver && !entry.meleeReturning;
 		boolean skillJumpLock = entry != null
 				&& entry.state == TkGun.State.SKILL_JUMP;
-		boolean skillLoadLock = entry != null
-				&& (entry.state == TkGun.State.FORTRESS_SKILL_LOAD
+		boolean fallAttackLock = entry != null
+				&& (entry.state == TkGun.State.FALL_ATTACK
+						|| entry.state == TkGun.State.FALL_ATTACK_RECOVERY);
+		boolean skillLoadOnly = entry != null
+				&& entry.state == TkGun.State.FORTRESS_SKILL_LOAD
+				&& !entry.fortressCrouchedLoad;
+		boolean slideSkillLoadLock = entry != null
+				&& entry.state == TkGun.State.FORTRESS_SKILL_LOAD
+				&& entry.fortressSlideLoad;
+		boolean skillCrouchedLoadLock = entry != null
+				&& entry.state == TkGun.State.FORTRESS_SKILL_LOAD
+				&& entry.fortressCrouchedLoad;
+		boolean skillGatherLock = entry != null
+				&& (entry.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 						|| entry.state == TkGun.State.FORTRESS_SKILL_GATHER);
 		boolean skillHitLock = entry != null
 				&& entry.state == TkGun.State.FORTRESS_SKILL_HIT;
-		boolean skillReadyHitLock = entry != null
-				&& entry.state == TkGun.State.FORTRESS_SKILL_READY_HIT;
 		boolean movementLock = focusLock || dashMeleeHold || atk3Lock
-				|| holdOverLock || skillJumpLock || skillHitLock
-				|| skillReadyHitLock;
-		if (!movementLock && !skillLoadLock) {
+				|| holdOverLock || skillJumpLock || fallAttackLock || skillGatherLock
+				|| skillHitLock || skillCrouchedLoadLock || slideSkillLoadLock;
+		if (!movementLock && !skillLoadOnly) {
 			return;
 		}
 		KeyboardInput self = (KeyboardInput) (Object) this;

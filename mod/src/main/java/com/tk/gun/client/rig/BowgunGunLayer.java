@@ -63,7 +63,8 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 		// 气流平面（`airflow1/2/3`，用第 2 张贴图）交给 BowgunAirflowLayer 单独画 ——
 		// 拿枪贴图硬画它的话 UV 越界，会糊出一块乱七八糟的东西。
 		if (BowgunRigRenderer.BODY_BONES.contains(bone.getName()) || bone.getCubes().isEmpty()
-				|| BowgunAirflowLayer.isAirflowBone(bone.getName())) {
+				|| BowgunAirflowLayer.isAirflowBone(bone.getName())
+				|| BowgunEffectSkillLayer.isSkillEffectBone(bone.getName())) {
 			return;
 		}
 		// **枪口焰那一组（`fire` / `fire1..4`）不要光照阴影**（用户 2026-10-16："如果可行请去掉此组中

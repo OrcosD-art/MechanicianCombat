@@ -137,7 +137,7 @@ public class EnergyParticle extends SpriteBillboardParticle {
 		public EnergyParticle createParticle(SimpleParticleType type, ClientWorld world,
 											 double x, double y, double z,
 											 double vx, double vy, double vz) {
-			return new EnergyParticle(world, x, y, z, this.provider, 10, 0.55F, true);
+			return new EnergyParticle(world, x, y, z, this.provider, 10, 2.0F, true);
 		}
 	}
 

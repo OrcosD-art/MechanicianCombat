@@ -78,7 +78,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			SHELL_PARENT_BONE,
 			"shell", "shell2", "shell3", "shell4", "shell5", "shell6", "shell7");
 	private static final Set<String> SKILL_PART_BONES =
-			Set.of("skill_1", "skill_2");
+			Set.of("skill_1", "fire_skill",
+					"step_1", "step_2", "step_3", "step_4");
 	/**
 	 * **只在真开火那一发才显形的"特效平面"**：枪口焰（fire1..4）、速度线（dash1..4）。
 	 * 举枪（`stand_shooting` 的"持枪停帧"）那一遍要把它们压掉，否则等于空放一发（见 renderRecursively）。
@@ -112,6 +113,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	public BowgunRigRenderer(EntityRendererFactory.Context context) {
 		super(context, new BowgunRigModel(), BowgunRig.INSTANCE);
 		addRenderLayer(new BowgunGunLayer(this));
+		addRenderLayer(new BowgunEffectSkillLayer(this));
 		addRenderLayer(new CombatBackpackRigLayer(this));
 		// 原版 PlayerRenderer 继续负责皮肤第二层、盔甲、披风和 Curios。
 		// ⚠️ **气流那一层默认不开**（2026-10-16 用户实测反馈："枪口特效完全糊着、像管风琴一列一列
@@ -183,8 +185,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				poseEntity == null ? null : com.tk.gun.client.GunClientState.get(poseEntity.getId());
 		boolean fortressSkillVisual = upperState != null
 				&& (upperState.state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| upperState.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 						|| upperState.state == TkGun.State.FORTRESS_SKILL_GATHER
-						|| upperState.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 						|| upperState.state == TkGun.State.FORTRESS_SKILL_HIT);
 		if (SKILL_PART_BONES.contains(name) && !fortressSkillVisual) {
 			hide(bone);
@@ -332,7 +334,14 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			//     提前显会看到"弹夹还没插、弹链已经在枪上"。
 			boolean reloading = e != null && (state == TkGun.State.RELOAD || e.reloading);
 			boolean magIn = reloading && e.elapsed >= RELOAD_MAG_IN_TICKS;
-			if (state == TkGun.State.OVERHEAT) {
+			boolean armedWalking = poseEntity instanceof net.minecraft.entity.player.PlayerEntity player
+					&& TkGun.holdingGun(player)
+					&& state == TkGun.State.IDLE
+					&& TkGunClient.isMoving(poseEntity.getId())
+					&& e != null && !e.focus;
+			if (armedWalking) {
+				hide(bone);
+			} else if (state == TkGun.State.OVERHEAT) {
 				// Focus overheat is only entered after the focus magazine's final
 				// shot. Preserve the ejected/empty chain instead of falling back
 				// to the hip-fire magazine presentation at zero shots fired.
@@ -476,9 +485,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				|| e.state == TkGun.State.OVERHEAT
 				|| e.state == TkGun.State.OVER
 				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FALL_ATTACK
+				|| e.state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 				|| e.state == TkGun.State.FORTRESS_SKILL_HIT);
 	}
 

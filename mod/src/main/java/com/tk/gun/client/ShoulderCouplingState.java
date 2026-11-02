@@ -73,7 +73,8 @@ public final class ShoulderCouplingState {
 		}
 		return switch (state.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
-					OVERHEAT, OVER, INSPECT, SKILL_JUMP -> false;
+					OVERHEAT, OVER, INSPECT, SKILL_JUMP,
+					FALL_ATTACK, FALL_ATTACK_RECOVERY -> false;
 			default -> true;
 		};
 	}
@@ -98,10 +99,8 @@ public final class ShoulderCouplingState {
 		}
 		int id = client.player.getId();
 		GunClientState.Entry state = GunClientState.get(id);
-		if (state != null
-				&& (state.state == TkGun.State.FORTRESS_SKILL_READY_HIT
-						|| state.state == TkGun.State.FORTRESS_SKILL_HIT)) {
-			return state.state == TkGun.State.FORTRESS_SKILL_READY_HIT ? 16 : 17;
+		if (state != null && state.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			return 17;
 		}
 		if (isFortressCoupledSkillState(state)) {
 			return 0;
@@ -127,6 +126,8 @@ public final class ShoulderCouplingState {
 			case OVER -> 10;
 			case INSPECT -> 11;
 			case SKILL_JUMP -> 15;
+			case FALL_ATTACK -> 18;
+			case FALL_ATTACK_RECOVERY -> 19;
 			default -> GunClientState.aimLocked(id) ? 12 : 0;
 		};
 	}
@@ -143,6 +144,7 @@ public final class ShoulderCouplingState {
 	private static boolean isFortressCoupledSkillState(GunClientState.Entry state) {
 		return state != null
 				&& (state.state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| state.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 						|| state.state == TkGun.State.FORTRESS_SKILL_GATHER);
 	}
 

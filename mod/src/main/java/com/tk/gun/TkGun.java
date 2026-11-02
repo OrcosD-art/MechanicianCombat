@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r540-2026-10-31";
+	public static final String BUILD = "r561-2026-11-01";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -64,9 +64,13 @@ public final class TkGun {
 		/** Silent Storm accelerated jump; jump/fall animation follows vertical velocity. */
 		SKILL_JUMP(17),
 		FORTRESS_SKILL_LOAD(18),
-		FORTRESS_SKILL_GATHER(19),
-		FORTRESS_SKILL_HIT(20),
-		FORTRESS_SKILL_READY_HIT(21);
+		FORTRESS_SKILL_READY_GATHER(19),
+		FORTRESS_SKILL_GATHER(20),
+		FORTRESS_SKILL_HIT(21),
+		/** Silent Storm's queued dive attack after the jump apex. */
+		FALL_ATTACK(22),
+		/** Authored fall_attack_over_to_idle recovery with movement locked. */
+		FALL_ATTACK_RECOVERY(23);
 
 		public static boolean isAiming(State s) {
 			return s == AIM || s == AIM_FAST || s == AIM_ROLL || s == AIM_SLIDE
@@ -114,11 +118,18 @@ public final class TkGun {
 	/** Updated ATK_1 damage marker at 0.1667 s. */
 	public static final int MELEE_ATK1_HIT_TICK =
 			(int) Math.ceil(0.16667D * 20.0D);
-	/** Updated ATK_1 clip is 0.625 s; one extra tick renders its final key. */
+	/** Updated ATK_2 damage marker at 0.375 s. */
+	public static final int MELEE_ATK2_HIT_TICK =
+			(int) Math.ceil(0.375D * 20.0D);
+	/** Updated ATK_1 clip is 0.875 s; one extra tick renders its final key. */
 	public static final int MELEE_ATK1_TICKS =
-			(int) Math.ceil(0.625D * 20.0D) + 1;
-	/** ATK_3 main hit ends at 1.0 s; held input branches into ATK_3_hold. */
-	public static final int MELEE_ATK3_MAIN_END_TICK = 20;
+			(int) Math.ceil(0.875D * 20.0D) + 1;
+	/** Updated ATK_2 clip is 0.75 s; one extra tick renders its final key. */
+	public static final int MELEE_ATK2_TICKS =
+			(int) Math.ceil(0.75D * 20.0D) + 1;
+	/** ATK_3 main hit ends at 0.75 s; held input branches into ATK_3_hold. */
+	public static final int MELEE_ATK3_MAIN_END_TICK =
+			(int) Math.ceil(0.75D * 20.0D);
 	public static final int MELEE_ATK3_HOLD_RELEASE_TICKS = 10;
 	public static final int MELEE_ATK3_HOLD_MAX_TICKS =
 			(int) Math.ceil(0.75D * 20.0D);
@@ -147,26 +158,53 @@ public final class TkGun {
 			(int) Math.ceil(1.25D * 20.0D);
 	public static final int MELEE_HOLD_OVER_MOTION_END_TICK =
 			MELEE_HOLD_OVER_STRIKE_FADE_END_TICK;
-	public static final int FORTRESS_SKILL_COOLDOWN_TICKS = 100;
+	public static final int FORTRESS_SKILL_COOLDOWN_TICKS = 30 * 20;
+	/** Each focused shot removes half a second from an active skill cooldown. */
+	public static final int FORTRESS_SKILL_FOCUS_COOLDOWN_REDUCTION_TICKS = 10;
 	public static final int FORTRESS_SKILL_LOAD_TICKS =
 			(int) Math.ceil(0.875D * 20.0D) + 1;
+	public static final int FORTRESS_SKILL_READY_GATHER_TICKS =
+			(int) Math.ceil(0.375D * 20.0D) + 1;
 	public static final int FORTRESS_SKILL_GATHER_TICKS =
-			(int) Math.ceil(1.75D * 20.0D) + 1;
+			(int) Math.ceil(2.0D * 20.0D) + 1;
 	public static final int FORTRESS_SKILL_GATHER_LEVEL_1_TICK = 10;
 	public static final int FORTRESS_SKILL_GATHER_LEVEL_2_TICK = 20;
 	public static final int FORTRESS_SKILL_GATHER_LEVEL_3_TICK = 30;
 	public static final int FORTRESS_SKILL_HIT_TICKS =
 			(int) Math.ceil(2.25D * 20.0D) + 1;
-	public static final int FORTRESS_SKILL_READY_HIT_TICKS =
-			(int) Math.ceil(0.5D * 20.0D) + 1;
 	public static final int FORTRESS_SKILL_HIT_DODGE_TICK = 10;
-	public static final int FORTRESS_SKILL_HIT_MOVE_TICKS = 10;
+	/** Peak retreat speed occurs at 0.625 s, between the hit frame and 0.63 s. */
+	public static final int FORTRESS_SKILL_HIT_PEAK_TICK = 12;
+	/** The retreat reaches zero in 1.4 s, before the authored 2.25 s hit clip ends. */
+	public static final int FORTRESS_SKILL_HIT_MOVE_TICKS = 28;
 	public static final double FORTRESS_SKILL_HIT_DISTANCE = 5.0D;
 	public static final float FORTRESS_SKILL_BASE_DAMAGE = 10.0F;
 	public static final float FORTRESS_SKILL_LEVEL_MULTIPLIER = 1.5F;
+	public static final double FORTRESS_SKILL_KNOCKBACK_DISTANCE = 15.0D;
+	public static final double FORTRESS_SKILL_PATH_DAMAGE_MULTIPLIER = 1.5D;
+	public static final int[] FORTRESS_SKILL_LOAD_SOUND_TICKS = {8, 12, 14};
+	public static final String[] FORTRESS_SKILL_LOAD_SOUND_KEYS = {
+			"reload2", "double_axe_swing01", "mag"
+	};
+	public static final String FORTRESS_SKILL_READY_SOUND_KEY = "double_axe_swing01";
+	public static final int[] FORTRESS_SKILL_GATHER_SOUND_TICKS = {0, 10, 20, 30};
+	public static final String[] FORTRESS_SKILL_GATHER_SOUND_KEYS = {
+			"current", "imp1", "imp1", "imp1"
+	};
+	public static final int[] FORTRESS_SKILL_HIT_SOUND_TICKS = {0, 1, 10, 12, 33, 35};
+	public static final String[] FORTRESS_SKILL_HIT_SOUND_KEYS = {
+			"smash_ground4", "explosion1", "double_axe_swing01",
+			"vent", "reload", "reload2"
+	};
+
+	public static float fortressSkillDamage(int level) {
+		return FORTRESS_SKILL_BASE_DAMAGE
+				* (float) Math.pow(FORTRESS_SKILL_LEVEL_MULTIPLIER,
+						Math.max(1, Math.min(3, level)) - 1);
+	}
 	public static final int[] MELEE_HOLD_OVER_SOUND_TICKS = {3, 10, 16, 18};
 	public static final String[] MELEE_HOLD_OVER_SOUND_KEYS = {
-			"glaive_slash02", "imp1", "smash_ground3", "imp1"
+			"glaive_slash02", "imp1", "imp1", "imp1"
 	};
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
@@ -189,6 +227,20 @@ public final class TkGun {
 	public static final double SKILL_JUMP_FALL_INERTIA_MULTIPLIER = 2.0D;
 	/** Safety lifetime; normal landing ends the state earlier. */
 	public static final int SKILL_JUMP_MAX_TICKS = 40;
+	/** Slow Falling duration before the fall attack acquires and dives at a target. */
+	public static final int SKILL_FALL_SLOW_TICKS = 5;
+	/** 30 blocks per second at 20 ticks per second. */
+	public static final double SKILL_FALL_DIVE_SPEED = 1.5D;
+	/** Forward length and total width of the downward target search footprint. */
+	public static final double SKILL_FALL_SEARCH_LENGTH = 12.0D;
+	public static final double SKILL_FALL_SEARCH_WIDTH = 6.0D;
+	/** Safety lifetime for the airborne dive state. */
+	public static final int SKILL_FALL_ATTACK_MAX_TICKS = 200;
+	/** Authored fall_attack_over_to_idle is 0.5 s; one extra tick holds its final key. */
+	public static final int SKILL_FALL_RECOVERY_TICKS =
+			(int) Math.ceil(0.5D * 20.0D) + 1;
+	public static final double SKILL_FALL_EXPLOSION_RADIUS = 6.0D;
+	public static final float SKILL_FALL_EXPLOSION_DAMAGE = 20.0F;
 
 	public static String meleeAnimation(int step) {
 		return "ATK_" + Math.max(1, Math.min(4, step));
@@ -201,13 +253,18 @@ public final class TkGun {
 	public static int meleeTicks(int step) {
 		return switch (step) {
 			case 1 -> MELEE_ATK1_TICKS;
+			case 2 -> MELEE_ATK2_TICKS;
 			case 3 -> MELEE_ATK3_MAIN_END_TICK + MELEE_ATK3_HOLD_RENDER_TICKS;
 			default -> 20;
 		};
 	}
 
 	public static int meleeHitTick(int step) {
-		return step == 1 ? MELEE_ATK1_HIT_TICK : MELEE_HIT_TICK;
+		return switch (step) {
+			case 1 -> MELEE_ATK1_HIT_TICK;
+			case 2 -> MELEE_ATK2_HIT_TICK;
+			default -> MELEE_HIT_TICK;
+		};
 	}
 	/**
 	 * 连发节奏：两发之间隔几 tick（每发都把该发动画从头播一遍 → 后坐/枪口焰/弹壳跟着重播）。
@@ -314,7 +371,9 @@ public final class TkGun {
 	 * 用户 2026-10-16："按下进入专注模式，再次输入则退出并使用 Focus_over 动画"。
 	 * 这段里状态是 {@link State#OVER}，播完 {@code tickAll} 就回 {@link State#IDLE}。
 	 */
-	public static final int FOCUS_EXIT_TICKS = 22;
+	/** Updated Focus_over is 1.625 s; one extra tick renders its final key. */
+	public static final int FOCUS_EXIT_TICKS =
+			(int) Math.ceil(1.625D * 20.0D) + 1;
 	/**
 	 * **"缓慢"效果的放大器** —— 现在只绑两件事（用户 2026-10-17：
 	 * "将缓慢效果绑定退出专注状态以及过热两种状态"）：
@@ -398,6 +457,12 @@ public final class TkGun {
 	public static final double ROSE_QUARTZ_GUIDANCE_RADIUS = 6.0D;
 	public static final float ROSE_QUARTZ_DAMAGE = 5.0F;
 	public static final int ROSE_QUARTZ_FOCUS_CYCLE_TICKS = GRAPESHOT_FOCUS_CYCLE_TICKS;
+
+	/** Grapeshot keeps the shotgun's ramp while applying its 80% cadence modifier. */
+	public static int grapeshotFocusCycleTicks(GunDefinition definition, int ramp) {
+		return Math.max(1, Math.round(
+				definition.focusCycleTicks(ramp) * GRAPESHOT_FOCUS_CYCLE_MULTIPLIER));
+	}
 
 	/** Starts at the shotgun's 80% cadence, then shortens with each consecutive focus shot. */
 	public static int roseQuartzFocusCycleTicks(int ramp) {
@@ -514,6 +579,8 @@ public final class TkGun {
 	 * `tkgun:imp1`，**由服务端在命中点放** → 分发出去之后附近所有人都听得见。
 	 */
 	public static final Identifier SND_IMPACT = id("imp1");
+	/** Veritas close-combat impact from the supplied hit.mp3. */
+	public static final Identifier SND_MELEE_HIT = id("hit");
 	public static final Identifier SND_CUTTING1 = id("cutting1");
 	public static final Identifier SND_EXPLOSION1 = id("explosion1");
 	public static final Identifier SND_ROSE_QUARTZ_HIT = id("rose_quartz_hit");
@@ -539,6 +606,8 @@ public final class TkGun {
 	/** ATK_3 authored mace ground impact (`smash_ground1.ogg`). */
 	public static final Identifier SND_SMASH_GROUND1 = id("smash_ground1");
 	public static final Identifier SND_SMASH_GROUND_HEAVY = id("smash_ground_heavy");
+	/** Updated fortress hit impact (`smash_ground4.ogg`). */
+	public static final Identifier SND_SMASH_GROUND4 = id("smash_ground4");
 	/** ATK_hold_over authored mace ground impact (`smash_ground3.ogg`). */
 	public static final Identifier SND_SMASH_GROUND3 = id("smash_ground3");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
@@ -576,6 +645,7 @@ public final class TkGun {
 			Map.entry("claymore_swing",
 					new KeyframeSound(SND_CLAYMORE_SWING, 1.0F, 1.0F)),
 			Map.entry("imp1", new KeyframeSound(SND_IMPACT, 1.0F, 1.0F)),
+			Map.entry("1", new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
 			Map.entry("anchor_slam01",
 					new KeyframeSound(SND_ANCHOR_SLAM1, 1.0F, 1.0F)),
 			Map.entry("smash_air1",
@@ -589,7 +659,11 @@ public final class TkGun {
 			Map.entry("smash_ground3",
 					new KeyframeSound(SND_SMASH_GROUND3, 1.0F, 1.0F)),
 			Map.entry("smash_ground_heavy",
-					new KeyframeSound(SND_SMASH_GROUND_HEAVY, 1.0F, 1.0F)));
+					new KeyframeSound(SND_SMASH_GROUND_HEAVY, 1.0F, 1.0F)),
+			Map.entry("smash_ground4",
+					new KeyframeSound(SND_SMASH_GROUND4, 1.0F, 1.0F)),
+			Map.entry("explosion1",
+					new KeyframeSound(SND_EXPLOSION1, 1.0F, 1.0F)));
 
 	/** 一个玩家**同一个 tick 里**最多让服务端放几声关键帧音（防改包刷屏；正常最多 2 声）。 */
 	public static final int KEYFRAME_SOUNDS_PER_TICK = 6;

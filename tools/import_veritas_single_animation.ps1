@@ -5,11 +5,17 @@ param(
     [string]$AnimationPath,
     [Parameter(Mandatory = $true)]
     [string]$AnimationName,
-    [switch]$IncludeLegs
+    [switch]$IncludeLegs,
+    [string]$TargetAnimationName = ""
 )
 
 $ErrorActionPreference = "Stop"
 $invariant = [Globalization.CultureInfo]::InvariantCulture
+$outputAnimationName = if ([string]::IsNullOrWhiteSpace($TargetAnimationName)) {
+    $AnimationName
+} else {
+    $TargetAnimationName
+}
 
 function Number([object]$value) {
     return [double]::Parse([string]$value, $invariant)
@@ -41,7 +47,9 @@ if ($null -eq $source) {
 }
 
 $converted = [ordered]@{
-    loop = if ($source.loop -eq "hold" -or $source.loop -eq $false) {
+    loop = if ($source.loop -eq "loop" -or $source.loop -eq $true) {
+        $true
+    } elseif ($source.loop -eq "hold" -or $source.loop -eq $false) {
         "hold_on_last_frame"
     } else {
         $source.loop
@@ -132,15 +140,15 @@ $target = [IO.File]::ReadAllText(
 $orderedAnimations = [ordered]@{}
 $replaced = $false
 foreach ($property in $target.animations.PSObject.Properties) {
-    if ($property.Name -eq $AnimationName) {
-        $orderedAnimations[$AnimationName] = [pscustomobject]$converted
+    if ($property.Name -eq $outputAnimationName) {
+        $orderedAnimations[$outputAnimationName] = [pscustomobject]$converted
         $replaced = $true
     } else {
         $orderedAnimations[$property.Name] = $property.Value
     }
 }
 if (-not $replaced) {
-    $orderedAnimations[$AnimationName] = [pscustomobject]$converted
+    $orderedAnimations[$outputAnimationName] = [pscustomobject]$converted
 }
 $target.animations = [pscustomobject]$orderedAnimations
 
@@ -148,5 +156,5 @@ $encoding = New-Object System.Text.UTF8Encoding($false)
 $json = $target | ConvertTo-Json -Depth 100 -Compress
 [IO.File]::WriteAllText($AnimationPath, $json, $encoding)
 Write-Output ("Imported {0}: length={1}, bones={2}, sounds={3}" -f
-        $AnimationName, $converted.animation_length,
+        $outputAnimationName, $converted.animation_length,
         $converted.bones.Count, $sounds.Count)

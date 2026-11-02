@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$SkillModel,
     [Parameter(Mandatory = $true)]
-    [string]$Geometry
+    [string]$Geometry,
+    [switch]$ReplaceExisting
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,7 +25,8 @@ function FindGroups($nodes, [string]$parent, $map, $found) {
         if ($node -is [string]) {
             continue
         }
-        if ($node.name -in @('skill_1', 'skill_2')) {
+        if ($node.name -in @('skill_1', 'fire_skill',
+                'step_1', 'step_2', 'step_3', 'step_4')) {
             $found[$node.name] = [pscustomobject]@{
                 Node = $node
                 Parent = $parent
@@ -61,7 +63,20 @@ foreach ($element in @($model.elements)) {
 $groups = @{}
 FindGroups $model.outliner $null $groups $groups
 
-foreach ($groupName in @('skill_1', 'skill_2')) {
+$staleSkillBones = @($geo.bones | Where-Object name -eq 'skill_2')
+if ($staleSkillBones.Count -gt 0) {
+    $geo.bones = @($geo.bones | Where-Object name -ne 'skill_2')
+    Write-Output "removed stale skill_2 arm child"
+}
+
+$targetGroups = @('skill_1', 'fire_skill',
+        'step_1', 'step_2', 'step_3', 'step_4')
+if ($ReplaceExisting) {
+    $geo.bones = @($geo.bones | Where-Object { $_.name -notin $targetGroups })
+}
+
+foreach ($groupName in @('skill_1', 'fire_skill',
+        'step_1', 'step_2', 'step_3', 'step_4')) {
     if (-not $groups.ContainsKey($groupName)) {
         throw "Missing source group: $groupName"
     }
@@ -79,7 +94,7 @@ foreach ($groupName in @('skill_1', 'skill_2')) {
             $uv = [ordered]@{}
             foreach ($faceName in @('north', 'east', 'south', 'west', 'up', 'down')) {
                 $face = $cube.faces.$faceName
-                if ($null -eq $face) {
+                if ($null -eq $face -or $null -eq $face.texture) {
                     continue
                 }
                 $uv[$faceName] = ConvertFace $face

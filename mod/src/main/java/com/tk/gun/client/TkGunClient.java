@@ -4,6 +4,7 @@ import com.tk.gun.TkGun;
 import com.tk.gun.CombatRollHook;
 import com.tk.gun.TkGunParticles;
 import com.tk.gun.net.GunFocusPayload;
+import com.tk.gun.net.GunFallAttackPayload;
 import com.tk.gun.net.GunFirePayload;
 import com.tk.gun.net.GunJumpPayload;
 import com.tk.gun.net.GunReloadPayload;
@@ -600,6 +601,12 @@ public class TkGunClient implements ClientModInitializer {
 				|| GunClientState.focusish(client.player.getId())) {
 			return false;
 		}
+		GunClientState.Entry state = GunClientState.get(client.player.getId());
+		if (state != null && (state.state == TkGun.State.SKILL_JUMP
+				|| state.state == TkGun.State.FALL_ATTACK
+				|| state.state == TkGun.State.FALL_ATTACK_RECOVERY)) {
+			return false;
+		}
 		// Server-authoritative state validation avoids falling back to a fire packet
 		// merely because a state packet has not arrived in the same client tick.
 		return true;
@@ -743,6 +750,10 @@ public class TkGunClient implements ClientModInitializer {
 						MeleeImpactClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunHitMarkerPayload.ID,
 				(payload, context) -> context.client().execute(GunReticle::triggerHitMarker));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.FortressSkillCooldownPayload.ID,
+				(payload, context) -> context.client().execute(
+						() -> FortressSkillCooldownClient.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunDemoPayload.ID,
 				(payload, context) -> context.client().execute(
 						() -> GunDebugHarness.setRemoteEnabled(payload.on())));
@@ -771,6 +782,14 @@ public class TkGunClient implements ClientModInitializer {
 								LocatorShriekBurst.Source.SUMMON_ANTENNA,
 								new net.minecraft.util.math.Vec3d(
 										payload.x(), payload.y(), payload.z()))));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.GunLocatorVentPayload.ID,
+				(payload, context) -> context.client().execute(() ->
+						LocatorShriekBurst.start(
+								payload.playerId(),
+								LocatorShriekBurst.Source.GUN,
+								new net.minecraft.util.math.Vec3d(
+										payload.x(), payload.y(), payload.z()))));
 
 
 		com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
@@ -780,6 +799,14 @@ public class TkGunClient implements ClientModInitializer {
 			io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
 					backpack, com.tk.gun.client.CombatBackpackAccessoryRenderer::new);
 		}
+		io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
+				com.tk.gun.TkGunServer.MECHANICIAN_UNDERSUIT,
+				com.tk.gun.client.MechanicianUndersuitRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer.register(
+				new com.tk.gun.client.MechanicianArmorRenderer(),
+				com.tk.gun.TkGunServer.MECHANICIAN_CHESTPLATE,
+				com.tk.gun.TkGunServer.MECHANICIAN_LEGGINGS,
+				com.tk.gun.TkGunServer.MECHANICIAN_BOOTS);
 		io.wispforest.accessories.api.client.AccessoriesRendererRegistry.onReload();
 		TkGun.LOGGER.info("[tkgun] 战斗背包 Accessories 渲染器={}",
 				io.wispforest.accessories.api.client.AccessoriesRendererRegistry
@@ -853,7 +880,29 @@ public class TkGunClient implements ClientModInitializer {
 		boolean focusDown = sneakDown && client.currentScreen == null;
 		// **Z = 切换专注**（用户 2026-10-17："将 z 的长按专注回调为切换"）：**只在按下那一下发一包**，
 		// 服务端按当前是否已专注决定进（`Focus_ready`）/ 出（`Focus_over`）。
-		if (focusDown != focusKeyDown) {
+		boolean fallAttackInputConsumed = false;
+		if (focusDown && !focusKeyDown && TkGun.holdingGun(client.player)) {
+			GunClientState.Entry jumpState =
+					GunClientState.get(client.player.getId());
+			boolean silentStormHeld = TkGun.definition(client.player).id()
+					.equals(TkGun.id("abyssal_ancient_cannon"));
+			if (silentStormHeld && jumpState != null
+					&& jumpState.state == TkGun.State.SKILL_JUMP) {
+				ClientPlayNetworking.send(
+						new GunFallAttackPayload());
+				focusKeyDown = true;
+				fallAttackInputConsumed = true;
+				TkGun.LOGGER.info("[tkgun] Z pre-input -> queue Silent Storm fall_attack");
+			} else if (jumpState != null
+					&& (jumpState.state == TkGun.State.FALL_ATTACK
+							|| jumpState.state == TkGun.State.FALL_ATTACK_RECOVERY)) {
+				focusKeyDown = true;
+				fallAttackInputConsumed = true;
+				TkGun.LOGGER.info("[tkgun] Z ignored during fall attack state={}",
+						jumpState.state);
+			}
+		}
+		if (!fallAttackInputConsumed && focusDown != focusKeyDown) {
 			focusKeyDown = focusDown;
 			if (focusDown && TkGun.holdingGun(client.player)) {
 				// **翻滚中按 Z = 快速蹲射**（用户 2026-10-17）：不再屏蔽 —— 服务端会打断翻滚动画、
@@ -952,7 +1001,10 @@ public class TkGunClient implements ClientModInitializer {
 		// （用户报的"翻滚未生效"就是这个根因）。服务端收到后：若是过热/退门 → 打断动画 +
 		// 清掉缓慢 + 状态切成 ROLL；其余情况什么都不做，翻滚照旧由 combat_roll 自己走。
 		boolean rollDown = readRollKeyDown(client);
-		if (rollDown && !rollKeyDown && TkGun.holdingGun(client.player)) {
+		boolean armorDodge = com.tk.gun.item.MechanicianUndersuitItem
+				.canUseArmorDodge(client.player);
+		if (rollDown && !rollKeyDown
+				&& (TkGun.holdingGun(client.player) || armorDodge)) {
 			GunClientState.Entry rollState = GunClientState.get(client.player.getId());
 			boolean prep = rollState != null && (rollState.state == TkGun.State.AIM
 					|| rollState.state == TkGun.State.AIM_FAST

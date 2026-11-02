@@ -8,15 +8,18 @@ final class CombatRollBridge {
 		TkGun.LOGGER.info("[tkgun] Combat Roll 已接入：ROLL 窗口按资源 `roll` 动画长度 = {} tick",
 				CombatRollHook.ROLL_DURATION);
 		ServerSideRollEvents.PLAYER_START_ROLLING.register((player, direction) -> {
+			boolean holdingGun = TkGun.holdingGun(player);
+			boolean armorDodge = com.tk.gun.item.MechanicianUndersuitItem
+					.canUseArmorDodge(player);
 			TkGun.LOGGER.info("[tkgun] 翻滚事件：手持弩炮={} 当前状态={} 玩家={}",
-					TkGun.holdingGun(player), TkGunServer.state(player).state,
+					holdingGun, TkGunServer.state(player).state,
 					player.getName().getString());
 			player.removeStatusEffect(net.minecraft.entity.effect.StatusEffects.SLOWNESS);
-			if (!TkGun.holdingGun(player)) {
+			if (!holdingGun && !armorDodge) {
 				return;
 			}
 			double horizontalSq = direction.x * direction.x + direction.z * direction.z;
-			if (horizontalSq > 1.0E-6D) {
+			if (holdingGun && horizontalSq > 1.0E-6D) {
 				float rollYaw = (float) Math.toDegrees(Math.atan2(-direction.x, direction.z));
 				player.setYaw(rollYaw);
 				player.setBodyYaw(rollYaw);

@@ -5,14 +5,9 @@ import net.minecraft.entity.Entity;
 import net.minecraft.particle.ShriekParticleEffect;
 import net.minecraft.util.math.Vec3d;
 
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-
 /**
- * Re-creates the sculk shrieker's ten-step particle delay while resolving the
- * attachment point again for every step. Vanilla resolves all ten positions at
- * once, which leaves late particles behind when a moving gun or antenna is used.
+ * Creates the same ten shriek sprites as a sculk shrieker in one burst. A tiny
+ * visual ring prevents all ten sprites from occupying the exact same point.
  */
 public final class LocatorShriekBurst {
 	private static final int PARTICLE_COUNT = 10;
@@ -20,23 +15,6 @@ public final class LocatorShriekBurst {
 		GUN,
 		SUMMON_ANTENNA
 	}
-
-	private record Key(int playerId, Source source) {
-	}
-
-	private static final class Burst {
-		long startedAt;
-		int spawned;
-		Vec3d fallbackOffset;
-
-		Burst(long startedAt, int spawned, Vec3d fallbackOffset) {
-			this.startedAt = startedAt;
-			this.spawned = spawned;
-			this.fallbackOffset = fallbackOffset;
-		}
-	}
-
-	private static final Map<Key, Burst> BURSTS = new HashMap<>();
 
 	public static void start(int playerId, Source source, Vec3d origin) {
 		MinecraftClient client = MinecraftClient.getInstance();
@@ -50,40 +28,18 @@ public final class LocatorShriekBurst {
 		Vec3d resolved = origin == null
 				? entity.getEyePos().add(entity.getRotationVec(1.0F).multiply(0.5D))
 				: origin;
-		Vec3d offset = resolved.subtract(entity.getEyePos());
-		BURSTS.put(new Key(playerId, source),
-				new Burst(client.world.getTime(), 1, offset));
-		spawn(client, resolved);
+		for (int index = 0; index < PARTICLE_COUNT; index++) {
+			double angle = Math.PI * 2.0D * index / PARTICLE_COUNT;
+			double radius = 0.16D + (index % 3) * 0.08D;
+			spawn(client, resolved.add(
+					Math.cos(angle) * radius,
+					(index % 2) * 0.04D,
+					Math.sin(angle) * radius));
+		}
 	}
 
 	public static void tick(MinecraftClient client) {
-		if (client.world == null) {
-			BURSTS.clear();
-			return;
-		}
-		long now = client.world.getTime();
-		Iterator<Map.Entry<Key, Burst>> iterator = BURSTS.entrySet().iterator();
-		while (iterator.hasNext()) {
-			Map.Entry<Key, Burst> entry = iterator.next();
-			Key key = entry.getKey();
-			Burst burst = entry.getValue();
-			Entity entity = client.world.getEntityById(key.playerId());
-			long age = now - burst.startedAt;
-			if (entity == null || age > (long) PARTICLE_COUNT * 5L) {
-				iterator.remove();
-				continue;
-			}
-			int targetCount = (int) Math.min(PARTICLE_COUNT, age / 5L + 1L);
-			while (burst.spawned < targetCount) {
-				Vec3d locator = key.source() == Source.GUN
-						? com.tk.gun.client.rig.BowgunRigRenderer.locatorPosition(key.playerId())
-						: CombatBackpackGeoRenderer.summonLocatorPosition(key.playerId());
-				Vec3d position = locator != null
-						? locator : entity.getEyePos().add(burst.fallbackOffset);
-				spawn(client, position);
-				burst.spawned++;
-			}
-		}
+		// Kept for the existing client tick hook; the burst is created atomically.
 	}
 
 	private static void spawn(MinecraftClient client, Vec3d position) {

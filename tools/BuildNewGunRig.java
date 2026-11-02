@@ -181,6 +181,13 @@ public final class BuildNewGunRig {
 		if (target == null || source == null) {
 			throw new IllegalStateException("Missing " + name + " animation.");
 		}
+		if (source.has("animation_length")) {
+			target.add("animation_length",
+					source.get("animation_length").deepCopy());
+		}
+		if (source.has("loop")) {
+			target.add("loop", source.get("loop").deepCopy());
+		}
 		JsonObject targetBones = target.getAsJsonObject("bones");
 		JsonObject sourceBones = source.getAsJsonObject("bones");
 		for (String bone : sourceBones.keySet()) {

@@ -12,17 +12,18 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Merges the four close-combat clips into the existing Veritas player rig and
- * keeps their leg channels disabled so locomotion remains externally owned.
+ * Merges the authored close-combat clips into the existing Veritas player rig.
+ * Full-body dash/entry clips keep their leg channels; attack clips whose lower
+ * body is externally owned have those channels removed.
  */
 public final class MergeVeritasMeleeAnimations {
 	private static final Gson GSON = new GsonBuilder()
 			.disableHtmlEscaping().setPrettyPrinting().create();
 	private static final List<String> MELEE_ANIMATIONS =
-			List.of("ATK_1", "ATK_1_to_idle",
-					"ATK_2", "ATK_2_to_idle", "ATK_2_end",
+			List.of("ATK_run", "ATK_1", "ATK_1_to_idle",
+					"ATK_2", "ATK_2_to_idle",
 					"ATK_3", "ATK_3_to_idle", "ATK_3_hold",
-					"ATK_4", "ATK_4_to_idle");
+					"ATK_4", "ATK_4_to_idle", "ATK_hold_over");
 
 	public static void main(String[] args) throws Exception {
 		Path targetPath = Path.of(args[0]);
@@ -48,8 +49,10 @@ public final class MergeVeritasMeleeAnimations {
 			}
 			JsonObject copy = animation.deepCopy();
 			JsonObject animationBones = copy.getAsJsonObject("bones");
-			boolean preserveLegs = "ATK_2_end".equals(name)
-					|| name.endsWith("_to_idle");
+			boolean preserveLegs = "ATK_run".equals(name)
+					|| "ATK_1".equals(name)
+					|| name.endsWith("_to_idle")
+					|| "ATK_hold_over".equals(name);
 			for (String bone : List.copyOf(animationBones.keySet())) {
 				if (!geometryBones.contains(bone)
 						|| (!preserveLegs
@@ -60,8 +63,22 @@ public final class MergeVeritasMeleeAnimations {
 			targetAnimations.add(name, copy);
 		}
 
+		JsonObject acceleratedRun = sourceAnimations.getAsJsonObject("run");
+		if (acceleratedRun == null) {
+			throw new IllegalStateException("Missing source animation: run");
+		}
+		JsonObject acceleratedCopy = acceleratedRun.deepCopy();
+		JsonObject acceleratedBones = acceleratedCopy.getAsJsonObject("bones");
+		for (String bone : List.copyOf(acceleratedBones.keySet())) {
+			if (!geometryBones.contains(bone)) {
+				acceleratedBones.remove(bone);
+			}
+		}
+		targetAnimations.add("veritas_accelerated_run", acceleratedCopy);
+
 		Files.writeString(targetPath, GSON.toJson(target), StandardCharsets.UTF_8);
-		System.out.println("Merged melee animations: " + String.join(", ", MELEE_ANIMATIONS));
+		System.out.println("Merged melee animations: " + String.join(", ", MELEE_ANIMATIONS)
+				+ ", run -> veritas_accelerated_run");
 	}
 
 	private static JsonObject read(Path path) throws Exception {

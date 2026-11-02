@@ -1,4 +1,13 @@
 ﻿{
+    "item.tkgun.mechanician_undersuit":  "Mechanician Undersuit",
+    "item.tkgun.mechanician_chestplate":  "Mechanician Chestplate",
+    "item.tkgun.mechanician_leggings":  "Mechanician Leggings",
+    "item.tkgun.mechanician_boots":  "Mechanician Boots",
+    "tooltip.tkgun.mechanician_undersuit":  "Accessory-slot undersuit. Replaces the player body below the head and grants 3 armor.",
+    "tooltip.tkgun.mechanician_chestplate":  "Chestplate and cloth drapes. Requires the Mechanician Undersuit.",
+    "tooltip.tkgun.mechanician_leggings":  "Mechanician leg armor. Requires the Mechanician Undersuit.",
+    "tooltip.tkgun.mechanician_boots":  "Mechanician boots. Requires the Mechanician Undersuit.",
+    "message.tkgun.requires_undersuit":  "Equip the Mechanician Undersuit first",
     "tooltip.tkgun.portable_launcher.storage":  "Occupies the offhand as launch storage. Only fireworks, tipped arrows, wind charges, and tridents can be stored.",
     "tooltip.tkgun.portable_launcher.ammo":  "Swap from a launchable main-hand item; a finished cooldown restores all 3 charges.",
     "tooltip.tkgun.portable_launcher.trajectory":  "Backpack projectiles fall at one-third gravity; Loyalty tridents return to the offhand first.",

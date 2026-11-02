@@ -6,6 +6,8 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.ArrayList;
@@ -56,9 +58,34 @@ public final class MeleeImpactService {
 				Math.max(1, baseTicks + (critical ? CRIT_BONUS_TICKS : 0)));
 		int[] targetIds = new int[targets.size()];
 		long now = attacker.getWorld().getTime();
+		boolean impactSoundPlayed = false;
 		for (int index = 0; index < targets.size(); index++) {
 			Entity target = targets.get(index);
 			targetIds[index] = target.getId();
+			Vec3d center = target.getBoundingBox().getCenter();
+			Vec3d outward = attacker.getEyePos().subtract(center);
+			outward = new Vec3d(outward.x, 0.0D, outward.z);
+			if (outward.lengthSquared() < 1.0E-6D) {
+				double yaw = Math.toRadians(attacker.getYaw());
+				outward = new Vec3d(Math.sin(yaw), 0.0D, -Math.cos(yaw));
+			}
+			outward = outward.normalize();
+			double surfaceOffset = target.getWidth() * 0.5D + 0.2D;
+			Vec3d impactPos = new Vec3d(
+					center.x + outward.x * surfaceOffset,
+					target.getY() + target.getHeight() * 0.62D,
+					center.z + outward.z * surfaceOffset);
+			attacker.getServerWorld().spawnParticles(
+					TkGunParticles.GRAPESHOT_IMPACT,
+					impactPos.x, impactPos.y, impactPos.z,
+					1, 0.0D, 0.0D, 0.0D, 0.0D);
+			if (!impactSoundPlayed) {
+				impactSoundPlayed = true;
+				attacker.getServerWorld().playSound(null, impactPos.x,
+						impactPos.y, impactPos.z,
+						SoundEvent.of(TkGun.SND_MELEE_HIT),
+						SoundCategory.MASTER, 2.0F, 2.0F);
+			}
 			if (target instanceof LivingEntity living) {
 				PENDING_KNOCKBACK.compute(living.getId(), (id, previous) -> {
 					long releaseAt = now + ticks;

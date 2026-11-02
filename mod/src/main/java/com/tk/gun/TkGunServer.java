@@ -47,10 +47,12 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** 服务端：物品注册 + 权威状态机（开火/过热/拉栓/滑铲/翻滚广播）。 */
@@ -71,6 +73,10 @@ public class TkGunServer implements ModInitializer {
 	public static Item AUTO_PORTABLE_LAUNCHER;
 	public static Item SUMMON_ANTENNA;
 	public static Item BACKPACK_COOLDOWN_RESET;
+	public static Item MECHANICIAN_UNDERSUIT;
+	public static Item MECHANICIAN_CHESTPLATE;
+	public static Item MECHANICIAN_LEGGINGS;
+	public static Item MECHANICIAN_BOOTS;
 	/** 只用来给创造模式标签当图标的物品（`视觉/创造模式标签.png`）。 */
 	public static Item TAB_ICON;
 	/** 素材 `子弹` 文件夹里的 5 种子弹（顺序：切割/幽匿/爆破/玫瑰石英/破甲）。 */
@@ -165,6 +171,13 @@ public class TkGunServer implements ModInitializer {
 		public boolean skillJumpAirborne;
 		public boolean skillJumpFalling;
 		public boolean skillJumpResumeSprint;
+		/** One queued Z input consumed at the jump apex. */
+		public boolean skillFallAttackQueued;
+		public boolean skillFallDiveStarted;
+		public boolean skillFallImpactDone;
+		public boolean skillFallHeatEffectStarted;
+		public long skillFallSlowUntil;
+		public UUID skillFallTargetUuid;
 		/**
 		 * **翻滚后的快速蹲射宽限窗**（截止 tick）。
 		 *
@@ -332,14 +345,17 @@ public class TkGunServer implements ModInitializer {
 		public int fortressSkillLevel;
 		public double fortressSkillHitDirX;
 		public double fortressSkillHitDirZ;
-		public double fortressSkillHitFromX;
-		public double fortressSkillHitFromZ;
-		public boolean fortressSkillDirectionLocked;
+		public boolean fortressSkillFromFocus;
+		public boolean fortressSkillFromSlide;
+		public double fortressSkillSlideDirX;
+		public double fortressSkillSlideDirZ;
+		public double fortressSkillSlideSpeed;
+		public int fortressSkillSoundMask;
 		public boolean meleeAtk3MainEnded;
 		public boolean meleeAtk4Empowered;
 		public boolean meleeHoldOver;
 		public int meleeHoldOverHits;
-		public int meleeHoldOverSoundIndex;
+		public final Set<String> meleePlayedSoundCues = new HashSet<>();
 		public double meleeHoldOverDirX;
 		public double meleeHoldOverDirZ;
 		public boolean meleeDashAttack;
@@ -410,9 +426,9 @@ public class TkGunServer implements ModInitializer {
 				|| st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER
 				|| st.state == TkGun.State.INSPECT || st.state == TkGun.State.MELEE
 				|| st.state == TkGun.State.SKILL_JUMP
+				|| st.state == TkGun.State.FALL_ATTACK
+				|| st.state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
 				|| now < st.aimLockUntil || now < st.dashUntil
 				|| now < st.overheatUntil;
@@ -567,8 +583,71 @@ public class TkGunServer implements ModInitializer {
 		return item;
 	}
 
+	private static void registerArmorItems() {
+		MECHANICIAN_UNDERSUIT = Registry.register(
+				Registries.ITEM, TkGun.id("mechanician_undersuit"),
+				new com.tk.gun.item.MechanicianUndersuitItem(
+						new Item.Settings().maxCount(1)));
+		io.wispforest.accessories.api.AccessoriesAPI.registerAccessory(
+				MECHANICIAN_UNDERSUIT,
+				(io.wispforest.accessories.api.Accessory)
+						MECHANICIAN_UNDERSUIT);
+		MECHANICIAN_CHESTPLATE = Registry.register(
+				Registries.ITEM, TkGun.id("mechanician_chestplate"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.CHESTPLATE,
+						net.minecraft.item.ArmorItem.Type.CHESTPLATE,
+						new Item.Settings()));
+		MECHANICIAN_LEGGINGS = Registry.register(
+				Registries.ITEM, TkGun.id("mechanician_leggings"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.LEGGINGS,
+						net.minecraft.item.ArmorItem.Type.LEGGINGS,
+						new Item.Settings()));
+		MECHANICIAN_BOOTS = Registry.register(
+				Registries.ITEM, TkGun.id("mechanician_boots"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.BOOTS,
+						net.minecraft.item.ArmorItem.Type.BOOTS,
+						new Item.Settings()));
+	}
+
+	/**
+	 * Vanilla armor slots and commands can bypass {@link Item#use}. Enforce the
+	 * dependency authoritatively on the server, including removing the outer
+	 * pieces if the undersuit is removed by any other mod.
+	 */
+	private static void enforceArmorRequirement(MinecraftServer server) {
+		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+			if (com.tk.gun.item.MechanicianUndersuitItem.isEquipped(player)) {
+				continue;
+			}
+			for (net.minecraft.entity.EquipmentSlot slot :
+					new net.minecraft.entity.EquipmentSlot[]{
+							net.minecraft.entity.EquipmentSlot.CHEST,
+							net.minecraft.entity.EquipmentSlot.LEGS,
+							net.minecraft.entity.EquipmentSlot.FEET}) {
+				ItemStack equipped = player.getEquippedStack(slot);
+				if (!(equipped.getItem()
+						instanceof com.tk.gun.item.MechanicianArmorItem)) {
+					continue;
+				}
+				ItemStack removed = equipped.copy();
+				player.equipStack(slot, ItemStack.EMPTY);
+				if (!player.getInventory().insertStack(removed)) {
+					player.dropItem(removed, false);
+				}
+				player.sendMessage(net.minecraft.text.Text.translatable(
+						"message.tkgun.requires_undersuit"), true);
+			}
+		}
+	}
+
 	@Override
 	public void onInitialize() {
+		registerArmorItems();
+		ServerTickEvents.END_SERVER_TICK.register(
+				server -> enforceArmorRequirement(server));
 		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
 		PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
 				!TkGun.holdingGun(player));
@@ -726,6 +805,10 @@ public class TkGunServer implements ModInitializer {
 							entries.add(AUTO_PORTABLE_LAUNCHER);
 							entries.add(SUMMON_ANTENNA);
 							entries.add(BACKPACK_COOLDOWN_RESET);
+							entries.add(MECHANICIAN_UNDERSUIT);
+							entries.add(MECHANICIAN_CHESTPLATE);
+							entries.add(MECHANICIAN_LEGGINGS);
+							entries.add(MECHANICIAN_BOOTS);
 							entries.add(MOLTEN_GOLEM_SPAWN_EGG);
 							entries.add(ENTITY_REMOVAL_TOOL);
 							for (Item bullet : BULLET_ITEMS) {
@@ -752,6 +835,9 @@ public class TkGunServer implements ModInitializer {
 						.build("molten_trident"));
 		PayloadTypeRegistry.playS2C().register(GunStatePayload.ID, GunStatePayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.FortressSkillCooldownPayload.ID,
+				com.tk.gun.net.FortressSkillCooldownPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.MeleeImpactPayload.ID,
 				com.tk.gun.net.MeleeImpactPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(com.tk.gun.net.GunHitMarkerPayload.ID,
@@ -767,9 +853,15 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.CombatBackpackParticlePayload.ID,
 				com.tk.gun.net.CombatBackpackParticlePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.GunLocatorVentPayload.ID,
+				com.tk.gun.net.GunLocatorVentPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(GunFirePayload.ID, GunFirePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
 				com.tk.gun.net.GunJumpPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.GunFallAttackPayload.ID,
+				com.tk.gun.net.GunFallAttackPayload.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(GunFirePayload.ID, (payload, context) ->
 				context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
@@ -801,6 +893,10 @@ public class TkGunServer implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunJumpPayload.ID,
 				(payload, context) -> context.server().execute(() ->
 						startGunJumpAction(context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.GunFallAttackPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleSilentStormFallInput(context.player())));
 		// —— Z 键（按住 = 专注）/ F 键（装填）（2026-10-17 改）——
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunFocusPayload.ID,
 				com.tk.gun.net.GunFocusPayload.CODEC);
@@ -823,6 +919,11 @@ public class TkGunServer implements ModInitializer {
 					// **闪避键 + Z 同时按**：翻滚与滑铲共用同一个“组合专注”缓冲。
 				// 如果 Z 先到，直接 startFocus 会先进普通 Focus_ready，随后翻滚/滑铲键又因为
 				// “蹲射准备中”被拒。带组合标记 / 刚收到闪避键时先缓存，等真正的 ROLL 或 SLIDE 开始再兑现。
+					if (holdingSilentStorm(p)
+							&& st.state == TkGun.State.SKILL_JUMP) {
+						handleSilentStormFallInput(p);
+						return;
+					}
 					boolean comboIntent = payload.dodgeCombo()
 							|| st.state == TkGun.State.ROLL
 							|| st.state == TkGun.State.SLIDE
@@ -871,9 +972,11 @@ public class TkGunServer implements ModInitializer {
 							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
 							|| st.state == TkGun.State.MELEE
 							|| st.state == TkGun.State.SKILL_JUMP
+							|| st.state == TkGun.State.FALL_ATTACK
+							|| st.state == TkGun.State.FALL_ATTACK_RECOVERY
 							|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
-							|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 							|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
 						return;
 					}
@@ -904,6 +1007,11 @@ public class TkGunServer implements ModInitializer {
 				context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
 					PState st = state(p);
+					if (!TkGun.holdingGun(p)
+							&& !com.tk.gun.item.MechanicianUndersuitItem
+									.canUseArmorDodge(p)) {
+						return;
+					}
 					st.rollRequestX = payload.directionX();
 					st.rollRequestZ = payload.directionZ();
 					long rollNow = p.getWorld().getTime();
@@ -915,9 +1023,15 @@ public class TkGunServer implements ModInitializer {
 								p.getName().getString());
 						return;
 					}
+					if (st.state == TkGun.State.FALL_ATTACK
+							|| st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
+						TkGun.LOGGER.info("[tkgun] fall attack active, this Alt press ignored player={}",
+								p.getName().getString());
+						return;
+					}
 					if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
-							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
-							|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 						return;
 					}
 					if (st.state == TkGun.State.FORTRESS_SKILL_HIT
@@ -1059,6 +1173,15 @@ public class TkGunServer implements ModInitializer {
 					}
 					long now = p.getWorld().getTime();
 					PState st = state(p);
+					if (st.state == TkGun.State.MELEE
+							&& switch (payload.sound()) {
+								case "glaive_slash02", "double_axe_swing01",
+										"anchor_slam01", "imp1", "1",
+										"claymore_swing" -> true;
+								default -> false;
+							}) {
+						return;
+					}
 					if (st.soundTick != now) {           // 每 tick 限制关键帧音效数量，避免重复触发刷屏
 						st.soundTick = now;
 						st.soundCount = 0;
@@ -1233,7 +1356,13 @@ public class TkGunServer implements ModInitializer {
 				TkGun.magazineCapacity(actor, true),
 				TkGun.definition(actor).maxShotIndex(),
 				st.airborneIdle, st.meleeDashAttack, st.meleeReturning,
-				st.meleeDashReturn, st.meleeReturnToRun, st.meleeHoldOver);
+				st.meleeDashReturn, st.meleeReturnToRun, st.meleeHoldOver,
+				(state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+						|| state == TkGun.State.FORTRESS_SKILL_HIT)
+						&& st.fortressSkillFromFocus,
+				state == TkGun.State.FORTRESS_SKILL_LOAD
+						&& st.fortressSkillFromSlide);
 		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(p, payload);
 		}
@@ -1288,6 +1417,10 @@ public class TkGunServer implements ModInitializer {
 				|| state == TkGun.State.AIM_SLIDE)) {
 			st.aimSoundAt = st.stateStarted + (state == TkGun.State.AIM ? 6
 					: (state == TkGun.State.AIM_FAST || state == TkGun.State.AIM_ROLL ? 2 : 1));
+		}
+		if (isFortressSkillState(state)) {
+			st.fortressSkillSoundMask = 0;
+			playFortressSkillSounds(player, st, 0L);
 		}
 		broadcast(server, player, state, ticks, st.heat);
 	}
@@ -2482,8 +2615,8 @@ public class TkGunServer implements ModInitializer {
 		st.meleeAtk3MainEnded = false;
 		st.meleeAtk4Empowered = st.meleeCombo == 4 && empowered;
 		st.meleeHoldOver = false;
+		st.meleePlayedSoundCues.clear();
 		st.meleeHoldOverHits = 0;
-		st.meleeHoldOverSoundIndex = 0;
 		st.meleeHoldOverDirX = 0.0D;
 		st.meleeHoldOverDirZ = 0.0D;
 		st.meleeDashAttack = false;
@@ -2518,8 +2651,8 @@ public class TkGunServer implements ModInitializer {
 		st.meleeAtk3MainEnded = true;
 		st.meleeAtk4Empowered = true;
 		st.meleeHoldOver = true;
+		st.meleePlayedSoundCues.clear();
 		st.meleeHoldOverHits = 0;
-		st.meleeHoldOverSoundIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
 		st.meleeHoldOverDirX = -Math.sin(yaw);
 		st.meleeHoldOverDirZ = Math.cos(yaw);
@@ -2627,6 +2760,7 @@ public class TkGunServer implements ModInitializer {
 			tickMeleeHoldOver(player, st, now);
 			return;
 		}
+		playMeleeAttackSounds(player, st, now - st.stateStarted);
 		if (!st.meleeHitDone
 				&& now >= st.stateStarted + TkGun.meleeHitTick(st.meleeCombo)) {
 			st.meleeHitDone = true;
@@ -2651,6 +2785,121 @@ public class TkGunServer implements ModInitializer {
 			TkGun.LOGGER.info("[tkgun] ATK_3 0.75 s charge complete -> ATK_hold_over player={}",
 					player.getName().getString());
 			beginMeleeHoldOver(player, st, now);
+		}
+	}
+
+	private record MeleeSoundCue(double seconds, String key) {
+	}
+
+	private static volatile Map<String, List<MeleeSoundCue>> meleeSoundTimelines;
+
+	private static void playMeleeAttackSounds(ServerPlayerEntity player,
+											  PState st, long elapsed) {
+		String animation = "ATK_" + st.meleeCombo;
+		long animationElapsed = elapsed;
+		if (st.meleeCombo == 3
+				&& elapsed >= TkGun.MELEE_ATK3_MAIN_END_TICK) {
+			animation = "ATK_3_hold";
+			animationElapsed -= TkGun.MELEE_ATK3_MAIN_END_TICK;
+		}
+		playMeleeAnimationSounds(player, st, animation,
+				animationElapsed / 20.0D);
+	}
+
+	private static void playMeleeAnimationSounds(ServerPlayerEntity player,
+												 PState st, String animation,
+												 double elapsedSeconds) {
+		List<MeleeSoundCue> cues =
+				meleeSoundTimelines().getOrDefault(animation, List.of());
+		for (int index = 0; index < cues.size(); index++) {
+			MeleeSoundCue cue = cues.get(index);
+			if (elapsedSeconds + 1.0E-4D < cue.seconds()) {
+				continue;
+			}
+			String cueId = animation + "#" + index;
+			if (!st.meleePlayedSoundCues.add(cueId)) {
+				continue;
+			}
+			String key = cue.key();
+			playMeleeSound(player, key, 1.0F, 1.0F);
+			TkGun.LOGGER.info("[tkgun] melee attack sound {} at {}s ({}) player={}",
+					key, cue.seconds(), animation,
+					player.getName().getString());
+		}
+	}
+
+	private static Map<String, List<MeleeSoundCue>> meleeSoundTimelines() {
+		Map<String, List<MeleeSoundCue>> cached = meleeSoundTimelines;
+		if (cached != null) {
+			return cached;
+		}
+		Map<String, List<MeleeSoundCue>> loaded = new HashMap<>();
+		String resource = "/assets/tkgun/animations/entity/"
+				+ "veritas_et_justitia_rig.animation.json";
+		try (java.io.InputStream stream =
+					 TkGunServer.class.getResourceAsStream(resource)) {
+			if (stream == null) {
+				throw new IllegalStateException("Missing resource " + resource);
+			}
+			String text = new String(stream.readAllBytes(),
+					java.nio.charset.StandardCharsets.UTF_8);
+			com.google.gson.JsonObject animations =
+					com.google.gson.JsonParser.parseString(text)
+							.getAsJsonObject().getAsJsonObject("animations");
+			for (Map.Entry<String, com.google.gson.JsonElement> animation
+					: animations.entrySet()) {
+				if (!animation.getValue().isJsonObject()) {
+					continue;
+				}
+				com.google.gson.JsonElement soundsElement =
+						animation.getValue().getAsJsonObject().get("sound_effects");
+				if (soundsElement == null || !soundsElement.isJsonObject()) {
+					continue;
+				}
+				List<MeleeSoundCue> cues = new ArrayList<>();
+				for (Map.Entry<String, com.google.gson.JsonElement> sound
+						: soundsElement.getAsJsonObject().entrySet()) {
+					if (!sound.getValue().isJsonObject()) {
+						continue;
+					}
+					com.google.gson.JsonObject value =
+							sound.getValue().getAsJsonObject();
+					String key = value.has("effect")
+							? value.get("effect").getAsString() : "";
+					if (key.isBlank() || !TkGun.KEYFRAME_SOUNDS.containsKey(key)) {
+						continue;
+					}
+					cues.add(new MeleeSoundCue(
+							Double.parseDouble(sound.getKey()), key));
+				}
+				if ("ATK_2".equals(animation.getKey())
+						&& cues.stream().noneMatch(cue ->
+								Math.abs(cue.seconds() - 0.25D) < 1.0E-3D)) {
+					cues.add(new MeleeSoundCue(0.25D, "claymore_swing"));
+				}
+				cues.sort(java.util.Comparator.comparingDouble(
+						MeleeSoundCue::seconds));
+				if (!cues.isEmpty()) {
+					loaded.put(animation.getKey(), List.copyOf(cues));
+				}
+			}
+		} catch (Throwable throwable) {
+			TkGun.LOGGER.warn("[tkgun] failed to load melee sound timelines: {}",
+					throwable.toString());
+		}
+		Map<String, List<MeleeSoundCue>> immutable =
+				Map.copyOf(loaded);
+		meleeSoundTimelines = immutable;
+		TkGun.LOGGER.info("[tkgun] loaded melee sound timelines: {}",
+				immutable.keySet());
+		return immutable;
+	}
+
+	private static void playMeleeSound(ServerPlayerEntity player, String key,
+									   float volume, float pitch) {
+		TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(key);
+		if (sound != null) {
+			playSound(player, sound.id(), volume, pitch);
 		}
 	}
 
@@ -2694,16 +2943,7 @@ public class TkGunServer implements ModInitializer {
 	private static void tickMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
 		long elapsed = now - st.stateStarted;
 		tickMeleeHoldOverMovement(player, st, elapsed);
-		while (st.meleeHoldOverSoundIndex < TkGun.MELEE_HOLD_OVER_SOUND_TICKS.length
-				&& elapsed >= TkGun.MELEE_HOLD_OVER_SOUND_TICKS[
-						st.meleeHoldOverSoundIndex]) {
-			String key = TkGun.MELEE_HOLD_OVER_SOUND_KEYS[
-					st.meleeHoldOverSoundIndex++];
-			TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(key);
-			if (sound != null) {
-				playSound(player, sound.id(), sound.volume(), sound.pitch());
-			}
-		}
+		playMeleeAnimationSounds(player, st, "ATK_hold_over", elapsed / 20.0D);
 		while (st.meleeHoldOverHits < TkGun.MELEE_HOLD_OVER_HIT_TICKS.length
 				&& elapsed >= TkGun.MELEE_HOLD_OVER_HIT_TICKS[st.meleeHoldOverHits]) {
 			st.meleeHoldOverHits++;
@@ -2965,6 +3205,14 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		if (st.state == TkGun.State.MELEE) {
+			return;
+		}
+		// Right-click is used only to aim the camera during the fortress skill.
+		// It must not replace ready_gather/gather with a normal AIM state.
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
 			return;
 		}
 		// 已经架着枪了（例如刚打完一发、或者又点了一次右键）→ **保持**当前姿势，
@@ -3347,7 +3595,7 @@ public class TkGunServer implements ModInitializer {
 			st.shotCycle *= 2;                     // 蹲射连射间隔减慢一倍
 		}
 		if (st.deployed && isGrapeshotAmmo(ammoId)) {
-			st.shotCycle = TkGun.GRAPESHOT_FOCUS_CYCLE_TICKS;
+			st.shotCycle = TkGun.grapeshotFocusCycleTicks(definition, st.focusRamp);
 		}
 		if (st.deployed && isRoseQuartzAmmo(ammoId)) {
 			st.shotCycle = TkGun.roseQuartzFocusCycleTicks(st.focusRamp);
@@ -3618,6 +3866,9 @@ public class TkGunServer implements ModInitializer {
 			st.focusRamp = 0;
 		}
 		fireOnce(player, st, damageMult, p.ammo, p.ammoStack);
+		if (focus) {
+			reduceFortressSkillCooldownOnFocusShot(player, st, now);
+		}
 
 		// 拉栓时长：专注里若当前节奏比拉栓还快（射速递减到 0.25s 一发），拉栓不能成为瓶颈，
 		// 所以专注里取 min(拉栓, 当前节奏) —— 否则"每发间隔 -0.25s"会被 8 tick 的拉栓卡住（2026-10-16）。
@@ -3647,7 +3898,8 @@ public class TkGunServer implements ModInitializer {
 			nextCycle *= 2;
 		}
 		if (isGrapeshotAmmo(p.ammo)) {
-			nextCycle = TkGun.GRAPESHOT_FOCUS_CYCLE_TICKS;
+			nextCycle = TkGun.grapeshotFocusCycleTicks(
+					TkGun.definition(player), st.focusRamp);
 		}
 		if (isRoseQuartzAmmo(p.ammo)) {
 			nextCycle = TkGun.roseQuartzFocusCycleTicks(st.focusRamp);
@@ -3881,6 +4133,10 @@ public class TkGunServer implements ModInitializer {
 		restoreLastFocusAmmoSelection(player, st);
 		st.overheatUntil = player.getWorld().getTime() + TkGun.OVERHEAT_TICKS;
 		st.heat = TkGun.HEAT_MAX;
+		if (TkGun.definition(player).id()
+				.equals(TkGun.id("veritas_et_justitia"))) {
+			playSound(player, TkGun.SND_CLAYMORE_SWING, 1.0F, 1.0F);
+		}
 		// 音效：**交给 `Overheat` 自己的音效关键帧** —— 作者在那段 0.4167s 处配了 `散热.ogg`
 		// （用户 2026-10-17："将专注相关的音效替换为…模型所引用的音频"）。原来这里那声即时 `vent`
 		// 和一层原版灭火声（`BLOCK_FIRE_EXTINGUISH`）已删：动画到点响的那一声才对得上画面。
@@ -4156,15 +4412,32 @@ public class TkGunServer implements ModInitializer {
 		}
 		PState st = state(player);
 		long now = player.getWorld().getTime();
-		if (isDodgeActionState(st.state)
+		boolean fromFocus = st.deployed;
+		boolean fromSlide = st.state == TkGun.State.SLIDE && now < st.slideUntil;
+		if (fromFocus) {
+			TkGun.LOGGER.info("[tkgun] fortress skill denied while crouched player={}",
+					player.getName().getString());
+			return;
+		}
+		if ((isDodgeActionState(st.state) && !fromSlide)
 				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
 				|| now < st.fortressSkillReadyAt) {
 			return;
 		}
 
+		Vec3d inheritedVelocity = player.getVelocity();
+		double inheritedSpeed = Math.sqrt(
+				inheritedVelocity.x * inheritedVelocity.x
+						+ inheritedVelocity.z * inheritedVelocity.z);
+		double slideDirX = st.slideDirX;
+		double slideDirZ = st.slideDirZ;
+		if (inheritedSpeed > 1.0E-4D) {
+			slideDirX = inheritedVelocity.x / inheritedSpeed;
+			slideDirZ = inheritedVelocity.z / inheritedSpeed;
+		}
 		clearPendingShots(player, st, "破垒重炮技能启动");
 		player.stopUsingItem();
 		player.removeStatusEffect(StatusEffects.SLOWNESS);
@@ -4180,14 +4453,30 @@ public class TkGunServer implements ModInitializer {
 		st.meleeReturning = false;
 		st.meleeDashAttack = false;
 		st.fortressSkillLevel = 0;
+		st.fortressSkillFromFocus = fromFocus;
+		st.fortressSkillFromSlide = fromSlide;
+		st.fortressSkillSlideDirX = slideDirX;
+		st.fortressSkillSlideDirZ = slideDirZ;
+		st.fortressSkillSlideSpeed = fromSlide ? inheritedSpeed : 0.0D;
 		st.fortressSkillHitDirX = 0.0D;
 		st.fortressSkillHitDirZ = 0.0D;
-		st.fortressSkillDirectionLocked = false;
+		if (fromSlide) {
+			st.slideUntil = 0L;
+			st.slideMeasuring = false;
+		}
 		GunStateMachine.clearDash(player);
 		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_LOAD,
 				TkGun.FORTRESS_SKILL_LOAD_TICKS);
-		TkGun.LOGGER.info("[tkgun] Fortress skill load started player={}",
-				player.getName().getString());
+		if (fromSlide) {
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			player.setVelocity(slideDirX * inheritedSpeed, inheritedVelocity.y,
+					slideDirZ * inheritedSpeed);
+			player.velocityModified = true;
+		}
+		TkGun.LOGGER.info("[tkgun] Fortress skill load started fromSlide={} speed={} player={}",
+				fromSlide, round3(inheritedSpeed), player.getName().getString());
 	}
 
 	private static int fortressGatherLevel(long elapsed) {
@@ -4211,6 +4500,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		PState st = state(player);
 		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 				|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
 			return true;
 		}
@@ -4220,14 +4510,14 @@ public class TkGunServer implements ModInitializer {
 		long elapsed = player.getWorld().getTime() - st.stateStarted;
 		int level = fortressGatherLevel(elapsed);
 		if (level > 0) {
-			beginFortressSkillReadyHit(player, st, level, attackDirection);
+			startFortressSkillHit(player, st, level, attackDirection);
 		}
 		return true;
 	}
 
-	private static void beginFortressSkillReadyHit(ServerPlayerEntity player,
-													PState st, int level,
-													Vec3d attackDirection) {
+	private static void startFortressSkillHit(ServerPlayerEntity player,
+											 PState st, int level,
+											 Vec3d attackDirection) {
 		if (player.getServer() == null) {
 			return;
 		}
@@ -4244,45 +4534,11 @@ public class TkGunServer implements ModInitializer {
 		}
 		st.fortressSkillHitDirX = -forward.x;
 		st.fortressSkillHitDirZ = -forward.z;
-		st.fortressSkillHitFromX = player.getX();
-		st.fortressSkillHitFromZ = player.getZ();
-		st.fortressSkillDirectionLocked = true;
 		float lockedYaw = (float) Math.toDegrees(
 				Math.atan2(-forward.x, forward.z));
 		player.setYaw(lockedYaw);
 		player.setHeadYaw(lockedYaw);
 		player.setBodyYaw(lockedYaw);
-		player.stopUsingItem();
-		player.setSprinting(false);
-		player.forwardSpeed = 0.0F;
-		player.sidewaysSpeed = 0.0F;
-		player.upwardSpeed = 0.0F;
-		Vec3d velocity = player.getVelocity();
-		player.setVelocity(0.0D, velocity.y, 0.0D);
-		player.velocityModified = true;
-		clearPendingShots(player, st, "破垒重炮 ready_hit");
-		setState(player.getServer(), player,
-				TkGun.State.FORTRESS_SKILL_READY_HIT,
-				TkGun.FORTRESS_SKILL_READY_HIT_TICKS);
-		TkGun.LOGGER.info("[tkgun] Fortress ready_hit level={} player={}",
-				clampedLevel, player.getName().getString());
-	}
-
-	private static void startFortressSkillHit(ServerPlayerEntity player,
-											 PState st, int level) {
-		if (player.getServer() == null) {
-			return;
-		}
-		int clampedLevel = Math.max(1, Math.min(3, level));
-		st.fortressSkillLevel = clampedLevel;
-		if (!st.fortressSkillDirectionLocked) {
-			double yaw = Math.toRadians(player.getYaw());
-			st.fortressSkillHitDirX = Math.sin(yaw);
-			st.fortressSkillHitDirZ = -Math.cos(yaw);
-			st.fortressSkillHitFromX = player.getX();
-			st.fortressSkillHitFromZ = player.getZ();
-			st.fortressSkillDirectionLocked = true;
-		}
 		long now = player.getWorld().getTime();
 		st.heat = TkGun.HEAT_MAX;
 		st.overheatUntil = now + TkGun.FORTRESS_SKILL_HIT_TICKS;
@@ -4291,6 +4547,9 @@ public class TkGunServer implements ModInitializer {
 		player.getItemCooldownManager().set(
 				player.getMainHandStack().getItem(),
 				TkGun.FORTRESS_SKILL_COOLDOWN_TICKS);
+		ServerPlayNetworking.send(player,
+				new com.tk.gun.net.FortressSkillCooldownPayload(
+						TkGun.FORTRESS_SKILL_COOLDOWN_TICKS));
 		player.stopUsingItem();
 		player.setSprinting(false);
 		player.forwardSpeed = 0.0F;
@@ -4300,12 +4559,45 @@ public class TkGunServer implements ModInitializer {
 		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_HIT,
 				TkGun.FORTRESS_SKILL_HIT_TICKS);
 		performFortressSkillDamage(player, st, clampedLevel);
-		TkGun.LOGGER.info("[tkgun] Fortress skill hit level={} damage={} player={}",
+		TkGun.LOGGER.info("[tkgun] Fortress skill hit level={} damage={} "
+						+ "retreat={} blocks player={}",
 				clampedLevel,
 				TkGun.FORTRESS_SKILL_BASE_DAMAGE
 						* Math.pow(TkGun.FORTRESS_SKILL_LEVEL_MULTIPLIER,
 								clampedLevel - 1),
+				TkGun.FORTRESS_SKILL_HIT_DISTANCE,
 				player.getName().getString());
+	}
+
+	/**
+	 * Focused fire contributes one second toward the skill cooldown. The vanilla
+	 * item cooldown is updated at the same time so the displayed cooldown matches
+	 * the authoritative {@code fortressSkillReadyAt} timestamp.
+	 */
+	private static void reduceFortressSkillCooldownOnFocusShot(
+			ServerPlayerEntity player, PState st, long now) {
+		if (!st.deployed || !holdingFortressDestroyer(player)
+				|| st.fortressSkillReadyAt <= now) {
+			return;
+		}
+		long reduced = Math.max(now,
+				st.fortressSkillReadyAt - TkGun.FORTRESS_SKILL_FOCUS_COOLDOWN_REDUCTION_TICKS);
+		long removed = st.fortressSkillReadyAt - reduced;
+		if (removed <= 0L) {
+			return;
+		}
+		st.fortressSkillReadyAt = reduced;
+		int remaining = (int) Math.min(Integer.MAX_VALUE, reduced - now);
+		ItemStack held = player.getMainHandStack();
+		if (remaining <= 0) {
+			player.getItemCooldownManager().remove(held.getItem());
+		} else {
+			player.getItemCooldownManager().set(held.getItem(), remaining);
+			ServerPlayNetworking.send(player,
+					new com.tk.gun.net.FortressSkillCooldownPayload(remaining));
+		}
+		TkGun.LOGGER.info("[tkgun] fortress skill cooldown -{} ticks -> {} remaining player={}",
+				removed, remaining, player.getName().getString());
 	}
 
 	private static void performFortressSkillDamage(ServerPlayerEntity player,
@@ -4321,9 +4613,7 @@ public class TkGunServer implements ModInitializer {
 				.add(forward.multiply(halfDepth));
 		net.minecraft.util.math.Box search = player.getBoundingBox()
 				.expand(6.0D, 6.0D, 6.0D);
-		float damage = TkGun.FORTRESS_SKILL_BASE_DAMAGE
-				* (float) Math.pow(TkGun.FORTRESS_SKILL_LEVEL_MULTIPLIER,
-						level - 1);
+		float damage = TkGun.fortressSkillDamage(level);
 		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
 				candidate -> candidate.isAlive() && candidate.canHit()
 						&& !candidate.isSpectator()
@@ -4332,7 +4622,10 @@ public class TkGunServer implements ModInitializer {
 					right, up, forward, side, halfHeight, halfDepth)) {
 				continue;
 			}
-			entity.damage(player.getDamageSources().playerAttack(player), damage);
+			if (entity.damage(player.getDamageSources().playerAttack(player), damage)
+					&& entity.isAlive()) {
+				FortressSkillKnockbackService.start(player, entity, forward);
+			}
 		}
 	}
 
@@ -4340,6 +4633,30 @@ public class TkGunServer implements ModInitializer {
 	 * Silent Storm consumes its active acceleration for a fixed-height,
 	 * fixed-distance leap. All eligibility checks are server-authoritative.
 	 */
+	private static boolean holdingSilentStorm(ServerPlayerEntity player) {
+		return TkGun.holdingGun(player)
+				&& TkGun.definition(player).id()
+						.equals(TkGun.id("abyssal_ancient_cannon"));
+	}
+
+	/** Consumes exactly one queued fall attack input during the jump. */
+	private static void handleSilentStormFallInput(ServerPlayerEntity player) {
+		if (!holdingSilentStorm(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (st.state != TkGun.State.SKILL_JUMP || st.skillFallAttackQueued
+				|| st.skillFallImpactDone) {
+			return;
+		}
+		st.skillFallAttackQueued = true;
+		TkGun.LOGGER.info("[tkgun] fall attack queued during jump player={}",
+				player.getName().getString());
+		if (st.skillJumpFalling) {
+			startSkillFallAttack(player, st, player.getWorld().getTime());
+		}
+	}
+
 	private static void startSkillJump(ServerPlayerEntity player) {
 		if (player.getServer() == null || !player.isAlive()
 				|| !TkGun.holdingGun(player) || !player.isOnGround()) {
@@ -4371,6 +4688,11 @@ public class TkGunServer implements ModInitializer {
 		st.skillJumpAirborne = false;
 		st.skillJumpFalling = false;
 		st.skillJumpResumeSprint = player.isSprinting();
+		st.skillFallAttackQueued = false;
+		st.skillFallDiveStarted = false;
+		st.skillFallImpactDone = false;
+		st.skillFallSlowUntil = 0L;
+		st.skillFallTargetUuid = null;
 		GunStateMachine.clearDash(player);
 
 		double yaw = Math.toRadians(player.getYaw());
@@ -4417,7 +4739,10 @@ public class TkGunServer implements ModInitializer {
 					player.getName().getString());
 			return false;
 		}
-		if (st.state == TkGun.State.MELEE) {
+		if (st.state == TkGun.State.MELEE
+				|| st.state == TkGun.State.SKILL_JUMP
+				|| st.state == TkGun.State.FALL_ATTACK
+				|| st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
 			return false;
 		}
 		if (ensureMagazineLoaded(player, st)) {
@@ -4708,6 +5033,7 @@ public class TkGunServer implements ModInitializer {
 	// ---------------------------------------------------------------- 每 tick
 	private static void tickAll(MinecraftServer server) {
 		MeleeImpactService.tick(server);
+		FortressSkillKnockbackService.tick(server);
 		tickBolts();
 		tickBackpackProjectiles(server);
 		tickBackpackStates(server);
@@ -4897,20 +5223,27 @@ public class TkGunServer implements ModInitializer {
 					if (holdingFortressDestroyer(player)) {
 						st.fortressSkillLevel = 0;
 						setState(server, player,
+								TkGun.State.FORTRESS_SKILL_READY_GATHER,
+								TkGun.FORTRESS_SKILL_READY_GATHER_TICKS);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_READY_GATHER) {
+					if (holdingFortressDestroyer(player)) {
+						setState(server, player,
 								TkGun.State.FORTRESS_SKILL_GATHER,
 								TkGun.FORTRESS_SKILL_GATHER_TICKS);
 					} else {
 						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
 					}
 				} else if (ended == TkGun.State.FORTRESS_SKILL_GATHER) {
-					beginFortressSkillReadyHit(player, st, 3, null);
-				} else if (ended == TkGun.State.FORTRESS_SKILL_READY_HIT) {
 					if (holdingFortressDestroyer(player)) {
-						startFortressSkillHit(player, st, st.fortressSkillLevel);
+						startFortressSkillHit(player, st, 3, null);
 					} else {
 						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
 					}
 				} else if (ended == TkGun.State.FORTRESS_SKILL_HIT) {
+					st.fortressSkillFromFocus = false;
 					st.overheatUntil = 0;
 					st.heat = TkGun.HEAT_MAX * 0.4F;
 					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
@@ -4933,6 +5266,10 @@ public class TkGunServer implements ModInitializer {
 						}
 					} else if (st.meleeCombo == 3) {
 						beginMelee(player, st, now, 4, st.meleeInputHeld);
+					} else if (st.meleeCombo == 1 && isMeleeLongPress(st, now)) {
+						TkGun.LOGGER.info("[tkgun] ATK_1 long press -> ATK_3 hold chain player={}",
+								player.getName().getString());
+						beginMelee(player, st, now, 3, false);
 					} else if (st.meleeCombo == 2 && isMeleeLongPress(st, now)) {
 						beginMelee(player, st, now, 3, false);
 					} else if (st.meleeQueued) {
@@ -4988,36 +5325,49 @@ public class TkGunServer implements ModInitializer {
 			tickSlideReady(player, st, now);
 			tickAimSlow(player, st);
 			tickSkillJump(player, st, now);
+			tickSkillFallAttack(player, st, now);
 			tickLongAirborne(player, st, now);
 		}
 	}
 
 	private static void tickFortressSkill(ServerPlayerEntity player, PState st,
 										  long now) {
+		if (isFortressSkillState(st.state)) {
+			playFortressSkillSounds(player, st,
+					Math.max(0L, now - st.stateStarted));
+		}
 		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD) {
 			player.setSprinting(false);
+			if (st.fortressSkillFromSlide) {
+				player.forwardSpeed = 0.0F;
+				player.sidewaysSpeed = 0.0F;
+				player.upwardSpeed = 0.0F;
+				long elapsed = Math.max(0L, now - st.stateStarted);
+				double progress = Math.min(1.0D,
+						elapsed / (double) Math.max(1,
+								TkGun.FORTRESS_SKILL_LOAD_TICKS - 1));
+				double speed = st.fortressSkillSlideSpeed * (1.0D - progress);
+				Vec3d velocity = player.getVelocity();
+				player.setVelocity(
+						st.fortressSkillSlideDirX * speed,
+						velocity.y,
+						st.fortressSkillSlideDirZ * speed);
+				player.velocityModified = true;
+			} else if (st.fortressSkillFromFocus) {
+				player.forwardSpeed = 0.0F;
+				player.sidewaysSpeed = 0.0F;
+				player.upwardSpeed = 0.0F;
+				Vec3d velocity = player.getVelocity();
+				player.setVelocity(0.0D, velocity.y, 0.0D);
+				player.velocityModified = true;
+			}
 			if (!holdingFortressDestroyer(player)) {
 				st.stateUntil = now;
 			}
 			return;
 		}
-		if (st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
-			player.setSprinting(false);
-			if (!holdingFortressDestroyer(player)) {
-				st.stateUntil = now;
-				return;
-			}
-			long elapsed = now - st.stateStarted;
-			if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_TICKS - 1L) {
-				beginFortressSkillReadyHit(player, st, 3, null);
-			}
-			return;
-		}
-		if (st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
-			if (!holdingFortressDestroyer(player)) {
-				st.stateUntil = now;
-				return;
-			}
+		if (st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 			player.setSprinting(false);
 			player.forwardSpeed = 0.0F;
 			player.sidewaysSpeed = 0.0F;
@@ -5025,9 +5375,16 @@ public class TkGunServer implements ModInitializer {
 			Vec3d velocity = player.getVelocity();
 			player.setVelocity(0.0D, velocity.y, 0.0D);
 			player.velocityModified = true;
-			if (now - st.stateStarted
-					>= TkGun.FORTRESS_SKILL_READY_HIT_TICKS - 1L) {
-				startFortressSkillHit(player, st, st.fortressSkillLevel);
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+				return;
+			}
+			if (st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER) {
+				return;
+			}
+			long elapsed = now - st.stateStarted;
+			if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_TICKS - 1L) {
+				startFortressSkillHit(player, st, 3, null);
 			}
 			return;
 		}
@@ -5045,19 +5402,97 @@ public class TkGunServer implements ModInitializer {
 			player.velocityModified = true;
 			return;
 		}
-		double dx = player.getX() - st.fortressSkillHitFromX;
-		double dz = player.getZ() - st.fortressSkillHitFromZ;
-		double travelled = dx * st.fortressSkillHitDirX
-				+ dz * st.fortressSkillHitDirZ;
-		double remainingTicks = TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS - elapsed;
-		double left = Math.max(0.0D,
-				TkGun.FORTRESS_SKILL_HIT_DISTANCE - travelled);
-		double speed = left / Math.max(1.0D, remainingTicks)
+		// Feed the authored speed curve forward without recalculating it from
+		// the measured position every tick. Position-error correction creates
+		// visible low-speed pulses in the second half of the retreat.
+		double previousTarget = fortressHitDistanceAfterTicks(elapsed);
+		double nextTarget = fortressHitDistanceAfterTicks(elapsed + 1L);
+		double speed = Math.max(0.0D, nextTarget - previousTarget)
 				/ holdOverMovementFriction(player);
 		Vec3d velocity = player.getVelocity();
 		player.setVelocity(st.fortressSkillHitDirX * speed, velocity.y,
 				st.fortressSkillHitDirZ * speed);
 		player.velocityModified = true;
+	}
+
+	private static boolean isFortressSkillState(TkGun.State state) {
+		return state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_HIT;
+	}
+
+	private static void playFortressSkillSounds(ServerPlayerEntity player,
+			PState st, long elapsed) {
+		int[] ticks;
+		String[] keys;
+		switch (st.state) {
+			case FORTRESS_SKILL_LOAD -> {
+				ticks = TkGun.FORTRESS_SKILL_LOAD_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_LOAD_SOUND_KEYS;
+			}
+			case FORTRESS_SKILL_READY_GATHER -> {
+				ticks = new int[]{0};
+				keys = new String[]{TkGun.FORTRESS_SKILL_READY_SOUND_KEY};
+			}
+			case FORTRESS_SKILL_GATHER -> {
+				ticks = TkGun.FORTRESS_SKILL_GATHER_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_GATHER_SOUND_KEYS;
+			}
+			case FORTRESS_SKILL_HIT -> {
+				ticks = TkGun.FORTRESS_SKILL_HIT_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_HIT_SOUND_KEYS;
+			}
+			default -> {
+				return;
+			}
+		}
+		for (int i = 0; i < ticks.length; i++) {
+			int bit = 1 << i;
+			if ((st.fortressSkillSoundMask & bit) != 0
+					|| elapsed < ticks[i]) {
+				continue;
+			}
+			st.fortressSkillSoundMask |= bit;
+			TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(keys[i]);
+			if (sound != null) {
+				playSound(player, sound.id(), sound.volume(), sound.pitch());
+			}
+		}
+	}
+
+	/**
+	 * Retreat profile. Damage itself stays on the authored hit frame; speed
+	 * ramps to its peak at 0.625 s, then falls to zero before 1.5 s.
+	 */
+	private static double fortressHitDistanceAfterTicks(long ticks) {
+		int clamped = (int) Math.max(0L,
+				Math.min(TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS, ticks));
+		double totalWeight = 0.0D;
+		double travelledWeight = 0.0D;
+		for (int interval = 0;
+				interval < TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS; interval++) {
+			double weight = fortressHitSpeedWeight(interval + 0.5D);
+			totalWeight += weight;
+			if (interval < clamped) {
+				travelledWeight += weight;
+			}
+		}
+		return TkGun.FORTRESS_SKILL_HIT_DISTANCE
+				* travelledWeight / totalWeight;
+	}
+
+	private static double fortressHitSpeedWeight(double intervalMidpoint) {
+		double peakMidpoint = TkGun.FORTRESS_SKILL_HIT_PEAK_TICK + 0.5D;
+		if (intervalMidpoint <= peakMidpoint) {
+			return Math.sin(intervalMidpoint / peakMidpoint * Math.PI * 0.5D);
+		}
+		double decayStart = peakMidpoint;
+		double decayTicks =
+				TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS - decayStart;
+		double progress = Math.max(0.0D,
+				Math.min(1.0D, (intervalMidpoint - decayStart) / decayTicks));
+		return 0.5D * (1.0D + Math.cos(progress * Math.PI));
 	}
 
 	/** Maintains the Silent Storm leap until the first landing after takeoff. */
@@ -5072,6 +5507,10 @@ public class TkGunServer implements ModInitializer {
 			st.skillJumpAirborne = true;
 			Vec3d velocity = player.getVelocity();
 			if (!st.skillJumpFalling && velocity.y <= 0.01D) {
+				if (st.skillFallAttackQueued) {
+					startSkillFallAttack(player, st, now);
+					return;
+				}
 				st.skillJumpFalling = true;
 				player.setVelocity(
 						velocity.x * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
@@ -5096,6 +5535,251 @@ public class TkGunServer implements ModInitializer {
 		if (now >= st.skillJumpStartedAt + TkGun.SKILL_JUMP_MAX_TICKS) {
 			st.stateUntil = now;
 		}
+	}
+
+	private static void startSkillFallAttack(ServerPlayerEntity player,
+											 PState st, long now) {
+		if (st.state != TkGun.State.SKILL_JUMP || !holdingSilentStorm(player)
+				|| st.skillFallImpactDone) {
+			return;
+		}
+		st.skillJumpFalling = true;
+		st.skillFallAttackQueued = false;
+		st.skillFallDiveStarted = false;
+		st.skillFallImpactDone = false;
+		st.skillFallHeatEffectStarted = false;
+		st.skillFallSlowUntil = now + TkGun.SKILL_FALL_SLOW_TICKS;
+		st.skillFallTargetUuid = null;
+		player.addStatusEffect(new StatusEffectInstance(
+				StatusEffects.SLOW_FALLING, TkGun.SKILL_FALL_SLOW_TICKS,
+				0, false, false, false));
+		player.fallDistance = 0.0F;
+		setState(player.getServer(), player, TkGun.State.FALL_ATTACK,
+				TkGun.SKILL_FALL_ATTACK_MAX_TICKS);
+		TkGun.LOGGER.info("[tkgun] fall_attack started, slow={} ticks player={}",
+				TkGun.SKILL_FALL_SLOW_TICKS, player.getName().getString());
+	}
+
+	private static void tickSkillFallAttack(ServerPlayerEntity player,
+											PState st, long now) {
+		if (st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			if (Math.abs(velocity.x) > 1.0E-7D
+					|| Math.abs(velocity.z) > 1.0E-7D) {
+				player.setVelocity(0.0D, velocity.y, 0.0D);
+				player.velocityModified = true;
+			}
+			return;
+		}
+		if (st.state != TkGun.State.FALL_ATTACK || st.skillFallImpactDone) {
+			return;
+		}
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		// The dive owns vertical and horizontal motion and can never deal fall damage.
+		player.fallDistance = 0.0F;
+
+		long elapsed = Math.max(0L, now - st.stateStarted);
+		if (elapsed >= TkGun.SKILL_FALL_ATTACK_MAX_TICKS) {
+			finishSkillFallAttack(player, st, now);
+			return;
+		}
+		if (now < st.skillFallSlowUntil) {
+			return;
+		}
+		player.removeStatusEffect(StatusEffects.SLOW_FALLING);
+
+		LivingEntity target = null;
+		if (st.skillFallTargetUuid != null) {
+			Entity found = player.getServerWorld().getEntity(st.skillFallTargetUuid);
+			if (found instanceof LivingEntity living && living.isAlive()
+					&& CombatTargeting.isTargetable(living)) {
+				target = living;
+			}
+		}
+		if (!st.skillFallDiveStarted) {
+			st.skillFallDiveStarted = true;
+			target = findFallAttackTarget(player);
+			st.skillFallTargetUuid = target == null ? null : target.getUuid();
+			TkGun.LOGGER.info("[tkgun] fall_attack target={} player={}",
+					target == null ? "none" : target.getName().getString(),
+					player.getName().getString());
+		}
+
+		if (player.isOnGround()) {
+			finishSkillFallAttack(player, st, now);
+			return;
+		}
+		if (!st.skillFallHeatEffectStarted) {
+			st.skillFallHeatEffectStarted = true;
+			startFallAttackHeatEffect(player);
+		}
+
+		Vec3d from = player.getBoundingBox().getCenter();
+		Vec3d direction;
+		if (target != null) {
+			direction = target.getBoundingBox().getCenter().subtract(from);
+		} else {
+			Vec3d current = player.getVelocity();
+			Vec3d horizontal = new Vec3d(current.x, 0.0D, current.z);
+			if (horizontal.lengthSquared() < 1.0E-6D) {
+				double yaw = Math.toRadians(player.getYaw());
+				horizontal = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+			}
+			direction = horizontal.normalize().multiply(0.35D)
+					.add(0.0D, -1.0D, 0.0D);
+		}
+		direction = direction.lengthSquared() < 1.0E-8D
+				? new Vec3d(0.0D, -1.0D, 0.0D) : direction.normalize();
+		player.setVelocity(direction.multiply(TkGun.SKILL_FALL_DIVE_SPEED));
+		player.velocityModified = true;
+		if (target != null && direction.horizontalLengthSquared() > 1.0E-6D) {
+			float yaw = (float) Math.toDegrees(
+					Math.atan2(-direction.x, direction.z));
+			player.setYaw(yaw);
+			player.setHeadYaw(yaw);
+			player.setBodyYaw(yaw);
+		}
+	}
+
+	private static void startFallAttackHeatEffect(ServerPlayerEntity player) {
+		ServerWorld world = player.getServerWorld();
+		world.playSound(null, player.getX(), player.getY(), player.getZ(),
+				SoundEvents.BLOCK_SCULK_SHRIEKER_SHRIEK,
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+		com.tk.gun.net.GunLocatorVentPayload payload =
+				new com.tk.gun.net.GunLocatorVentPayload(
+						player.getId(), player.getX(), player.getY() + 1.0D,
+						player.getZ());
+		for (ServerPlayerEntity viewer :
+				player.getServer().getPlayerManager().getPlayerList()) {
+			if (viewer.getServerWorld() == world) {
+				ServerPlayNetworking.send(viewer, payload);
+			}
+		}
+	}
+
+	private static LivingEntity findFallAttackTarget(ServerPlayerEntity player) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw))
+				.normalize();
+		Vec3d center = player.getPos().add(
+				forward.multiply(TkGun.SKILL_FALL_SEARCH_LENGTH * 0.5D));
+		double halfWidth = TkGun.SKILL_FALL_SEARCH_WIDTH * 0.5D;
+		ServerWorld world = player.getServerWorld();
+		net.minecraft.util.math.Box area = new net.minecraft.util.math.Box(
+				center.x - halfWidth, world.getBottomY(), center.z - halfWidth,
+				center.x + halfWidth, player.getY(), center.z + halfWidth);
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		Vec3d eye = player.getEyePos();
+		for (Entity candidate : world.getOtherEntities(player, area,
+				entity -> entity instanceof LivingEntity && entity.isAlive()
+						&& entity.canHit() && !entity.isSpectator()
+						&& !CombatTargeting.isGolem(entity)
+						&& CombatTargeting.isTargetable(entity))) {
+			Vec3d targetCenter = candidate.getBoundingBox().getCenter();
+			if (targetCenter.y >= player.getY()
+					|| !hasBlockLineOfSight(player, eye, targetCenter)) {
+				continue;
+			}
+			double distance = targetCenter.squaredDistanceTo(eye);
+			if (distance < nearestDistance) {
+				nearestDistance = distance;
+				nearest = (LivingEntity) candidate;
+			}
+		}
+		return nearest;
+	}
+
+	private static void finishSkillFallAttack(ServerPlayerEntity player,
+											  PState st, long now) {
+		if (st.skillFallImpactDone) {
+			return;
+		}
+		st.skillFallImpactDone = true;
+		st.skillFallTargetUuid = null;
+		refillMagazineAfterFallAttack(player, st);
+		player.removeStatusEffect(StatusEffects.SLOW_FALLING);
+		player.fallDistance = 0.0F;
+		player.setVelocity(0.0D, 0.0D, 0.0D);
+		player.velocityModified = true;
+
+		ServerWorld world = player.getServerWorld();
+		Vec3d center = player.getBoundingBox().getCenter();
+		world.playSound(null, player.getX(), player.getY(), player.getZ(),
+				SoundEvent.of(TkGun.id("golem_explosion")),
+				SoundCategory.PLAYERS, 1.1F, 1.0F);
+		world.spawnParticles(ParticleTypes.EXPLOSION_EMITTER,
+				center.x, center.y, center.z, 1,
+				0.0D, 0.0D, 0.0D, 0.0D);
+		double radius = TkGun.SKILL_FALL_EXPLOSION_RADIUS;
+		net.minecraft.util.math.Box area = net.minecraft.util.math.Box.of(
+				center, radius * 2.0D, radius * 2.0D, radius * 2.0D);
+		for (LivingEntity target : world.getEntitiesByClass(
+				LivingEntity.class, area,
+				entity -> entity != player && entity.isAlive()
+						&& !entity.isSpectator() && !CombatTargeting.isGolem(entity)
+						&& CombatTargeting.isTargetable(entity))) {
+			Vec3d targetCenter = target.getBoundingBox().getCenter();
+			double distance = targetCenter.distanceTo(center);
+			if (distance > radius) {
+				continue;
+			}
+			double falloff = 1.0D - distance / radius;
+			target.damage(player.getDamageSources().playerAttack(player),
+					TkGun.SKILL_FALL_EXPLOSION_DAMAGE * (float) falloff);
+			Vec3d push = targetCenter.subtract(center);
+			Vec3d horizontal = new Vec3d(push.x, 0.0D, push.z);
+			if (horizontal.lengthSquared() > 1.0E-6D) {
+				horizontal = horizontal.normalize();
+				target.takeKnockback(1.4D * falloff,
+						horizontal.x, horizontal.z);
+			}
+		}
+		st.skillJumpResumeSprint = false;
+		completeDodgeCooldownAfterSkillJump(st);
+		setState(player.getServer(), player,
+				TkGun.State.FALL_ATTACK_RECOVERY,
+				TkGun.SKILL_FALL_RECOVERY_TICKS);
+		TkGun.LOGGER.info("[tkgun] fall_attack landed -> recovery player={}",
+				player.getName().getString());
+	}
+
+	private static void refillMagazineAfterFallAttack(ServerPlayerEntity player,
+													  PState st) {
+		int capacity = TkGun.magazineCapacity(player, false);
+		int needed = Math.max(0, Math.min(capacity, st.mag));
+		if (needed <= 0) {
+			return;
+		}
+		String ammoId = st.magAmmo;
+		if (ammoId == null || ammoId.isEmpty()) {
+			ammoId = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
+			needed = capacity;
+		}
+		if (ammoId.isEmpty()
+				|| !com.tk.gun.item.GunAmmoData.consumeExpected(
+						player, ammoId, needed)) {
+			return;
+		}
+		if (!ammoId.equals(st.magAmmo)) {
+			st.magAmmo = ammoId;
+			st.magAmmoStack =
+					com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1);
+			st.magExplosive =
+					com.tk.gun.item.GunAmmoData.selectedIsExplosive(player);
+			st.lastSavedAmmo = ammoId;
+		}
+		st.mag = 0;
+		persistHipMagazine(player, st, true);
+		TkGun.LOGGER.info("[tkgun] fall_attack landed -> refilled {} rounds of {} player={}",
+				needed, ammoId, player.getName().getString());
 	}
 
 	/** Handles ordinary long-airborne idle and the landing-roll fallback. */
@@ -5157,9 +5841,11 @@ public class TkGunServer implements ModInitializer {
 				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE
 				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER
 				|| state == TkGun.State.SKILL_JUMP
+				|| state == TkGun.State.FALL_ATTACK
+				|| state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 				|| state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| state == TkGun.State.FORTRESS_SKILL_READY_HIT
 				|| state == TkGun.State.FORTRESS_SKILL_HIT;
 	}
 
@@ -5543,8 +6229,8 @@ public class TkGunServer implements ModInitializer {
 			st.heat = TkGun.HEAT_MAX * 0.4F;
 		}
 		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| st.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 			return;
 		}
 		// 滑铲/收势不能被 combat_roll 的翻滚事件半路顶掉；滑铲结束后的 1 秒锁由 dodgeBlockUntil 管。

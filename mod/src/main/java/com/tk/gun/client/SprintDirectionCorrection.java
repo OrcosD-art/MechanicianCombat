@@ -42,7 +42,8 @@ public final class SprintDirectionCorrection {
 		}
 		GunClientState.Entry state = GunClientState.get(id);
 		if (state != null && switch (state.state) {
-			case MELEE, SLIDE, SLIDE_READY, OVERHEAT, OVER, INSPECT -> true;
+			case MELEE, SLIDE, SLIDE_READY, OVERHEAT, OVER, INSPECT,
+					SKILL_JUMP, FALL_ATTACK, FALL_ATTACK_RECOVERY -> true;
 			default -> false;
 		}) {
 			resetDirection();

@@ -22,6 +22,14 @@ public abstract class FocusInputLockMixin {
 				&& TkGun.holdingGun(client.player)
 				&& GunClientState.focusish(client.player.getId())
 				&& !TkGunClient.isRollTriggerTick(client)) {
+			// Cancelling handleInputEvents() prevents the slot change, but vanilla
+			// keeps the press queued in KeyBinding.timesPressed. Consume every
+			// queued hotbar press so it cannot execute after leaving focus.
+			for (var hotbarKey : client.options.hotbarKeys) {
+				while (hotbarKey.wasPressed()) {
+					// Drain the queued press.
+				}
+			}
 			TkGunClient.handleBackpackActionKey(client);
 			if (client.options.inventoryKey.wasPressed()) {
 				client.setScreen(new InventoryScreen(client.player));

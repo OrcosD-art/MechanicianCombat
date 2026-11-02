@@ -16,6 +16,7 @@
     "AimMouseSensitivityMixin",
     "GunAmmoScrollMixin",
     "MiddleMouseReloadMixin",
+    "ItemCooldownProgressMixin",
     "GunTooltipScreenMixin",
     "GunTooltipBackgroundMixin",
     "CombatRollInputGuardMixin",

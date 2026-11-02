@@ -48,6 +48,10 @@ public final class GunClientState {
 		public boolean dashMeleeReturn;
 		public boolean dashMeleeReturnRun;
 		public boolean meleeHoldOver;
+		/** The fortress load/ready began from the deployed crouch/aim state. */
+		public boolean fortressCrouchedLoad;
+		/** The fortress load began from an active slide. */
+		public boolean fortressSlideLoad;
 		public String lastMeleeAnimation;
 		public int meleeGraceUntil;
 		/** Local melee lifetime ended; wait briefly for the authoritative server state. */
@@ -136,6 +140,8 @@ public final class GunClientState {
 		e.dashMeleeReturn = payload.dashMeleeReturn();
 		e.dashMeleeReturnRun = payload.dashMeleeReturnRun();
 		e.meleeHoldOver = payload.meleeHoldOver();
+		e.fortressCrouchedLoad = payload.fortressCrouchedLoad();
+		e.fortressSlideLoad = payload.fortressSlideLoad();
 		if (newState != TkGun.State.MELEE || payload.meleeReturning()) {
 			e.meleeAwaitUntil = 0;
 		}
@@ -176,6 +182,8 @@ public final class GunClientState {
 				? ticks + payload.rollCooldownTicks() : 0;
 		if (newState == TkGun.State.SKILL_JUMP
 				|| previousState == TkGun.State.SKILL_JUMP
+						&& newState == TkGun.State.IDLE
+				|| previousState == TkGun.State.FALL_ATTACK_RECOVERY
 						&& newState == TkGun.State.IDLE) {
 			e.localDodgeLockUntil = 0;
 			e.nativeRollReadyAt = 0;
@@ -233,9 +241,11 @@ public final class GunClientState {
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FALL_ATTACK
+				|| e.state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 			return false;
 		}
 		if (e.state == TkGun.State.FORTRESS_SKILL_HIT
@@ -266,9 +276,11 @@ public final class GunClientState {
 		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FALL_ATTACK
+				|| e.state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 			return;
 		}
 		if (e.state == TkGun.State.FORTRESS_SKILL_HIT
@@ -292,6 +304,7 @@ public final class GunClientState {
 		e.dashMeleeReturn = false;
 		e.dashMeleeReturnRun = false;
 		e.meleeHoldOver = false;
+		e.fortressCrouchedLoad = false;
 		e.dashUntil = 0;
 		e.state = TkGun.State.ROLL;
 		e.total = CombatRollHook.ROLL_STATE_TICKS;
@@ -319,8 +332,8 @@ public final class GunClientState {
 					}
 				}
 				if (e.state == TkGun.State.FORTRESS_SKILL_LOAD && !e.active()) {
-					e.state = TkGun.State.FORTRESS_SKILL_GATHER;
-					e.total = TkGun.FORTRESS_SKILL_GATHER_TICKS;
+					e.state = TkGun.State.FORTRESS_SKILL_READY_GATHER;
+					e.total = TkGun.FORTRESS_SKILL_READY_GATHER_TICKS;
 					e.elapsed = 0;
 				}
 				if (e.state == TkGun.State.FIRE && !e.active()) {
@@ -329,11 +342,11 @@ public final class GunClientState {
 					//    （2026-10-13 实测过一次，日志里能看到打完紧跟一行 `rig -> idle`）。
 					e.holdUntil = ticks + FIRE_HOLD_GRACE;
 				}
-			} else if (e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
-				e.state = TkGun.State.FORTRESS_SKILL_READY_HIT;
-				e.total = TkGun.FORTRESS_SKILL_READY_HIT_TICKS;
+			} else if (e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER) {
+				e.state = TkGun.State.FORTRESS_SKILL_GATHER;
+				e.total = TkGun.FORTRESS_SKILL_GATHER_TICKS;
 				e.elapsed = 0;
-			} else if (e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+			} else if (e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 				e.state = TkGun.State.FORTRESS_SKILL_HIT;
 				e.total = TkGun.FORTRESS_SKILL_HIT_TICKS;
 				e.elapsed = 0;
@@ -402,6 +415,7 @@ public final class GunClientState {
 		e.dashMeleeReturn = false;
 		e.dashMeleeReturnRun = false;
 		e.meleeHoldOver = false;
+		e.fortressCrouchedLoad = false;
 		e.lastMeleeAnimation = null;
 		e.meleeGraceUntil = 0;
 		e.meleeAwaitUntil = 0;
@@ -429,14 +443,18 @@ public final class GunClientState {
 		switch (e.state) {
 			case FORTRESS_SKILL_LOAD:
 				return "skill_load";
+			case FORTRESS_SKILL_READY_GATHER:
+				return "ready_gather";
 			case FORTRESS_SKILL_GATHER:
 				return "gather";
 			case FORTRESS_SKILL_HIT:
-				return "hit";
-			case FORTRESS_SKILL_READY_HIT:
-				return "ready_hit";
+				return e.fortressCrouchedLoad ? "focus_hit" : "hit";
 			case SKILL_JUMP:
 				return skillJumpAnimation(entityId);
+			case FALL_ATTACK:
+				return "fall_attack";
+			case FALL_ATTACK_RECOVERY:
+				return "fall_attack_over_to_idle";
 			case IDLE:
 				return "idle";                       // 待机（作者新做的 idle）
 			case AIM:
@@ -569,9 +587,9 @@ public final class GunClientState {
 				|| e.state == TkGun.State.OVERHEAT || e.state == TkGun.State.OVER
 				|| e.state == TkGun.State.INSPECT || e.state == TkGun.State.MELEE
 				|| e.state == TkGun.State.SKILL_JUMP
+				|| e.state == TkGun.State.FALL_ATTACK
+				|| e.state == TkGun.State.FALL_ATTACK_RECOVERY
 				|| e.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT
 				|| e.state == TkGun.State.FORTRESS_SKILL_HIT
 				|| ticks < e.aimLockUntil;
 	}
@@ -647,8 +665,8 @@ public final class GunClientState {
 			return true;
 		}
 		if (e.state == TkGun.State.FORTRESS_SKILL_LOAD
-				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
-				|| e.state == TkGun.State.FORTRESS_SKILL_READY_HIT) {
+				|| e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER) {
 			return true;
 		}
 		if (e.state == TkGun.State.FORTRESS_SKILL_HIT) {
@@ -656,7 +674,8 @@ public final class GunClientState {
 		}
 		return switch (e.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
-					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE, SKILL_JUMP -> true;
+					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE, SKILL_JUMP,
+					FALL_ATTACK, FALL_ATTACK_RECOVERY -> true;
 			case MELEE -> !dashMeleeRecovery(e);
 			default -> false;
 		};

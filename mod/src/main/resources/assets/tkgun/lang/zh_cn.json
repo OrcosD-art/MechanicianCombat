@@ -1,4 +1,13 @@
 {
+    "item.tkgun.mechanician_undersuit":  "机械师底衣",
+    "item.tkgun.mechanician_chestplate":  "机械师胸甲",
+    "item.tkgun.mechanician_leggings":  "机械师腿甲",
+    "item.tkgun.mechanician_boots":  "机械师战靴",
+    "tooltip.tkgun.mechanician_undersuit":  "饰品栏装备；穿戴后替换头部以下的玩家身体，并提供 3 点护甲。",
+    "tooltip.tkgun.mechanician_chestplate":  "胸甲与披挂式前摆；必须先装备机械师底衣。",
+    "tooltip.tkgun.mechanician_leggings":  "机械师护腿；必须先装备机械师底衣。",
+    "tooltip.tkgun.mechanician_boots":  "机械师战靴；必须先装备机械师底衣。",
+    "message.tkgun.requires_undersuit":  "需要先装备机械师底衣",
     "tooltip.tkgun.portable_launcher.storage":  "安装后征用副手为发射物槽，仅可存放烟花火箭、药水箭、风弹与三叉戟。",
     "tooltip.tkgun.portable_launcher.ammo":  "主手持有可发射物时可快捷交换；冷却结束一次补满 3 发充能。",
     "tooltip.tkgun.portable_launcher.trajectory":  "背包发射物下坠减弱至三分之一；忠诚三叉戟优先返回副手。",
