@@ -60,6 +60,7 @@ public class TkGunClient implements ClientModInitializer {
 	private static KeyBinding rollKey;
 	private static KeyBinding fallbackRollKey;
 	private static boolean rollKeyDown = false;
+	private static net.minecraft.resource.ResourceManager lastResourceManager;
 
 	/** 在 `options.allKeys` 里找 combat_roll 的翻滚键；找不到就返回 null（不影响别的功能）。 */
 	private static KeyBinding findCombatRollKey(MinecraftClient client) {
@@ -190,6 +191,8 @@ public class TkGunClient implements ClientModInitializer {
 		boolean aiming;
 		/** walk_* 动画的归一化相位（0..1，1 秒一轮），用于同步 chest 的 Y 起伏。 */
 		float walkPhase;
+		/** walk_* 胸部起伏权重；停步后淡出，避免 PlayerAnimator 采样时瞬间回零。 */
+		float walkBobWeight;
 		/** walk_* 动画倍速 = 实际水平速度 / 标准步行速度。 */
 		float walkAnimationSpeed = 1.0F;
 	}
@@ -199,6 +202,8 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean heldGunLastTick;
 	/** 停下之后还当作"在动"几 tick，免得临界速度来回抖。 */
 	private static final int MOVING_HOLD_TICKS = 4;
+	/** 停步后用 4 tick 把手工胸部起伏淡出，而不是在同一帧硬切回 0。 */
+	private static final float WALK_BOB_FADE_PER_TICK = 0.25F;
 	/** 每 tick 水平位移超过 0.02 格（= 0.4 格/秒）才算走（潜行 0.065、疾跑 0.28 都远超它）。 */
 	private static final double MOVING_EPS2 = 0.02 * 0.02;
 
@@ -212,6 +217,12 @@ public class TkGunClient implements ClientModInitializer {
 	public static float walkPhase(int entityId) {
 		Move m = MOVES.get(entityId);
 		return m == null ? 0.0F : m.walkPhase;
+	}
+
+	/** 手工 chest 起伏的权重（0 = 完全静止，1 = 完整 walk_* 起伏）。 */
+	public static float walkBobWeight(int entityId) {
+		Move m = MOVES.get(entityId);
+		return m == null ? 0.0F : m.walkBobWeight;
 	}
 
 	/** walk_* 动画应按玩家实际行走速度播放的倍速。 */
@@ -233,6 +244,9 @@ public class TkGunClient implements ClientModInitializer {
 			m.until = 0;
 			m.dx = 0.0D;
 			m.dz = 0.0D;
+			m.walkPhase = 0.0F;
+			m.walkBobWeight = 0.0F;
+			m.walkAnimationSpeed = 1.0F;
 		}
 	}
 
@@ -300,6 +314,7 @@ public class TkGunClient implements ClientModInitializer {
 		move.until = ticks + MOVING_HOLD_TICKS;
 		move.sprinting = sprinting;
 		move.aiming = GunCamera.aiming(client);
+		move.walkBobWeight = sprinting ? 0.0F : 1.0F;
 	}
 
 	/** 客户端 tick 计数（连射节拍/日志用）。 */
@@ -438,9 +453,19 @@ public class TkGunClient implements ClientModInitializer {
 				if (m.walkPhase >= 1.0F) {
 					m.walkPhase -= 1.0F;
 				}
+				String sampledWalk = walkAnimation(player.getId());
+				m.walkBobWeight = sampledWalk != null
+						&& sampledWalk.startsWith("walk_") ? 1.0F : 0.0F;
 			} else if (ticks >= m.until) {
-				m.walkPhase = 0.0F;
-				m.walkAnimationSpeed = 1.0F;
+				if (m.walkBobWeight > 0.0F) {
+					// Keep the last sampled phase while fading the manual chest offset.
+					// Resetting it in the same frame was visible as a one-pixel upper-body hop.
+					m.walkBobWeight = Math.max(0.0F,
+							m.walkBobWeight - WALK_BOB_FADE_PER_TICK);
+				} else {
+					m.walkPhase = 0.0F;
+					m.walkAnimationSpeed = 1.0F;
+				}
 			}
 			m.x = player.getX();
 			m.z = player.getZ();
@@ -674,6 +699,7 @@ public class TkGunClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		com.tk.gun.client.rig.BowgunPlayerAnimatorPose.register();
+		JumpBackpackPlayerAnimation.register();
 		if (!CombatRollHook.isInstalled()) {
 			fallbackRollKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 					"key.tkgun.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
@@ -727,6 +753,8 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.THUNDER, ThunderParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.FLASH, FlashParticle.Factory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.GOLEM_ENERGY_CONVERGE,
 						GolemEnergyParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -767,13 +795,18 @@ public class TkGunClient implements ClientModInitializer {
 				}));
 		ClientPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.CombatBackpackStatusPayload.ID,
-				(payload, context) -> context.client().execute(() ->
-						CombatBackpackClientState.applyStatus(
+				(payload, context) -> context.client().execute(() -> {
+					CombatBackpackClientState.applyStatus(
 								payload.ownerEntityId(),
 								payload.targetEntityId(),
 								payload.phase(),
 								payload.charges(),
-								payload.remainingTicks())));
+								payload.remainingTicks(),
+								payload.launcherType());
+					JumpBackpackClientState.applyStatus(
+							payload.ownerEntityId(), payload.phase(),
+							payload.remainingTicks());
+				}));
 		ClientPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.CombatBackpackParticlePayload.ID,
 				(payload, context) -> context.client().execute(() ->
@@ -819,8 +852,17 @@ public class TkGunClient implements ClientModInitializer {
 	}
 
 	private static void tick(MinecraftClient client) {
+		net.minecraft.resource.ResourceManager resourceManager =
+				client.getResourceManager();
+		if (resourceManager != lastResourceManager) {
+			lastResourceManager = resourceManager;
+			CombatBackpackPoseAnimation.clearCache();
+			CombatBackpackGeoRenderer.clearPoseDiagnostics();
+			MechanicianArmorGeometry.clearCache();
+		}
 		GunClientState.tickAll();
 		CombatBackpackClientState.tick(client);
+		JumpBackpackClientState.tick(client);
 		LocatorShriekBurst.tick(client);
 		AmmoSwitchHud.tick(client);
 		ticks++;
@@ -835,6 +877,8 @@ public class TkGunClient implements ClientModInitializer {
 			jumpKeyDown = false;
 			MOVES.clear();
 			backpackActionDown = false;
+			CombatBackpackClientState.resetAll();
+			JumpBackpackClientState.resetAll();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			return;
 		}

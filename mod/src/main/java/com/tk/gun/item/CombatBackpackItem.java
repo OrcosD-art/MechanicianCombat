@@ -12,6 +12,7 @@ import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.animation.AnimationController;
 import software.bernie.geckolib.animation.RawAnimation;
+import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 public final class CombatBackpackItem extends AccessoryItem implements GeoItem {
@@ -23,6 +24,12 @@ public final class CombatBackpackItem extends AccessoryItem implements GeoItem {
 			RawAnimation.begin().thenPlayAndHold("ready");
 	private static final RawAnimation MAINTENANCE =
 			RawAnimation.begin().thenPlayAndHold("Maintenance");
+	private static final RawAnimation READY_TO_FLY =
+			RawAnimation.begin().thenPlayAndHold("ready_to_fly");
+	private static final RawAnimation FLYING =
+			RawAnimation.begin().thenPlayAndHold("flying");
+	private static final RawAnimation CLOSE =
+			RawAnimation.begin().thenPlayAndHold("close");
 	private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 	private final String textureName;
 
@@ -50,10 +57,15 @@ public final class CombatBackpackItem extends AccessoryItem implements GeoItem {
 	@Override
 	public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
 		controllers.add(new AnimationController<>(this, "equipped", 0,
-				state -> state.setAndContinue(switch (CombatBackpackAnimation.renderingPhase()) {
+				state -> CombatBackpackAnimation.manualJumpRendering()
+						? PlayState.STOP
+						: state.setAndContinue(switch (CombatBackpackAnimation.renderingPhase()) {
 					case CD -> CD;
 					case READY -> READY;
 					case MAINTENANCE -> MAINTENANCE;
+					case READY_TO_FLY -> READY_TO_FLY;
+					case FLYING -> FLYING;
+					case CLOSE -> CLOSE;
 					default -> AIM;
 				})));
 	}

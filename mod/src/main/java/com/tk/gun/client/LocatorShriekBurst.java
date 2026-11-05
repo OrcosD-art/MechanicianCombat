@@ -5,12 +5,19 @@ import net.minecraft.entity.Entity;
 import net.minecraft.particle.ShriekParticleEffect;
 import net.minecraft.util.math.Vec3d;
 
-/**
- * Creates the same ten shriek sprites as a sculk shrieker in one burst. A tiny
- * visual ring prevents all ten sprites from occupying the exact same point.
- */
+import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+/** Reproduces the delayed ten-sprite sequence emitted by a sculk shrieker. */
 public final class LocatorShriekBurst {
 	private static final int PARTICLE_COUNT = 10;
+	private static final int FRAME_DELAY_TICKS = 5;
+	private static final long DUPLICATE_WINDOW_TICKS = 2;
+	private static final ArrayDeque<Burst> BURSTS = new ArrayDeque<>();
+	private static final Map<String, Long> LAST_STARTED = new HashMap<>();
+
 	public enum Source {
 		GUN,
 		SUMMON_ANTENNA
@@ -28,26 +35,53 @@ public final class LocatorShriekBurst {
 		Vec3d resolved = origin == null
 				? entity.getEyePos().add(entity.getRotationVec(1.0F).multiply(0.5D))
 				: origin;
-		for (int index = 0; index < PARTICLE_COUNT; index++) {
-			double angle = Math.PI * 2.0D * index / PARTICLE_COUNT;
-			double radius = 0.16D + (index % 3) * 0.08D;
-			spawn(client, resolved.add(
-					Math.cos(angle) * radius,
-					(index % 2) * 0.04D,
-					Math.sin(angle) * radius));
+		long now = client.world.getTime();
+		String key = playerId + ":" + source.name();
+		Long previous = LAST_STARTED.put(key, now);
+		if (previous != null && now - previous < DUPLICATE_WINDOW_TICKS) {
+			return;
 		}
+		BURSTS.addLast(new Burst(resolved, now));
 	}
 
 	public static void tick(MinecraftClient client) {
-		// Kept for the existing client tick hook; the burst is created atomically.
-	}
-
-	private static void spawn(MinecraftClient client, Vec3d position) {
-		if (client.world == null) {
+		if (client.world == null || BURSTS.isEmpty()) {
 			return;
 		}
-		client.world.addParticle(new ShriekParticleEffect(0),
-				position.x, position.y, position.z, 0.0D, 0.0D, 0.0D);
+		long now = client.world.getTime();
+		Iterator<Burst> iterator = BURSTS.iterator();
+		while (iterator.hasNext()) {
+			Burst burst = iterator.next();
+			long due = burst.startedAt
+					+ (long) burst.emitted * FRAME_DELAY_TICKS;
+			if (now < due) {
+				continue;
+			}
+			// Spawn one sprite now. Using ShriekParticleEffect(0) avoids
+			// implementations that reveal every queued delayed particle in the
+			// same render frame.
+			client.world.addParticle(new ShriekParticleEffect(0),
+					burst.origin.x, burst.origin.y, burst.origin.z,
+					0.0D, 0.0D, 0.0D);
+			burst.emitted++;
+			if (burst.emitted >= PARTICLE_COUNT) {
+				iterator.remove();
+			}
+		}
+		if (BURSTS.isEmpty()) {
+			LAST_STARTED.clear();
+		}
+	}
+
+	private static final class Burst {
+		private final Vec3d origin;
+		private final long startedAt;
+		private int emitted;
+
+		private Burst(Vec3d origin, long startedAt) {
+			this.origin = origin;
+			this.startedAt = startedAt;
+		}
 	}
 
 	private LocatorShriekBurst() {

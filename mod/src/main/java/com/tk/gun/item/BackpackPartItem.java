@@ -13,7 +13,8 @@ public final class BackpackPartItem extends Item {
 		CORE,
 		LAUNCHER,
 		AUTO_LAUNCHER,
-		SUMMON_ANTENNA
+		SUMMON_ANTENNA,
+		JUMP_THRUSTER
 	}
 
 	private final Kind kind;
@@ -29,7 +30,7 @@ public final class BackpackPartItem extends Item {
 
 	public boolean isLauncherKind() {
 		return kind == Kind.LAUNCHER || kind == Kind.AUTO_LAUNCHER
-				|| kind == Kind.SUMMON_ANTENNA;
+				|| kind == Kind.SUMMON_ANTENNA || kind == Kind.JUMP_THRUSTER;
 	}
 
 	@Override
@@ -48,6 +49,10 @@ public final class BackpackPartItem extends Item {
 			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.deploy"));
 			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.mark"));
 			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.cast"));
+		} else if (kind == Kind.JUMP_THRUSTER) {
+			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.activate"));
+			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.steer"));
+			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.restriction"));
 		}
 	}
 }

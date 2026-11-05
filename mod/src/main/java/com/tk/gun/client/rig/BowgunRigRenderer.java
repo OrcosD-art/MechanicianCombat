@@ -205,11 +205,18 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		}
 		boolean chestBobTransform = false;
 		float chestBobPx = 0.0F;
-		if (bodyLocked && CHEST_BONE.equals(name)) {
+		if (CHEST_BONE.equals(name)) {
+			float bobWeight = TkGunClient.walkBobWeight(poseEntity.getId());
 			String walk = TkGunClient.walkAnimation(poseEntity.getId());
-			if (walk != null && walk.startsWith("walk_")) {
+			boolean authoredUpperWalk = bodyLocked && walk != null
+					&& walk.startsWith("walk_");
+			// Once upper stops owning the body, keep fading the same manual offset
+			// instead of removing it on the controller handoff frame.
+			boolean fadingOut = bobWeight > 0.0F && bobWeight < 1.0F;
+			if (authoredUpperWalk || fadingOut) {
 				// 把作者 walk_* 的 chest.position.y 曲线叠加到腰射上半身。
-				chestBobPx = walkChestBobPx(TkGunClient.walkPhase(poseEntity.getId()));
+				chestBobPx = walkChestBobPx(TkGunClient.walkPhase(poseEntity.getId()))
+						* bobWeight;
 				poseStack.push();
 				poseStack.translate(0.0F, chestBobPx / 16.0F, 0.0F);
 				chestBobTransform = true;
@@ -334,12 +341,14 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			//     提前显会看到"弹夹还没插、弹链已经在枪上"。
 			boolean reloading = e != null && (state == TkGun.State.RELOAD || e.reloading);
 			boolean magIn = reloading && e.elapsed >= RELOAD_MAG_IN_TICKS;
-			boolean armedWalking = poseEntity instanceof net.minecraft.entity.player.PlayerEntity player
-					&& TkGun.holdingGun(player)
-					&& state == TkGun.State.IDLE
-					&& TkGunClient.isMoving(poseEntity.getId())
-					&& e != null && !e.focus;
-			if (armedWalking) {
+			boolean crouchShooting = e != null
+					&& (e.focus || GunClientState.focusish(poseEntity.getId()));
+			// The folded/non-focus weapon must not expose its magazine in idle,
+			// locomotion, dodges or other ordinary states. Authored fire and
+			// reload clips still own their magazine motion.
+			boolean hideFoldedMagazine = e == null
+					|| (!crouchShooting && !reloading && state != TkGun.State.FIRE);
+			if (hideFoldedMagazine) {
 				hide(bone);
 			} else if (state == TkGun.State.OVERHEAT) {
 				// Focus overheat is only entered after the focus magazine's final

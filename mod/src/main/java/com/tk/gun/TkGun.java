@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r561-2026-11-01";
+	public static final String BUILD = "r650-2026-11-04";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -182,6 +182,8 @@ public final class TkGun {
 	public static final float FORTRESS_SKILL_LEVEL_MULTIPLIER = 1.5F;
 	public static final double FORTRESS_SKILL_KNOCKBACK_DISTANCE = 15.0D;
 	public static final double FORTRESS_SKILL_PATH_DAMAGE_MULTIPLIER = 1.5D;
+	/** Initial contact damage before the charged hit is released at knockback end. */
+	public static final float FORTRESS_SKILL_IMPACT_DAMAGE = 5.0F;
 	public static final int[] FORTRESS_SKILL_LOAD_SOUND_TICKS = {8, 12, 14};
 	public static final String[] FORTRESS_SKILL_LOAD_SOUND_KEYS = {
 			"reload2", "double_axe_swing01", "mag"
@@ -208,12 +210,13 @@ public final class TkGun {
 	};
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
-	public static final int MELEE_DASH_MOVE_TICKS = 10;
-	public static final int MELEE_DASH_STUN_TICKS = 3;
+	/** The second dash hit lands at 0.75 s; hard-stop runs from 0.75 s to 1.0 s. */
+	public static final int MELEE_DASH_MOVE_TICKS = 15;
+	public static final int MELEE_DASH_STUN_TICKS = 5;
 	/** 0.25 s authored clip plus one tick so its final keyframe is rendered. */
 	public static final int MELEE_RETURN_TICKS = 6;
 	public static final int MELEE_DASH_TOTAL_TICKS =
-			MELEE_HIT_TICK + MELEE_DASH_STUN_TICKS;
+			MELEE_DASH_MOVE_TICKS + MELEE_DASH_STUN_TICKS;
 	public static final double MELEE_DASH_DISTANCE = 4.6D;
 	public static final double MELEE_DASH_STUN_SPEED = 0.16D;
 	public static final double MELEE_RANGE = 4.0D;
@@ -227,6 +230,24 @@ public final class TkGun {
 	public static final double SKILL_JUMP_FALL_INERTIA_MULTIPLIER = 2.0D;
 	/** Safety lifetime; normal landing ends the state earlier. */
 	public static final int SKILL_JUMP_MAX_TICKS = 40;
+	/** Backpack-assisted apex hover: 2.5 seconds, followed by a normal descent. */
+	public static final int SKILL_JUMP_HOVER_TICKS = 50;
+	/** Extended safety lifetime while the jump backpack may own the apex hover. */
+	public static final int SKILL_JUMP_THRUSTER_MAX_TICKS = 200;
+	/** Jump thruster doubles both the gun slide distance and its state duration. */
+	public static final double SLIDE_THRUSTER_DISTANCE_MULTIPLIER = 2.0D;
+	public static final int SLIDE_THRUSTER_DURATION_MULTIPLIER = 2;
+	/** Jump backpack: at most five seconds of held thrust. */
+	public static final int JUMP_BACKPACK_READY_TICKS = 5;
+	public static final int JUMP_BACKPACK_THRUST_TICKS = 100;
+	public static final int JUMP_BACKPACK_START_BOOST_TICKS = 5;
+	public static final double JUMP_BACKPACK_START_SPEED_MULTIPLIER = 1.25D;
+	public static final int JUMP_BACKPACK_CLOSE_TICKS = 8;
+	public static final int JUMP_BACKPACK_COOLDOWN_TICKS = 60;
+	public static final double JUMP_BACKPACK_BOOST_RISE = 0.15D;
+	public static final double JUMP_BACKPACK_FORWARD_SPEED = 0.75D;
+	public static final double JUMP_BACKPACK_MIN_START_RISE = 0.5D;
+	public static final double JUMP_BACKPACK_MAX_HEIGHT = 6.0D;
 	/** Slow Falling duration before the fall attack acquires and dives at a target. */
 	public static final int SKILL_FALL_SLOW_TICKS = 5;
 	/** 30 blocks per second at 20 ticks per second. */
@@ -596,6 +617,8 @@ public final class TkGun {
 	public static final Identifier SND_GLAIVE_SLASH2 = id("glaive_slash2");
 	/** ATK_2/ATK_3 authored double-axe swing (`double_axe_swing-01.ogg`). */
 	public static final Identifier SND_DOUBLE_AXE_SWING1 = id("double_axe_swing1");
+	/** ATK_run authored slash (`slash.ogg`). */
+	public static final Identifier SND_SLASH = id("slash");
 	public static final Identifier SND_CURRENT = id("current");
 	/** ATK_4 authored anchor slam (`anchor_slam-01.ogg`). */
 	public static final Identifier SND_ANCHOR_SLAM1 = id("anchor_slam1");
@@ -640,6 +663,7 @@ public final class TkGun {
 					new KeyframeSound(SND_GLAIVE_SLASH2, 1.0F, 1.0F)),
 			Map.entry("double_axe_swing01",
 					new KeyframeSound(SND_DOUBLE_AXE_SWING1, 1.0F, 1.0F)),
+			Map.entry("slash", new KeyframeSound(SND_SLASH, 1.0F, 1.0F)),
 			Map.entry("current",
 					new KeyframeSound(SND_CURRENT, 1.0F, 1.0F)),
 			Map.entry("claymore_swing",

@@ -34,6 +34,7 @@ public final class CombatBackpackClientState {
 		BackpackUpgradeData.LauncherType launcherType = BackpackUpgradeData.LauncherType.NONE;
 		CombatBackpackAnimation.Phase animationPhase = CombatBackpackAnimation.Phase.READY;
 		boolean animationInitialized;
+		int animationStartedAt;
 		int openSoundAt = -1;
 		int closeSoundAt = -1;
 	}
@@ -46,8 +47,11 @@ public final class CombatBackpackClientState {
 		if (player == null) {
 			return;
 		}
-		if (!BackpackUpgradeData.canUseLauncher(
-				CombatBackpackItem.equippedStack(player))) {
+		BackpackUpgradeData.LauncherType launcherType =
+				BackpackUpgradeData.launcherType(
+						CombatBackpackItem.equippedStack(player));
+		if (launcherType == BackpackUpgradeData.LauncherType.NONE
+				|| launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
 			return;
 		}
 		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
@@ -75,12 +79,22 @@ public final class CombatBackpackClientState {
 				state.targetEntityId = -1;
 			}
 			updateAnimationPhase(pair.getKey(), state);
+			boolean suppressMechanismSounds = client.player != null
+					&& TkGun.holdingGun(client.player)
+					&& state.launcherType
+							== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+			if (suppressMechanismSounds) {
+				state.openSoundAt = -1;
+				state.closeSoundAt = -1;
+			}
 			if (pair.getKey() == localPlayerId()
+					&& !suppressMechanismSounds
 					&& state.openSoundAt >= 0 && ticks >= state.openSoundAt) {
 				state.openSoundAt = -1;
 				playBackpackSound("open");
 			}
 			if (pair.getKey() == localPlayerId()
+					&& !suppressMechanismSounds
 					&& state.closeSoundAt >= 0 && ticks >= state.closeSoundAt) {
 				state.closeSoundAt = -1;
 				playBackpackSound("close");
@@ -91,8 +105,7 @@ public final class CombatBackpackClientState {
 			return;
 		}
 		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
-		if (!BackpackUpgradeData.canUseLauncher(
-				CombatBackpackItem.equippedStack(player))) {
+		if (CombatBackpackItem.equippedStack(player).isEmpty()) {
 			reset(player.getId());
 			return;
 		}
@@ -139,18 +152,18 @@ public final class CombatBackpackClientState {
 	}
 
 	public static void applyStatus(int ownerEntityId, int targetEntityId, int phase,
-								   int charges, int remainingTicks) {
+								   int charges, int remainingTicks, int launcherType) {
 		Entry entry = ENTRIES.computeIfAbsent(ownerEntityId, ignored -> new Entry());
 		entry.targetEntityId = Math.max(-1, targetEntityId);
 		entry.phase = Math.max(CombatBackpackStatusPayload.PHASE_READY,
-				Math.min(CombatBackpackStatusPayload.PHASE_SUMMON_CAST, phase));
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.world != null
-				&& client.world.getEntityById(ownerEntityId)
-				instanceof net.minecraft.entity.LivingEntity owner) {
-			entry.launcherType = BackpackUpgradeData.launcherType(
-					CombatBackpackItem.equippedStack(owner));
-		}
+				Math.min(CombatBackpackStatusPayload.PHASE_CLOSE, phase));
+		entry.launcherType = switch (launcherType) {
+			case 1 -> BackpackUpgradeData.LauncherType.PORTABLE;
+			case 2 -> BackpackUpgradeData.LauncherType.AUTO;
+			case 3 -> BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+			case 4 -> BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+			default -> BackpackUpgradeData.LauncherType.NONE;
+		};
 		entry.charges = Math.max(0, Math.min(MAX_CHARGES, charges));
 		entry.remainingTicks = Math.max(0, remainingTicks);
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_MARKED) {
@@ -159,6 +172,8 @@ public final class CombatBackpackClientState {
 				|| entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_DORMANT) {
 			entry.aimLatched = false;
 		}
+		JumpBackpackClientState.applyStatus(ownerEntityId, entry.phase,
+				entry.remainingTicks);
 		updateAnimationPhase(ownerEntityId, entry);
 	}
 
@@ -193,22 +208,45 @@ public final class CombatBackpackClientState {
 		com.tk.gun.client.rig.CombatBackpackRigLayer.clearCachedStack(playerId);
 	}
 
+	public static void resetAll() {
+		ENTRIES.clear();
+		CombatBackpackAnimation.clearAll();
+		com.tk.gun.client.rig.CombatBackpackRigLayer.clearAllCachedStacks();
+	}
+
 	private static void updateAnimationPhase(int playerId, Entry entry) {
 		CombatBackpackAnimation.Phase next = animationPhase(entry);
 		if (entry.animationInitialized && next == entry.animationPhase) {
 			return;
 		}
 		entry.animationInitialized = true;
+		CombatBackpackAnimation.Phase previous = entry.animationPhase;
 		entry.animationPhase = next;
+		entry.animationStartedAt = ticks;
 		CombatBackpackAnimation.setPhase(playerId, next);
+		if (entry.launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			TkGun.LOGGER.info("[tkgun] jump backpack animation {} -> {} player={}",
+					previous, next, playerId);
+		}
 		entry.openSoundAt = -1;
 		entry.closeSoundAt = -1;
 		if (playerId != localPlayerId()) {
 			return;
 		}
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.player != null && TkGun.holdingGun(client.player)
+				&& entry.launcherType
+						== BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			return;
+		}
 		if (next == CombatBackpackAnimation.Phase.READY) {
 			playBackpackSound("open");
 			entry.closeSoundAt = ticks + 6;
+		} else if (next == CombatBackpackAnimation.Phase.READY_TO_FLY) {
+			playBackpackSound("open");
+			entry.closeSoundAt = ticks + 6;
+		} else if (next == CombatBackpackAnimation.Phase.CLOSE) {
+			playBackpackSound("close");
 		} else if (next == CombatBackpackAnimation.Phase.CD) {
 			entry.openSoundAt = ticks + 1;
 			entry.closeSoundAt = ticks + 7;
@@ -240,6 +278,18 @@ public final class CombatBackpackClientState {
 		return entry == null ? CombatBackpackStatusPayload.PHASE_READY : entry.phase;
 	}
 
+	public static BackpackUpgradeData.LauncherType launcherType(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? BackpackUpgradeData.LauncherType.NONE
+				: entry.launcherType;
+	}
+
+	public static double animationAgeTicks(int playerId, float tickDelta) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? 0.0D
+				: Math.max(0, ticks - entry.animationStartedAt) + tickDelta;
+	}
+
 	public static int targetEntityId(int ownerEntityId) {
 		Entry entry = ENTRIES.get(ownerEntityId);
 		if (entry == null
@@ -269,6 +319,20 @@ public final class CombatBackpackClientState {
 	}
 
 	private static CombatBackpackAnimation.Phase animationPhase(Entry entry) {
+		if (entry.launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			return switch (entry.phase) {
+				case CombatBackpackStatusPayload.PHASE_READY_TO_FLY ->
+						CombatBackpackAnimation.Phase.READY_TO_FLY;
+				case CombatBackpackStatusPayload.PHASE_FLYING,
+						CombatBackpackStatusPayload.PHASE_FALLING ->
+						CombatBackpackAnimation.Phase.FLYING;
+				case CombatBackpackStatusPayload.PHASE_CLOSE ->
+						CombatBackpackAnimation.Phase.CLOSE;
+				case CombatBackpackStatusPayload.PHASE_COOLDOWN ->
+						CombatBackpackAnimation.Phase.CD;
+				default -> CombatBackpackAnimation.Phase.CD;
+			};
+		}
 		if (entry.launcherType == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
 			return entry.phase == CombatBackpackStatusPayload.PHASE_COOLDOWN
 					|| entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_DORMANT

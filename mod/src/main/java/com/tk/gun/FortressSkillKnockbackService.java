@@ -23,13 +23,15 @@ public final class FortressSkillKnockbackService {
 	private static final double DAMAGE_HALF_EXTENT = 1.5D;
 	private static final List<Push> PUSHES = new ArrayList<>();
 
-	public static void start(ServerPlayerEntity attacker, Entity target, Vec3d direction) {
+	public static void start(ServerPlayerEntity attacker, Entity target,
+			Vec3d direction, float delayedDamage) {
 		if (!(target.getWorld() instanceof ServerWorld) || direction.lengthSquared() < 1.0E-6D) {
 			return;
 		}
 		Vec3d horizontal = new Vec3d(direction.x, 0.0D, direction.z).normalize();
 		PUSHES.removeIf(push -> push.target() == target);
-		PUSHES.add(new Push(attacker, target, horizontal, new HashSet<>(), 0.0D));
+		PUSHES.add(new Push(attacker, target, horizontal, delayedDamage,
+				new HashSet<>(), 0.0D));
 	}
 
 	public static void tick(MinecraftServer server) {
@@ -50,6 +52,7 @@ public final class FortressSkillKnockbackService {
 			Vec3d next = from.add(step);
 			Box shiftedBounds = target.getBoundingBox().offset(step);
 			if (!world.isSpaceEmpty(target, shiftedBounds)) {
+				applyDelayedDamage(world, push, target);
 				iterator.remove();
 				continue;
 			}
@@ -61,11 +64,24 @@ public final class FortressSkillKnockbackService {
 			spawnTrail(world, from, next, target.getHeight() * 0.5D);
 			double travelled = push.travelled() + STEP_DISTANCE;
 			if (travelled + 1.0E-4D >= TkGun.FORTRESS_SKILL_KNOCKBACK_DISTANCE) {
+				applyDelayedDamage(world, push, target);
 				iterator.remove();
 			} else {
 				push.setTravelled(travelled);
 			}
 		}
+	}
+
+	private static void applyDelayedDamage(ServerWorld world, Push push, Entity target) {
+		if (!target.isAlive() || target.isRemoved()
+				|| target.getWorld() != world) {
+			return;
+		}
+		if (target instanceof LivingEntity living) {
+			living.timeUntilRegen = 0;
+		}
+		target.damage(push.attacker().getDamageSources().playerAttack(
+				push.attacker()), push.delayedDamage());
 	}
 
 	private static void damagePath(ServerWorld world, Push push,
@@ -121,14 +137,16 @@ public final class FortressSkillKnockbackService {
 		private final ServerPlayerEntity attacker;
 		private final Entity target;
 		private final Vec3d direction;
+		private final float delayedDamage;
 		private final Set<Integer> hitIds;
 		private double travelled;
 
 		private Push(ServerPlayerEntity attacker, Entity target, Vec3d direction,
-				Set<Integer> hitIds, double travelled) {
+				float delayedDamage, Set<Integer> hitIds, double travelled) {
 			this.attacker = attacker;
 			this.target = target;
 			this.direction = direction;
+			this.delayedDamage = delayedDamage;
 			this.hitIds = hitIds;
 			this.travelled = travelled;
 		}
@@ -143,6 +161,10 @@ public final class FortressSkillKnockbackService {
 
 		Vec3d direction() {
 			return direction;
+		}
+
+		float delayedDamage() {
+			return delayedDamage;
 		}
 
 		Set<Integer> hitIds() {

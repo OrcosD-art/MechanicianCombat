@@ -11,7 +11,8 @@ public final class BackpackUpgradeData {
 		NONE,
 		PORTABLE,
 		AUTO,
-		SUMMON_ANTENNA
+		SUMMON_ANTENNA,
+		JUMP_THRUSTER
 	}
 
 	private static final String CORE = "tkgun_backpack_core";
@@ -32,6 +33,11 @@ public final class BackpackUpgradeData {
 		return hasCore(backpack) && hasLauncher(backpack);
 	}
 
+	public static boolean canUseJumpThruster(ItemStack backpack) {
+		return canUseLauncher(backpack)
+				&& launcherType(backpack) == LauncherType.JUMP_THRUSTER;
+	}
+
 	public static LauncherType launcherType(ItemStack backpack) {
 		if (!hasLauncher(backpack)) {
 			return LauncherType.NONE;
@@ -40,6 +46,7 @@ public final class BackpackUpgradeData {
 		return switch (type) {
 			case 2 -> LauncherType.AUTO;
 			case 3 -> LauncherType.SUMMON_ANTENNA;
+			case 4 -> LauncherType.JUMP_THRUSTER;
 			default -> LauncherType.PORTABLE;
 		};
 	}
@@ -102,6 +109,7 @@ public final class BackpackUpgradeData {
 				int encoded = switch (type) {
 					case AUTO -> 2;
 					case SUMMON_ANTENNA -> 3;
+					case JUMP_THRUSTER -> 4;
 					default -> 1;
 				};
 				nbt.putInt(LAUNCHER_TYPE, encoded);

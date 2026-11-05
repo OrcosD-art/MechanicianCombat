@@ -22,9 +22,9 @@ import net.minecraft.util.math.BlockPos;
  * Persistent backpack component installer.
  *
  * <p>The backpack remains in the right-hand slot. The upper-left component slot
- * accepts only a core, the upper-right accepts only a portable launcher, and the
- * lower two slots remain reserved. Closing the screen never returns the backpack
- * to the player.</p>
+ * accepts only a core, the upper-right accepts one swappable launcher/thruster
+ * module, and the lower two slots remain reserved. Closing the screen never
+ * returns the backpack to the player.</p>
  */
 public final class BackpackModificationTableScreenHandler extends ScreenHandler {
 	public static final int BACKPACK_SLOT_X = 152;
@@ -217,15 +217,9 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			int coreSlot = partSlot(BackpackPartItem.Kind.CORE);
 			ItemStack launcherPart = launcherPartStack();
 			BackpackUpgradeData.LauncherType launcherType =
-					launcherPart.getItem() instanceof BackpackPartItem part
-							&& part.kind() == BackpackPartItem.Kind.AUTO_LAUNCHER
-							? BackpackUpgradeData.LauncherType.AUTO
-							: launcherPart.getItem() instanceof BackpackPartItem summonPart
-									&& summonPart.kind() == BackpackPartItem.Kind.SUMMON_ANTENNA
-									? BackpackUpgradeData.LauncherType.SUMMON_ANTENNA
-							: launcherPart.isEmpty() && preserveLauncher
-									? BackpackUpgradeData.launcherType(backpack)
-									: BackpackUpgradeData.LauncherType.PORTABLE;
+					launcherPart.isEmpty() && preserveLauncher
+							? BackpackUpgradeData.launcherType(backpack)
+							: launcherType(launcherPart);
 			boolean core = coreSlot >= 0 || preserveCore;
 			boolean launcher = core
 					&& (!launcherPart.isEmpty() || preserveLauncher);
@@ -327,6 +321,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		return insertPart(switch (type) {
 			case AUTO -> BackpackPartItem.Kind.AUTO_LAUNCHER;
 			case SUMMON_ANTENNA -> BackpackPartItem.Kind.SUMMON_ANTENNA;
+			case JUMP_THRUSTER -> BackpackPartItem.Kind.JUMP_THRUSTER;
 			default -> BackpackPartItem.Kind.LAUNCHER;
 		});
 	}
@@ -351,7 +346,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 					core = stack.copy();
 				} else if ((kind == BackpackPartItem.Kind.LAUNCHER
 						|| kind == BackpackPartItem.Kind.AUTO_LAUNCHER
-						|| kind == BackpackPartItem.Kind.SUMMON_ANTENNA)
+						|| kind == BackpackPartItem.Kind.SUMMON_ANTENNA
+						|| kind == BackpackPartItem.Kind.JUMP_THRUSTER)
 						&& launcher.isEmpty()) {
 					launcher = stack.copy();
 				} else {
@@ -383,8 +379,22 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			case LAUNCHER_PART_SLOT ->
 					kind == BackpackPartItem.Kind.LAUNCHER
 							|| kind == BackpackPartItem.Kind.AUTO_LAUNCHER
-							|| kind == BackpackPartItem.Kind.SUMMON_ANTENNA;
+							|| kind == BackpackPartItem.Kind.SUMMON_ANTENNA
+							|| kind == BackpackPartItem.Kind.JUMP_THRUSTER;
 			default -> false;
+		};
+	}
+
+	private static BackpackUpgradeData.LauncherType launcherType(ItemStack stack) {
+		if (!(stack.getItem() instanceof BackpackPartItem part)) {
+			return BackpackUpgradeData.LauncherType.NONE;
+		}
+		return switch (part.kind()) {
+			case AUTO_LAUNCHER -> BackpackUpgradeData.LauncherType.AUTO;
+			case SUMMON_ANTENNA -> BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+			case JUMP_THRUSTER -> BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+			case LAUNCHER -> BackpackUpgradeData.LauncherType.PORTABLE;
+			default -> BackpackUpgradeData.LauncherType.NONE;
 		};
 	}
 
@@ -394,6 +404,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			case LAUNCHER -> new ItemStack(TkGunServer.PORTABLE_LAUNCHER);
 			case AUTO_LAUNCHER -> new ItemStack(TkGunServer.AUTO_PORTABLE_LAUNCHER);
 			case SUMMON_ANTENNA -> new ItemStack(TkGunServer.SUMMON_ANTENNA);
+			case JUMP_THRUSTER -> new ItemStack(TkGunServer.JUMP_BACKPACK_THRUSTER);
 		};
 	}
 

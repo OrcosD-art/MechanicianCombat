@@ -20,7 +20,7 @@ public enum MechanicianArmorPiece {
 	}
 
 	public Identifier textureLocation() {
-		return TkGun.id("textures/entity/mechanician_downsuit.png");
+		return TkGun.id("textures/entity/mechanician_" + modelName + ".png");
 	}
 
 	public String modelName() {

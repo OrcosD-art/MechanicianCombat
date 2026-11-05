@@ -5,12 +5,13 @@ import java.util.Map;
 
 public final class CombatBackpackAnimation {
 	public enum Phase {
-		AIM, CD, READY, MAINTENANCE
+		AIM, CD, READY, MAINTENANCE, READY_TO_FLY, FLYING, CLOSE
 	}
 
 	private static final int PREVIEW_RENDER_ID = -1;
 	private static final Map<Integer, Phase> PHASES = new HashMap<>();
 	private static int renderingPlayer = -1;
+	private static boolean manualJumpRendering;
 
 	public static void setPhase(int playerId, Phase phase) {
 		PHASES.put(playerId, phase);
@@ -22,6 +23,12 @@ public final class CombatBackpackAnimation {
 
 	public static void clear(int playerId) {
 		PHASES.remove(playerId);
+	}
+
+	public static void clearAll() {
+		PHASES.clear();
+		renderingPlayer = -1;
+		manualJumpRendering = false;
 	}
 
 	public static void setRenderingPlayer(int playerId) {
@@ -38,6 +45,15 @@ public final class CombatBackpackAnimation {
 
 	public static void clearRenderingPlayer() {
 		renderingPlayer = -1;
+		manualJumpRendering = false;
+	}
+
+	public static void setManualJumpRendering(boolean manual) {
+		manualJumpRendering = manual;
+	}
+
+	public static boolean manualJumpRendering() {
+		return manualJumpRendering;
 	}
 
 	public static void beginModificationPreview() {

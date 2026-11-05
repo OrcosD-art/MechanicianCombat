@@ -158,6 +158,20 @@ public final class BowgunRig implements GeoReplacedEntity {
 			}
 			return;
 		}
+		if ("flash".equals(effect)) {
+			String locatorName = event.getKeyframeData().getLocator();
+			net.minecraft.util.math.Vec3d locator = "aim".equals(locatorName)
+					? BowgunRigRenderer.aimPosition(player.getId())
+					: BowgunRigRenderer.locatorPosition(player.getId());
+			if (locator != null) {
+				player.getWorld().addParticle(TkGunParticles.FLASH,
+						locator.x, locator.y, locator.z,
+						0.0D, 0.0D, 0.0D);
+				TkGun.LOGGER.info("[tkgun] Veritas flash particle -> locator（玩家 {}）",
+						player.getName().getString());
+			}
+			return;
+		}
 		if ("particles".equals(effect)) {
 			net.minecraft.util.math.Vec3d locator =
 					BowgunRigRenderer.locatorPosition(player.getId());
@@ -545,6 +559,14 @@ public final class BowgunRig implements GeoReplacedEntity {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY -> true;
 			default -> false;
 		};
+		// Veritas keeps its deployed blade geometry while rolling or sliding.
+		if (gunId.equals(TkGun.id("veritas_et_justitia"))
+				&& (entry.state == TkGun.State.ROLL
+						|| entry.state == TkGun.State.ROLL_TO_IDLE
+						|| entry.state == TkGun.State.SLIDE
+						|| entry.state == TkGun.State.SLIDE_READY)) {
+			return state.setAndContinue(rawFor("open"));
+		}
 		boolean hipAiming = holdingGunUp(entity);
 		// The accelerated run is a complete authored locomotion clip, including
 		// the gun subtree. gun_pose is registered after the rig controller, so
@@ -758,9 +780,11 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		boolean holding = holdingGunUp(entity);
 		String moveAnim = TkGunClient.walkAnimation(entity.getId());
-		boolean moving = TkGunClient.isMoving(entity.getId());
-		if (!holding && moving && moveAnim != null
-				&& moveAnim.startsWith("walk_")) {
+		// Keep the split upper/lower representation through a walk-to-idle
+		// transition. Switching from idle_upper to full idle changes the same
+		// yaw from chest=45/body=0 to body=45/chest=0; those pivots differ and
+		// produced a small lateral pop in the chest and PlayerAnimator bridge.
+		if (!holding && (moveAnim == null || moveAnim.startsWith("walk_"))) {
 			return "idle_upper";
 		}
 		// 奔跑时让作者完整 run 的上半身动作播放，不被 stand_shooting_hold 覆盖。
@@ -771,7 +795,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 			// 腰射：开火那一遍整段重播；只是举着枪 → 端枪静姿（别空放一发后坐）
 			return firing ? "stand_shooting" : "stand_shooting_hold";
 		}
-		// 停止操作后先保持上半身端枪姿势 5 秒，再让完整 idle 的上半身动作接管。
+		// Focus/full-body states above still use their authored complete clips.
+		// Non-aiming locomotion deliberately keeps idle_upper for a stable split pose.
 		return null;
 	}
 
@@ -946,7 +971,20 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return play(state, "idle");
 		}
 		if (isVeritasAcceleratedRun(entity, e)) {
+			// The recovery clip has already reached the planted landing pose.
+			// Let the authored run start immediately from that pose instead of
+			// retaining the previous one-tick crossfade.
+			if ("roll_to_idle".equals(currentAnimationName)) {
+				state.getController().transitionLength(0);
+			}
 			return play(state, "veritas_accelerated_run");
+		}
+		if (e != null && e.state == TkGun.State.ROLL_TO_IDLE
+				&& entity instanceof net.minecraft.entity.player.PlayerEntity player
+				&& TkGun.definition(player).id().equals(
+						TkGun.id("veritas_et_justitia"))) {
+			// Veritas has no authored roll recovery transition.
+			return play(state, "idle");
 		}
 		if (e != null && (e.active() || e.meleeAwaitUntil > 0)
 				&& e.state == TkGun.State.MELEE
@@ -1062,6 +1100,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 				case SKILL_JUMP:
 					return play(state, GunClientState.skillJumpAnimation(entity.getId()));
 				case FALL_ATTACK:
+					if (e != null && e.fallAttackTailPose) {
+						state.getController().transitionLength(0);
+						return play(state, "fall_attack_2");
+					}
 					return play(state, "fall_attack");
 				case FALL_ATTACK_RECOVERY:
 					return play(state, "fall_attack_over_to_idle");

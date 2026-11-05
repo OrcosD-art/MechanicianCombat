@@ -29,6 +29,8 @@ import net.minecraft.util.math.Vec3d;
 public final class GunStateMachine {
 	/** 翻滚之后的"加速冲刺"持续 tick（用户 2026-10-16："持续个 3 秒呗…相当于获得一个加速爆发冲刺"）。 */
 	public static final int DASH_TICKS = 60;
+	/** Veritas keeps its dash reward 30% longer than other guns. */
+	public static final double VERITAS_DASH_DURATION_MULTIPLIER = 1.30D;
 	/** A completed slide adds this much speed-only buff after the current dash ends. */
 	public static final int SLIDE_SPEED_BOOST_EXTENSION_TICKS = 40;
 	/**
@@ -157,6 +159,12 @@ public final class GunStateMachine {
 		return syncChanged;
 	}
 
+	public static int dashTicksFor(ServerPlayerEntity player) {
+		return TkGunServer.isVeritasMainHand(player)
+				? (int) Math.round(DASH_TICKS * VERITAS_DASH_DURATION_MULTIPLIER)
+				: DASH_TICKS;
+	}
+
 	/** Applies the one-time two-second speed extension for a completed slide. */
 	public static void extendSpeedBoostAfterSlide(ServerPlayerEntity player,
 												 TkGunServer.PState st, long now) {
@@ -251,14 +259,16 @@ public final class GunStateMachine {
 		st.slideBoostApplied = false;
 		// **翻滚 / 滑铲交替循环**：1 = 刚翻滚（下次 Alt 走滑铲），2 = 刚滑铲（下次重新翻滚）。
 		st.lastDodgeKind = roll ? 1 : 2;
-		st.dashUntil = now + DASH_TICKS;
+		int dashTicks = dashTicksFor(player);
+		st.dashUntil = now + dashTicks;
 		if (chained) {
 			st.dodgeLockUntil = now + DODGE_LOCK_TICKS;
 			TkGun.LOGGER.info("[tkgun] 连锁闪避 -> 闪避键失效 {} tick 玩家={}", DODGE_LOCK_TICKS,
 					player.getName().getString());
 		}
 		TkGun.LOGGER.info("[tkgun] 闪避（{}）-> 加速冲刺 {} tick（+{}% 移速）玩家={}",
-				chained ? "连锁" : "单次", DASH_TICKS, (int) (DASH_SPEED_BONUS * 100), player.getName().getString());
+				chained ? "连锁" : "单次", dashTicks,
+				(int) (DASH_SPEED_BONUS * 100), player.getName().getString());
 		return false;
 	}
 

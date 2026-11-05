@@ -44,15 +44,19 @@ public final class ShoulderCouplingState {
 				== net.minecraft.client.option.Perspective.THIRD_PERSON_FRONT) {
 			return false;
 		}
-		// Close combat owns the camera direction for the full authored attack,
-		// including movement and sprint. Do not fall through to sprint decoupling.
+		// Normal melee follows the camera, but the directional dash is locked to
+		// its trigger yaw and must keep the camera decoupled from attack heading.
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return !state.meleeHoldOver;
+			return !state.meleeHoldOver && !state.dashMeleeActive;
 		}
 		// 右键瞄准由 aim→locator 中心线闭环控制身体 yaw；ShoulderSurfing 继续解耦，
 		// 否则它会和中心线控制器同时写 yaw。使用其它物品时同样不接管。
 		if (client.player.isUsingItem()) {
 			return false;
+		}
+		if (state != null && state.state == TkGun.State.SKILL_JUMP
+				&& state.skillJumpHovering) {
+			return true;
 		}
 		int id = client.player.getId();
 		// 疾跑 / 翻滚后的加速冲刺必须保持解耦，由原版/ShoulderSurfing 的移动视角处理；
@@ -66,9 +70,9 @@ public final class ShoulderCouplingState {
 		if (state == null) {
 			return true;
 		}
-		// Standing idle is decoupled so the camera can look around without
-		// rotating the stationary body. Walking in IDLE state remains coupled.
-		if (state.state == TkGun.State.IDLE && !TkGunClient.isMoving(id)) {
+		// Non-aiming idle/walking and manual reloading own a split camera/body pose.
+		if (isNonAimingGunIdle(client, state)
+				|| isManualReloadDecoupled(client, state)) {
 			return false;
 		}
 		return switch (state.state) {
@@ -106,7 +110,11 @@ public final class ShoulderCouplingState {
 			return 0;
 		}
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return state.meleeHoldOver ? 13 : 0;
+			return state.dashMeleeActive ? 20 : (state.meleeHoldOver ? 13 : 0);
+		}
+		if (state != null && state.state == TkGun.State.SKILL_JUMP
+				&& state.skillJumpHovering) {
+			return 0;
 		}
 		if (usesDecoupledSprint(client)) {
 			return client.player.isSprinting() ? 1 : 2;
@@ -116,6 +124,12 @@ public final class ShoulderCouplingState {
 		}
 		if (state == null) {
 			return GunClientState.aimLocked(id) ? 12 : 0;
+		}
+		if (isManualReloadDecoupled(client, state)) {
+			return 21;
+		}
+		if (isNonAimingGunIdle(client, state)) {
+			return 22;
 		}
 		return switch (state.state) {
 			case ROLL -> 4;
@@ -139,6 +153,42 @@ public final class ShoulderCouplingState {
 	 */
 	private static boolean usesDecoupledSprint(MinecraftClient client) {
 		return isSprintDirectionActive(client);
+	}
+
+	/** Camera-relative steering also owns non-aiming walks and manual reloads. */
+	public static boolean usesCameraRelativeSteering(MinecraftClient client) {
+		if (client == null || client.player == null) {
+			return false;
+		}
+		GunClientState.Entry state = GunClientState.get(client.player.getId());
+		return isSprintDirectionActive(client)
+				|| isNonAimingGunWalk(client, state)
+				|| isManualReloadDecoupled(client, state);
+	}
+
+	private static boolean isNonAimingGunWalk(MinecraftClient client,
+											  GunClientState.Entry state) {
+		if (!isNonAimingGunIdle(client, state)) {
+			return false;
+		}
+		int id = client.player.getId();
+		return TkGunClient.isMoving(id)
+				|| TkGunClient.hasMovementInput(id);
+	}
+
+	private static boolean isNonAimingGunIdle(MinecraftClient client,
+											  GunClientState.Entry state) {
+		// IDLE is broadcast with ticks=0, so Entry#active() is intentionally false
+		// while the player is standing or walking in the normal gun state.
+		return state != null && state.state == TkGun.State.IDLE
+				&& !state.focus && !client.player.isUsingItem();
+	}
+
+	private static boolean isManualReloadDecoupled(MinecraftClient client,
+												   GunClientState.Entry state) {
+		return state != null && state.active() && state.state == TkGun.State.RELOAD
+				&& state.reloading && !state.focus
+				&& !client.player.isUsingItem();
 	}
 
 	private static boolean isFortressCoupledSkillState(GunClientState.Entry state) {

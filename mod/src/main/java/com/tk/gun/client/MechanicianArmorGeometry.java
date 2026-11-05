@@ -4,7 +4,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.tk.gun.TkGun;
 import com.tk.gun.item.MechanicianArmorPiece;
 import net.minecraft.client.model.ModelPart;
 import net.minecraft.client.render.OverlayTexture;
@@ -45,8 +44,6 @@ public final class MechanicianArmorGeometry {
 
 	private static final Map<MechanicianArmorPiece, Geometry> CACHE =
 			new EnumMap<>(MechanicianArmorPiece.class);
-	private static final Identifier TEXTURE =
-			TkGun.id("textures/entity/mechanician_downsuit.png");
 	// The bbmodel's metadata still says 16x16, but its face UVs and the authored
 	// downsuit.png image both use a 64x64 atlas.
 	private static final int TEXTURE_WIDTH = 64;
@@ -54,6 +51,10 @@ public final class MechanicianArmorGeometry {
 	private static final float PIXEL = 1.0F / 16.0F;
 
 	private MechanicianArmorGeometry() {
+	}
+
+	public static void clearCache() {
+		CACHE.clear();
 	}
 
 	public static void renderAll(MechanicianArmorPiece piece, MatrixStack matrices,
@@ -95,7 +96,7 @@ public final class MechanicianArmorGeometry {
 			return;
 		}
 		VertexConsumer buffer = consumers.getBuffer(
-				RenderLayer.getArmorCutoutNoCull(TEXTURE));
+				RenderLayer.getArmorCutoutNoCull(geometry.texture()));
 		matrices.push();
 		try {
 			ModelPart modelPart = part(baseModel, part);
@@ -171,11 +172,16 @@ public final class MechanicianArmorGeometry {
 				0.0F, 1.0F);
 		float walk = MathHelper.sin(limbAngle) * limbDistance;
 		float idle = MathHelper.sin((entity.age + limbAngle) * 0.09F);
+		float twistScale = cloth.back ? 0.30F : 0.22F;
+		float twistLimit = cloth.back ? 18.0F : 12.0F;
 		float twist = MathHelper.clamp(
-				MathHelper.wrapDegrees(headYaw) * 0.22F, -12.0F, 12.0F);
+				MathHelper.wrapDegrees(headYaw) * twistScale,
+				-twistLimit, twistLimit);
 		float pitch;
 		if (cloth.back) {
-			pitch = 5.0F + speed * 24.0F + walk * 9.0F + idle * 2.0F;
+			// F2 is the rear drape. Keep its secondary motion pronounced so it
+			// reads as cloth instead of a rigid plate attachment.
+			pitch = 5.0F + speed * 36.0F + walk * 13.5F + idle * 3.0F;
 		} else {
 			pitch = -2.0F - speed * 7.0F - walk * 4.0F - idle;
 		}
@@ -216,7 +222,8 @@ public final class MechanicianArmorGeometry {
 		for (Map.Entry<String, Face> entryFace : cube.faces.entrySet()) {
 			String direction = entryFace.getKey().toUpperCase(Locale.ROOT);
 			Face face = entryFace.getValue();
-			String[] order = vertexOrder(direction);
+			String[] order = vertexOrder(direction,
+					cube.topFaceXFlip && "UP".equals(direction));
 			float[][] uvs = faceUvs(face, textureWidth, textureHeight);
 			float[] normal = normalOf(direction);
 			for (int i = 0; i < 4; i++) {
@@ -254,7 +261,16 @@ public final class MechanicianArmorGeometry {
 		return out;
 	}
 
-	private static String[] vertexOrder(String direction) {
+	private static String[] vertexOrder(String direction, boolean topFaceXFlip) {
+		if ("UP".equals(direction)) {
+			return topFaceXFlip
+					? new String[]{
+							"topLeftFront", "topLeftBack",
+							"topRightBack", "topRightFront"}
+					: new String[]{
+							"topLeftBack", "topLeftFront",
+							"topRightFront", "topRightBack"};
+		}
 		return switch (direction) {
 			case "WEST" -> new String[]{
 					"topRightBack", "topLeftBack",
@@ -268,9 +284,6 @@ public final class MechanicianArmorGeometry {
 			case "SOUTH" -> new String[]{
 					"topRightFront", "topRightBack",
 					"bottomRightBack", "bottomRightFront"};
-			case "UP" -> new String[]{
-					"topLeftBack", "topLeftFront",
-					"topRightFront", "topRightBack"};
 			case "DOWN" -> new String[]{
 					"bottomLeftBack", "bottomLeftFront",
 					"bottomRightFront", "bottomRightBack"};
@@ -312,7 +325,8 @@ public final class MechanicianArmorGeometry {
 						elements, cubes);
 			}
 		}
-		return new Geometry(TEXTURE_WIDTH, TEXTURE_HEIGHT, cubes);
+		return new Geometry(TEXTURE_WIDTH, TEXTURE_HEIGHT,
+				piece.textureLocation(), cubes);
 	}
 
 	private static void walkBone(JsonObject bone, Part inheritedPart,
@@ -383,7 +397,8 @@ public final class MechanicianArmorGeometry {
 				Math.max(from[0], to[0]), 24.0F - Math.min(from[1], to[1]),
 				Math.max(from[2], to[2]),
 				pivot[0], 24.0F - pivot[1], pivot[2],
-				rotation[0], rotation[1], rotation[2], faces, cloth);
+				rotation[0], rotation[1], rotation[2],
+				Math.abs(rotation[2]) >= 89.0F, faces, cloth);
 	}
 
 	private static Part partFor(String name) {
@@ -422,6 +437,7 @@ public final class MechanicianArmorGeometry {
 	}
 
 	private record Geometry(int textureWidth, int textureHeight,
+							Identifier texture,
 							Map<Part, List<Cube>> cubes) {
 	}
 
@@ -437,6 +453,7 @@ public final class MechanicianArmorGeometry {
 						float x1, float y1, float z1,
 						float pivotX, float pivotY, float pivotZ,
 						float rotationX, float rotationY, float rotationZ,
+						boolean topFaceXFlip,
 						Map<String, Face> faces, Cloth cloth) {
 	}
 }

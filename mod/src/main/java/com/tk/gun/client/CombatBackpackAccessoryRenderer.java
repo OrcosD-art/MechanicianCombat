@@ -12,6 +12,8 @@ import net.minecraft.item.ItemStack;
 
 /** Accessories renderer for players still using the vanilla player renderer. */
 public final class CombatBackpackAccessoryRenderer implements AccessoryRenderer {
+	private static final java.util.Set<String> ATTACH_DIAGNOSTICS =
+			new java.util.HashSet<>();
 	@Override
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	public <M extends LivingEntity> void render(ItemStack stack, SlotReference reference,
@@ -27,6 +29,18 @@ public final class CombatBackpackAccessoryRenderer implements AccessoryRenderer 
 		}
 		if (!(model instanceof PlayerEntityModel playerModel)) {
 			return;
+		}
+		net.minecraft.client.model.ModelTransform bodyTransform =
+				playerModel.body.getTransform();
+		String diagnosticKey = reference.entity().getId() + ":"
+				+ JumpBackpackClientState.phase(reference.entity().getId());
+		if (JumpBackpackClientState.isActive(reference.entity().getId())
+				&& ATTACH_DIAGNOSTICS.add(diagnosticKey)) {
+			TkGun.LOGGER.info(
+					"[tkgun] backpack chest attach part=body pivot=({},{},{}) "
+							+ "rotation=({},{},{})",
+					bodyTransform.pivotX, bodyTransform.pivotY, bodyTransform.pivotZ,
+					bodyTransform.pitch, bodyTransform.yaw, bodyTransform.roll);
 		}
 		matrices.push();
 		try {

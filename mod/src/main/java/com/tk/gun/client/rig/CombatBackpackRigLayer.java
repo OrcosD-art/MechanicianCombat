@@ -27,6 +27,10 @@ public final class CombatBackpackRigLayer extends GeoRenderLayer<BowgunRig> {
 		LAST_EQUIPPED.remove(entityId);
 	}
 
+	public static void clearAllCachedStacks() {
+		LAST_EQUIPPED.clear();
+	}
+
 	@Override
 	public void renderForBone(MatrixStack matrices, BowgunRig animatable, GeoBone bone,
 							  RenderLayer renderLayer, VertexConsumerProvider consumers,
@@ -49,7 +53,8 @@ public final class CombatBackpackRigLayer extends GeoRenderLayer<BowgunRig> {
 		}
 		matrices.push();
 		try {
-			matrices.translate(0.0D, 0.75D, 0.0D);
+			// Final holding-state attachment offset.
+			matrices.translate(0.0D, 0.68D, 0.0D);
 			CombatBackpackGeoRenderer.getRig().renderAttached(
 					stack, player, matrices, consumers, light, tickDelta);
 		} finally {

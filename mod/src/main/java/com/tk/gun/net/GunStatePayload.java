@@ -14,7 +14,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 							  boolean airborneIdle, boolean dashMelee,
 							  boolean meleeReturning, boolean dashMeleeReturn,
 							  boolean dashMeleeReturnRun, boolean meleeHoldOver,
-							  boolean fortressCrouchedLoad, boolean fortressSlideLoad)
+							  boolean fortressCrouchedLoad, boolean fortressSlideLoad,
+							  boolean skillJumpHovering, boolean fallAttackTailPose)
 		implements CustomPayload {
 	public static final CustomPayload.Id<GunStatePayload> ID =
 			new CustomPayload.Id<>(TkGun.id("state"));
@@ -51,6 +52,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 				buf.writeBoolean(value.meleeHoldOver());
 				buf.writeBoolean(value.fortressCrouchedLoad());
 				buf.writeBoolean(value.fortressSlideLoad());
+				buf.writeBoolean(value.skillJumpHovering());
+				buf.writeBoolean(value.fallAttackTailPose());
 			},
 			buf -> new GunStatePayload(buf.readVarInt(), buf.readByte(), buf.readVarInt(), buf.readVarInt(),
 					buf.readVarInt(), buf.readVarInt(),
@@ -71,6 +74,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 					buf.readableBytes() > 0 ? buf.readVarInt() : 6,
 					buf.readableBytes() > 0 ? buf.readVarInt() : 10,
 					buf.readableBytes() > 0 ? buf.readVarInt() : 10,
+					buf.readableBytes() > 0 && buf.readBoolean(),
+					buf.readableBytes() > 0 && buf.readBoolean(),
 					buf.readableBytes() > 0 && buf.readBoolean(),
 					buf.readableBytes() > 0 && buf.readBoolean(),
 					buf.readableBytes() > 0 && buf.readBoolean(),

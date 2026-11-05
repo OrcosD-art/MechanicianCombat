@@ -1,9 +1,11 @@
 package com.tk.gun.client;
 
+import com.tk.gun.TkGun;
 import com.tk.gun.item.CombatBackpackItem;
 import com.tk.gun.item.CombatBackpackAnimation;
 import com.tk.gun.item.BackpackUpgradeData;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -21,14 +23,24 @@ import org.joml.Vector3f;
 import org.joml.Vector4f;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.cache.object.GeoBone;
+import software.bernie.geckolib.cache.object.GeoCube;
+import software.bernie.geckolib.cache.object.GeoQuad;
+import software.bernie.geckolib.cache.object.GeoVertex;
+import software.bernie.geckolib.cache.texture.AnimatableTexture;
 import software.bernie.geckolib.model.GeoModel;
 import software.bernie.geckolib.renderer.GeoItemRenderer;
 import software.bernie.geckolib.util.RenderUtil;
 
 import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 /** Renders the wearable backpack at an already-transformed chest attachment point. */
 public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackpackItem> {
+	private static final Identifier FLAME_TEXTURE =
+			TkGun.id("textures/entity/combat_backpack_flame.png");
+	/** Base geometry uses a 48x48 atlas; each animated flame frame is 16x16. */
+	private static final float FLAME_UV_SCALE = 3.0F;
 	private static CombatBackpackGeoRenderer accessoryInstance;
 	private static CombatBackpackGeoRenderer rigInstance;
 	private static CombatBackpackGeoRenderer previewInstance;
@@ -44,6 +56,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			new java.util.HashMap<>();
 	private static final java.util.Map<Integer, AimFilter> AIM_FILTERS =
 			new java.util.HashMap<>();
+	private static final Set<String> POSE_ISOLATION_DIAGNOSTICS = new HashSet<>();
 	private static final double AIM_DEADBAND_COS =
 			Math.cos(Math.toRadians(2.0D));
 	private static final double AIM_SMOOTHING = 0.25D;
@@ -51,9 +64,11 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	private boolean suppressC3Cubes;
 	private boolean autoAimCubesOnly;
 	private boolean allowAutoAimCubeRender;
+	private boolean flamePass;
 	private boolean attachedCoreInstalled;
 	private BackpackUpgradeData.LauncherType attachedLauncherType =
 			BackpackUpgradeData.LauncherType.NONE;
+	private boolean attachedJumpThruster;
 
 	private static final class AimFilter {
 		int targetId = -1;
@@ -86,6 +101,10 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		return previewInstance;
 	}
 
+	public static void clearPoseDiagnostics() {
+		POSE_ISOLATION_DIAGNOSTICS.clear();
+	}
+
 	/**
 	 * Draws the selected backpack through GeckoLib's item renderer while forcing
 	 * the Maintenance animation. The caller supplies the GUI transform and scissor.
@@ -102,6 +121,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		this.attachedLauncherType = BackpackUpgradeData.canUseLauncher(stack)
 				? BackpackUpgradeData.launcherType(stack)
 				: BackpackUpgradeData.LauncherType.NONE;
+		this.attachedJumpThruster = this.attachedLauncherType
+				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
 		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
 		CombatBackpackAnimation.beginModificationPreview();
 		try {
@@ -111,6 +132,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			doPostRenderCleanup();
 			CombatBackpackAnimation.endModificationPreview();
 			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
+			this.attachedJumpThruster = false;
 			this.attachedCoreInstalled = false;
 		}
 	}
@@ -124,21 +146,42 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		CombatBackpackAnimation.setRenderingPlayer(entity.getId());
 		this.animatable = item;
 		this.currentItemStack = stack;
-		this.attachedLauncherType = BackpackUpgradeData.canUseLauncher(stack)
+		BackpackUpgradeData.LauncherType syncedType =
+				CombatBackpackClientState.launcherType(entity.getId());
+		this.attachedLauncherType = syncedType
+						!= BackpackUpgradeData.LauncherType.NONE
+				? syncedType
+				: (BackpackUpgradeData.canUseLauncher(stack)
 				? BackpackUpgradeData.launcherType(stack)
-				: BackpackUpgradeData.LauncherType.NONE;
+				: BackpackUpgradeData.LauncherType.NONE);
+		this.attachedJumpThruster = this.attachedLauncherType
+				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
 		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
+		CombatBackpackAnimation.setManualJumpRendering(attachedJumpThruster);
 		this.renderPerspective = ModelTransformationMode.NONE;
 		try {
 			Identifier texture = getTextureLocation(item);
 			RenderLayer layer = getRenderType(item, texture, consumers, tickDelta);
 			VertexConsumer buffer = consumers.getBuffer(layer);
 			defaultRender(matrices, item, consumers, layer, buffer, tickDelta, tickDelta, light);
+			// GeoItemRenderer clears these after a completed render pass. Restore
+			// the attached stack before drawing the separate animated flame pass.
+			this.animatable = item;
+			this.currentItemStack = stack;
+			this.currentEntity = entity;
+			this.renderPerspective = ModelTransformationMode.NONE;
+			this.flamePass = true;
+			RenderLayer flameLayer = RenderLayer.getEntityCutoutNoCull(FLAME_TEXTURE);
+			VertexConsumer flameBuffer = consumers.getBuffer(flameLayer);
+			defaultRender(matrices, item, consumers, flameLayer, flameBuffer,
+					tickDelta, tickDelta, light);
 		} finally {
 			CombatBackpackAnimation.clearRenderingPlayer();
 			this.currentEntity = null;
 			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
+			this.attachedJumpThruster = false;
 			this.attachedCoreInstalled = false;
+			this.flamePass = false;
 			doPostRenderCleanup();
 		}
 	}
@@ -206,6 +249,82 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	}
 
 	@Override
+	public void actuallyRender(MatrixStack matrices, CombatBackpackItem animatable,
+							   BakedGeoModel model, RenderLayer renderType,
+							   VertexConsumerProvider consumers, VertexConsumer buffer,
+							   boolean isReRender, float tickDelta, int packedLight,
+							   int packedOverlay, int colour) {
+		// The jump backpack pose is sampled directly into the shared GeoBones.
+		// Running the item AnimationController in the same pass would mix its
+		// residual queue/snapshots with that pose. isReRender=true is GeckoLib's
+		// contract for rendering without calling GeoModel.handleAnimations.
+		super.actuallyRender(matrices, animatable, model, renderType, consumers,
+				buffer, attachedJumpThruster || isReRender, tickDelta, packedLight,
+				packedOverlay, colour);
+		if (attachedJumpThruster && currentEntity != null) {
+			CombatBackpackAnimation.Phase phase =
+					CombatBackpackAnimation.phase(currentEntity.getId());
+			String key = currentEntity.getId() + ":" + phase + ":"
+					+ (flamePass ? "flame" : "body");
+			if (POSE_ISOLATION_DIAGNOSTICS.add(key)) {
+				TkGun.LOGGER.info(
+						"[tkgun] backpack pose isolated player={} phase={} clip={} "
+								+ "pass={} geckoController=skipped manualSampler=on ageTicks={}",
+						currentEntity.getId(), phase,
+						CombatBackpackPoseAnimation.clipName(phase),
+						flamePass ? "flame" : "body",
+						CombatBackpackClientState.animationAgeTicks(
+								currentEntity.getId(), tickDelta));
+			}
+		}
+	}
+
+	@Override
+	public void updateAnimatedTextureFrame(CombatBackpackItem animatable) {
+		if (flamePass) {
+			// GeckoLib owns the current frame of an animated texture. A plain
+			// entity RenderLayer only binds it and would leave the flame on frame 0.
+			AnimatableTexture.setAndUpdate(FLAME_TEXTURE);
+			return;
+		}
+		super.updateAnimatedTextureFrame(animatable);
+	}
+
+	@Override
+	public void renderCube(MatrixStack matrices, GeoCube cube, VertexConsumer buffer,
+						   int packedLight, int packedOverlay, int colour) {
+		if (flamePass) {
+			super.renderCube(matrices, scaleFlameUvs(cube), buffer,
+					LightmapTextureManager.MAX_LIGHT_COORDINATE,
+					packedOverlay, colour);
+			return;
+		}
+		super.renderCube(matrices, cube, buffer, packedLight, packedOverlay, colour);
+	}
+
+	private static GeoCube scaleFlameUvs(GeoCube cube) {
+		GeoQuad[] source = cube.quads();
+		GeoQuad[] scaled = new GeoQuad[source.length];
+		for (int i = 0; i < source.length; i++) {
+			GeoQuad quad = source[i];
+			if (quad == null) {
+				continue;
+			}
+			GeoVertex[] vertices = quad.vertices();
+			GeoVertex[] updated = new GeoVertex[vertices.length];
+			for (int j = 0; j < vertices.length; j++) {
+				GeoVertex vertex = vertices[j];
+				updated[j] = vertex.withUVs(
+						vertex.texU() * FLAME_UV_SCALE,
+						vertex.texV() * FLAME_UV_SCALE);
+			}
+			scaled[i] = new GeoQuad(updated, quad.normal(), quad.direction());
+		}
+		return new GeoCube(scaled, cube.pivot(), cube.rotation(), cube.size(),
+				cube.inflate(), cube.mirror());
+	}
+
+	@Override
 	public void renderRecursively(MatrixStack matrices, CombatBackpackItem animatable, GeoBone bone,
 								  RenderLayer renderType, VertexConsumerProvider consumers,
 								  VertexConsumer buffer, boolean isReRender, float tickDelta,
@@ -217,8 +336,16 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				== BackpackUpgradeData.LauncherType.AUTO;
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean jumpThruster = attachedJumpThruster;
+		if (jumpThruster && currentEntity != null) {
+			double seconds = CombatBackpackClientState.animationAgeTicks(
+					currentEntity.getId(), tickDelta) / 20.0D;
+			CombatBackpackPoseAnimation.apply(bone,
+					CombatBackpackAnimation.phase(currentEntity.getId()), seconds);
+		}
 		Quaternionf aimRotation = null;
 		if (currentEntity != null && launcherInstalled && !summonLauncher
+				&& !jumpThruster
 				&& CombatBackpackAnimation.phase(currentEntity.getId())
 				== CombatBackpackAnimation.Phase.AIM) {
 			if (autoLauncher && "C3".equals(bone.getName())) {
@@ -237,12 +364,17 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		switch (bone.getName()) {
 			case "core" -> bone.setHidden(!coreInstalled);
 			case "C1", "C2", "C3" ->
-					bone.setHidden(!launcherInstalled || autoLauncher || summonLauncher);
+					bone.setHidden(!launcherInstalled || autoLauncher
+							|| summonLauncher || jumpThruster);
 			case "auto_C1" -> bone.setHidden(!autoLauncher);
 			case "auto_ejector", "auto_box", "auto_sight", "auto_barrel" ->
 					bone.setHidden(!autoLauncher);
 			case "summon_C1", "summon_C2", "summon_C3", "summon_locator" ->
 					bone.setHidden(!summonLauncher);
+			case "jet_F", "jet_F2", "jet_right", "jet_left" ->
+					bone.setHidden(!jumpThruster);
+			case "jet_F2_flame", "jet_right_flame", "jet_left_flame" ->
+					bone.setHidden(!jumpThruster);
 			default -> {
 			}
 		}
@@ -282,10 +414,15 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	@Override
 	public void renderCubesOfBone(MatrixStack matrices, GeoBone bone, VertexConsumer buffer,
 								  int packedLight, int packedOverlay, int colour) {
+		boolean flameBone = bone.getName().endsWith("_flame");
+		if (flamePass != flameBone) {
+			return;
+		}
 		boolean autoLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.AUTO;
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean jumpThruster = attachedJumpThruster;
 		if (("C3".equals(bone.getName()) || "auto_C3".equals(bone.getName()))
 				&& suppressC3Cubes) {
 			return;
@@ -301,7 +438,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				&& !allowAutoAimCubeRender) {
 			return;
 		}
-		if ((autoLauncher || summonLauncher) && ("C1".equals(bone.getName())
+		if ((autoLauncher || summonLauncher || jumpThruster)
+				&& ("C1".equals(bone.getName())
 				|| "C2".equals(bone.getName())
 				|| "C3".equals(bone.getName()))) {
 			return;

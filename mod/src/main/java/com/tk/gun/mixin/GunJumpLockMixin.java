@@ -16,6 +16,10 @@ public abstract class GunJumpLockMixin {
 		MinecraftClient client = MinecraftClient.getInstance();
 		boolean jumpPressed = client.player != null && client.currentScreen == null
 				&& client.options.jumpKey.isPressed();
+		if (jumpPressed) {
+			com.tk.gun.client.JumpBackpackClientState.handleJumpKey(
+					client, true);
+		}
 		if (!jumpPressed || GunJumpRules.canJump(client)) {
 			return;
 		}

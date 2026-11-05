@@ -191,6 +191,14 @@
                                              }
                                          ]
                           },
+    "slash":  {
+                  "sounds":  [
+                                 {
+                                     "name":  "tkgun:slash",
+                                     "stream":  false
+                                 }
+                             ]
+              },
     "current":  {
                     "sounds":  [
                                    {

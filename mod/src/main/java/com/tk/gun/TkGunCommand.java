@@ -149,6 +149,34 @@ public final class TkGunCommand {
 											"tkgun: 已给 " + p.getName().getString() + " 发武器 + 64 箭"), false);
 									return 1;
 								})))
+				.then(CommandManager.literal("jumpkit")
+						.then(CommandManager.argument("player", EntityArgumentType.player())
+								.executes(ctx -> {
+									ServerPlayerEntity p = EntityArgumentType.getPlayer(ctx, "player");
+									ItemStack backpack = new ItemStack(TkGunServer.COMBAT_BACKPACK);
+									com.tk.gun.item.BackpackUpgradeData.installCore(backpack);
+									com.tk.gun.item.BackpackUpgradeData.setLauncherType(
+											backpack,
+											com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER);
+									com.tk.gun.item.BackpackUpgradeData.setCoreSlot(backpack, 0);
+									com.tk.gun.item.BackpackUpgradeData.setLauncherSlot(backpack, 1);
+									io.wispforest.accessories.api.AccessoriesCapability
+											.getOptionally(p)
+											.ifPresent(capability -> capability.equipAccessory(backpack));
+									p.currentScreenHandler.syncState();
+									ctx.getSource().sendFeedback(() -> Text.literal(
+											"tkgun: 已装备跳跃背包 -> " + p.getName().getString()), false);
+									return 1;
+								})))
+				.then(CommandManager.literal("jumpstart")
+						.then(CommandManager.argument("player", EntityArgumentType.player())
+								.executes(ctx -> {
+									ServerPlayerEntity p = EntityArgumentType.getPlayer(ctx, "player");
+									p.setOnGround(true);
+									p.fallDistance = 0.0F;
+									TkGunServer.handleJumpBackpackInput(p, true);
+									return 1;
+								})))
 				// /tkgun demo <player> <on|off> —— 远程开关客户端的自动演示（自己按键跑全套动作并截图）
 				.then(CommandManager.literal("demo")
 						.then(CommandManager.argument("player", EntityArgumentType.player())

@@ -9,9 +9,14 @@ import net.minecraft.item.TridentItem;
 /** Shared server/client rules for the portable launcher's occupied offhand. */
 public final class BackpackLauncherRules {
 	public static boolean hasActiveLauncher(LivingEntity entity) {
-		return entity != null
-				&& BackpackUpgradeData.canUseLauncher(
-						CombatBackpackItem.equippedStack(entity));
+		if (entity == null) {
+			return false;
+		}
+		BackpackUpgradeData.LauncherType type = BackpackUpgradeData.launcherType(
+				CombatBackpackItem.equippedStack(entity));
+		return type == BackpackUpgradeData.LauncherType.PORTABLE
+				|| type == BackpackUpgradeData.LauncherType.AUTO
+				|| type == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
 	}
 
 	public static boolean isLaunchable(ItemStack stack) {

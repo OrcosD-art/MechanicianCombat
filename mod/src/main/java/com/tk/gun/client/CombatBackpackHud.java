@@ -27,6 +27,10 @@ public final class CombatBackpackHud {
 		BackpackUpgradeData.LauncherType launcherType =
 				BackpackUpgradeData.launcherType(
 						CombatBackpackItem.equippedStack(client.player));
+		if (launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			renderJumpThruster(context, client, phase, remaining);
+			return;
+		}
 		if (launcherType == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
 			renderSummonAntenna(context, client, phase, remaining);
 			return;
@@ -103,6 +107,54 @@ public final class CombatBackpackHud {
 		context.drawText(client.textRenderer, stateText, x + 6, y + 5, colour, true);
 		context.drawText(client.textRenderer, chargeText, x + 6, y + 15,
 				0xFFFFF0A0, true);
+	}
+
+	private static void renderJumpThruster(DrawContext context,
+			MinecraftClient client, int phase, int remaining) {
+		String jumpKey = jumpBindingText(client);
+		String stateText = switch (phase) {
+			case CombatBackpackStatusPayload.PHASE_READY_TO_FLY ->
+					net.minecraft.text.Text.translatable(
+							"hud.tkgun.jump_backpack.ready").getString();
+			case CombatBackpackStatusPayload.PHASE_FLYING ->
+					net.minecraft.text.Text.translatable(
+							"hud.tkgun.jump_backpack.flying").getString();
+			case CombatBackpackStatusPayload.PHASE_FALLING ->
+					net.minecraft.text.Text.translatable(
+							"hud.tkgun.jump_backpack.falling").getString();
+			case CombatBackpackStatusPayload.PHASE_CLOSE ->
+					remaining > 0
+							? net.minecraft.text.Text.translatable(
+									"hud.tkgun.jump_backpack.cooldown",
+									Math.max(1, (remaining + 19) / 20)).getString()
+							: net.minecraft.text.Text.translatable(
+									"hud.tkgun.jump_backpack.idle", jumpKey).getString();
+			case CombatBackpackStatusPayload.PHASE_COOLDOWN ->
+					net.minecraft.text.Text.translatable(
+							"hud.tkgun.jump_backpack.cooldown",
+							Math.max(1, (remaining + 19) / 20)).getString();
+			default -> net.minecraft.text.Text.translatable(
+					"hud.tkgun.jump_backpack.idle", jumpKey).getString();
+		};
+		int width = client.textRenderer.getWidth(stateText) + 10;
+		int effectRows = client.player.getStatusEffects().size();
+		int x = context.getScaledWindowWidth() - width - 6;
+		int y = 30 + effectRows * 24;
+		drawAmmoInfoBackground(context, x, y, width, 16);
+		int colour = phase == CombatBackpackStatusPayload.PHASE_READY_TO_FLY
+				|| phase == CombatBackpackStatusPayload.PHASE_FLYING
+				? 0xFF9BE0FF
+				: phase == CombatBackpackStatusPayload.PHASE_COOLDOWN
+						? 0xFFFFB060 : 0xFFE8E8E8;
+		context.drawText(client.textRenderer, stateText, x + 6, y + 5, colour, true);
+	}
+
+	private static String jumpBindingText(MinecraftClient client) {
+		String key = client.options.jumpKey.getBoundKeyLocalizedText().getString();
+		if (client.options.language.startsWith("zh") && !key.endsWith("键")) {
+			return key + "键";
+		}
+		return key;
 	}
 
 	private static void drawAmmoInfoBackground(DrawContext context,

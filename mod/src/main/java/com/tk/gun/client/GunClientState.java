@@ -30,6 +30,8 @@ public final class GunClientState {
 		public int maxShotIndex = TkGun.SHOT_ANIM_MAX;
 		/** Authoritative normal-airborne hold flag from the server. */
 		public boolean airborneIdle;
+		public boolean skillJumpHovering;
+		public boolean fallAttackTailPose;
 		/** 服务端正在执行主动装填；HUD 据此显示“装填”。 */
 		public boolean reloading;
 		/**
@@ -135,6 +137,8 @@ public final class GunClientState {
 		e.focusMagazineCapacity = Math.max(1, payload.focusMagazineCapacity());
 		e.maxShotIndex = Math.max(1, payload.maxShotIndex());
 		e.airborneIdle = payload.airborneIdle();
+		e.skillJumpHovering = payload.skillJumpHovering();
+		e.fallAttackTailPose = payload.fallAttackTailPose();
 		e.dashMeleeActive = payload.dashMelee();
 		e.meleeReturning = payload.meleeReturning();
 		e.dashMeleeReturn = payload.dashMeleeReturn();
@@ -195,7 +199,8 @@ public final class GunClientState {
 			e.nextDodgeSlide = true;
 		} else if (e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
 			e.nextDodgeSlide = false;
-			e.localDodgeLockUntil = ticks + TkGun.SLIDE_TICKS + 20;
+			e.localDodgeLockUntil = ticks
+					+ Math.max(TkGun.SLIDE_TICKS, e.total) + 20;
 		}
 		boolean movementInput = TkGunClient.hasMovementInput(payload.playerId());
 		if (e.state == TkGun.State.ROLL) {
@@ -452,7 +457,8 @@ public final class GunClientState {
 			case SKILL_JUMP:
 				return skillJumpAnimation(entityId);
 			case FALL_ATTACK:
-				return "fall_attack";
+				return e.fallAttackTailPose
+						? "fall_attack_2" : "fall_attack";
 			case FALL_ATTACK_RECOVERY:
 				return "fall_attack_over_to_idle";
 			case IDLE:
@@ -540,6 +546,8 @@ public final class GunClientState {
 			case AIM_FAST -> 1.0D;
 			case AIM_SLIDE -> 2.0D;
 			case AIM_ROLL -> 1.0D;
+			case SLIDE -> TkGun.SLIDE_TICKS / (double) Math.max(
+					TkGun.SLIDE_TICKS, e.total);
 			default -> 1.0D;
 		};
 	}
