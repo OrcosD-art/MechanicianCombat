@@ -4,7 +4,10 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.tk.gun.item.ArmorPartItem;
+import com.tk.gun.item.ArmorUpgradeData;
 import com.tk.gun.item.MechanicianArmorPiece;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.model.ModelPart;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.RenderLayer;
@@ -13,19 +16,23 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.model.BipedEntityModel;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix4f;
+import software.bernie.geckolib.cache.texture.AnimatableTexture;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Renders the authored Blockbench armor without converting its per-face UVs to
@@ -40,6 +47,10 @@ import java.util.Map;
 public final class MechanicianArmorGeometry {
 	public enum Part {
 		HEAD, BODY, RIGHT_ARM, LEFT_ARM, RIGHT_LEG, LEFT_LEG
+	}
+
+	public enum Feature {
+		C1, C2, C3
 	}
 
 	private static final Map<MechanicianArmorPiece, Geometry> CACHE =
@@ -68,7 +79,8 @@ public final class MechanicianArmorGeometry {
 				continue;
 			}
 			renderPart(geometry, part, matrices, consumers, baseModel, light,
-					entity, limbAngle, limbDistance, headYaw);
+					entity, limbAngle, limbDistance, headYaw,
+					EnumSet.allOf(Feature.class));
 		}
 	}
 
@@ -78,10 +90,47 @@ public final class MechanicianArmorGeometry {
 							  LivingEntity entity, float limbAngle,
 							  float limbDistance, float headYaw,
 							  Part... parts) {
+		render(piece, matrices, consumers, baseModel, light, entity,
+				limbAngle, limbDistance, headYaw,
+				EnumSet.noneOf(Feature.class), parts);
+	}
+
+	public static void render(MechanicianArmorPiece piece, ItemStack stack,
+							  MatrixStack matrices,
+							  VertexConsumerProvider consumers,
+							  BipedEntityModel<?> baseModel, int light,
+							  LivingEntity entity, float limbAngle,
+							  float limbDistance, float headYaw,
+							  Part... parts) {
+		Set<Feature> installed = EnumSet.noneOf(Feature.class);
+		for (Feature feature : Feature.values()) {
+			boolean hasPart = ArmorUpgradeData.hasPart(stack,
+					ArmorPartItem.Kind.valueOf(feature.name()));
+			if (entity == MinecraftClient.getInstance().player) {
+				hasPart = switch (feature) {
+					case C1 -> ArmorAbilityClientState.totemInstalled();
+					case C2 -> ArmorAbilityClientState.shieldInstalled();
+					case C3 -> ArmorAbilityClientState.soulChainInstalled();
+				};
+			}
+			if (hasPart) {
+				installed.add(feature);
+			}
+		}
+		render(piece, matrices, consumers, baseModel, light, entity,
+				limbAngle, limbDistance, headYaw, installed, parts);
+	}
+
+	private static void render(MechanicianArmorPiece piece, MatrixStack matrices,
+							   VertexConsumerProvider consumers,
+							   BipedEntityModel<?> baseModel, int light,
+							   LivingEntity entity, float limbAngle,
+							   float limbDistance, float headYaw,
+							   Set<Feature> installed, Part... parts) {
 		Geometry geometry = get(piece);
 		for (Part part : parts) {
 			renderPart(geometry, part, matrices, consumers, baseModel, light,
-					entity, limbAngle, limbDistance, headYaw);
+					entity, limbAngle, limbDistance, headYaw, installed);
 		}
 	}
 
@@ -90,13 +139,12 @@ public final class MechanicianArmorGeometry {
 								   VertexConsumerProvider consumers,
 								   BipedEntityModel<?> baseModel, int light,
 								   LivingEntity entity, float limbAngle,
-								   float limbDistance, float headYaw) {
+								   float limbDistance, float headYaw,
+								   Set<Feature> installed) {
 		List<Cube> cubes = geometry.cubes.get(part);
 		if (cubes == null || cubes.isEmpty()) {
 			return;
 		}
-		VertexConsumer buffer = consumers.getBuffer(
-				RenderLayer.getArmorCutoutNoCull(geometry.texture()));
 		matrices.push();
 		try {
 			ModelPart modelPart = part(baseModel, part);
@@ -104,7 +152,10 @@ public final class MechanicianArmorGeometry {
 			net.minecraft.client.model.ModelTransform origin =
 					modelPart.getDefaultTransform();
 			for (Cube cube : cubes) {
-				renderCube(matrices, buffer, geometry, cube, light,
+				if (cube.feature != null && !installed.contains(cube.feature)) {
+					continue;
+				}
+				renderCube(matrices, consumers, geometry, cube, light,
 						entity, limbAngle, limbDistance, headYaw,
 						origin.pivotX, origin.pivotY, origin.pivotZ);
 			}
@@ -124,7 +175,8 @@ public final class MechanicianArmorGeometry {
 		};
 	}
 
-	private static void renderCube(MatrixStack matrices, VertexConsumer buffer,
+	private static void renderCube(MatrixStack matrices,
+								   VertexConsumerProvider consumers,
 								   Geometry geometry, Cube cube, int light,
 								   LivingEntity entity, float limbAngle,
 								   float limbDistance, float headYaw,
@@ -157,8 +209,7 @@ public final class MechanicianArmorGeometry {
 						-(cube.pivotY - bonePivotY) * PIXEL,
 						-(cube.pivotZ - bonePivotZ) * PIXEL);
 			}
-			drawCube(matrices, buffer, geometry.textureWidth,
-					geometry.textureHeight, cube, light,
+			drawCube(matrices, consumers, geometry, cube, light,
 					bonePivotX, bonePivotY, bonePivotZ);
 		} finally {
 			matrices.pop();
@@ -194,9 +245,10 @@ public final class MechanicianArmorGeometry {
 				-cloth.pivotZ * PIXEL);
 	}
 
-	private static void drawCube(MatrixStack matrices, VertexConsumer buffer,
-								 int textureWidth, int textureHeight,
-								 Cube cube, int light, float bonePivotX,
+	private static void drawCube(MatrixStack matrices,
+								 VertexConsumerProvider consumers,
+								 Geometry geometry, Cube cube, int light,
+								 float bonePivotX,
 								 float bonePivotY, float bonePivotZ) {
 		float[] p = {
 				(cube.x0 - bonePivotX) * PIXEL,
@@ -224,8 +276,19 @@ public final class MechanicianArmorGeometry {
 			Face face = entryFace.getValue();
 			String[] order = vertexOrder(direction,
 					cube.topFaceXFlip && "UP".equals(direction));
-			float[][] uvs = faceUvs(face, textureWidth, textureHeight);
+			float[][] uvs = faceUvs(face,
+					geometry.uvWidth(face.textureIndex),
+					geometry.uvHeight(face.textureIndex));
 			float[] normal = normalOf(direction);
+			Identifier texture = geometry.texture(face.textureIndex);
+			RenderLayer layer;
+			if (cube.feature == Feature.C3) {
+				AnimatableTexture.setAndUpdate(texture);
+				layer = RenderLayer.getEntityCutoutNoCull(texture);
+			} else {
+				layer = RenderLayer.getArmorCutoutNoCull(texture);
+			}
+			VertexConsumer buffer = consumers.getBuffer(layer);
 			for (int i = 0; i < 4; i++) {
 				float[] vertex = vertices.get(order[i]);
 				buffer.vertex(matrix, vertex[0], vertex[1], vertex[2])
@@ -247,18 +310,26 @@ public final class MechanicianArmorGeometry {
 		if (face.rotation == 0.0F) {
 			return out;
 		}
-		float centerU = (u0 + u1) * 0.5F;
-		float centerV = (v0 + v1) * 0.5F;
-		double radians = Math.toRadians(face.rotation);
-		float cos = (float) Math.cos(radians);
-		float sin = (float) Math.sin(radians);
-		for (float[] uv : out) {
-			float du = uv[0] - centerU;
-			float dv = uv[1] - centerV;
-			uv[0] = centerU + du * cos - dv * sin;
-			uv[1] = centerV + du * sin + dv * cos;
+		if (face.textureIndex == 0) {
+			float centerU = (u0 + u1) * 0.5F;
+			float centerV = (v0 + v1) * 0.5F;
+			double radians = Math.toRadians(face.rotation);
+			float cos = (float) Math.cos(radians);
+			float sin = (float) Math.sin(radians);
+			for (float[] uv : out) {
+				float du = uv[0] - centerU;
+				float dv = uv[1] - centerV;
+				uv[0] = centerU + du * cos - dv * sin;
+				uv[1] = centerV + du * sin + dv * cos;
+			}
+			return out;
 		}
-		return out;
+		int quarterTurns = Math.floorMod(Math.round(face.rotation / 90.0F), 4);
+		float[][] rotated = new float[4][];
+		for (int index = 0; index < 4; index++) {
+			rotated[index] = out[(index + quarterTurns) % 4];
+		}
+		return rotated;
 	}
 
 	private static String[] vertexOrder(String direction, boolean topFaceXFlip) {
@@ -321,16 +392,33 @@ public final class MechanicianArmorGeometry {
 		Map<Part, List<Cube>> cubes = new EnumMap<>(Part.class);
 		for (JsonElement topLevel : document.getAsJsonArray("outliner")) {
 			if (topLevel.isJsonObject()) {
-				walkBone(topLevel.getAsJsonObject(), null, null,
+				walkBone(topLevel.getAsJsonObject(), null, null, null,
 						elements, cubes);
 			}
 		}
-		return new Geometry(TEXTURE_WIDTH, TEXTURE_HEIGHT,
-				piece.textureLocation(), cubes);
+		Map<Integer, TextureInfo> textures = new HashMap<>();
+		JsonArray sourceTextures = document.getAsJsonArray("textures");
+		for (int index = 0; index < sourceTextures.size(); index++) {
+			JsonObject sourceTexture =
+					sourceTextures.get(index).getAsJsonObject();
+			String name = sourceTexture.get("name").getAsString();
+			Identifier texture = switch (name) {
+				case "eng_chain.png" -> Identifier.of("tkgun",
+						"textures/entity/mechanician_soul_chain.png");
+				default -> piece.textureLocation();
+			};
+			textures.put(index, new TextureInfo(texture,
+					sourceTexture.has("uv_width")
+							? sourceTexture.get("uv_width").getAsInt() : TEXTURE_WIDTH,
+					sourceTexture.has("uv_height")
+							? sourceTexture.get("uv_height").getAsInt() : TEXTURE_HEIGHT));
+		}
+		return new Geometry(textures, cubes);
 	}
 
 	private static void walkBone(JsonObject bone, Part inheritedPart,
 								 Cloth inheritedCloth,
+								 Feature inheritedFeature,
 								 Map<String, JsonObject> elements,
 								 Map<Part, List<Cube>> cubes) {
 		String name = bone.has("name") ? bone.get("name").getAsString() : "";
@@ -338,6 +426,12 @@ public final class MechanicianArmorGeometry {
 		if (part == null) {
 			part = inheritedPart;
 		}
+		Feature feature = switch (name) {
+			case "pauldorn_left" -> Feature.C2;
+			case "undying_totem", "totem" -> Feature.C1;
+				case "soul_chain" -> Feature.C3;
+			default -> inheritedFeature;
+		};
 		Cloth cloth = inheritedCloth;
 		if ("F1".equals(name) || "F2".equals(name)) {
 			float[] pivot = vector(bone.getAsJsonArray("origin"), 0, 0, 0);
@@ -351,19 +445,19 @@ public final class MechanicianArmorGeometry {
 				JsonObject element = elements.get(child.getAsString());
 				if (element != null && part != null) {
 					cubes.computeIfAbsent(part, ignored -> new ArrayList<>())
-							.add(toCube(element, cloth));
+							.add(toCube(element, cloth, feature));
 				}
 			} else if (child.isJsonObject()) {
 				JsonObject childBone = child.getAsJsonObject();
 				if (!"locator".equals(childBone.has("type")
 						? childBone.get("type").getAsString() : "bone")) {
-					walkBone(childBone, part, cloth, elements, cubes);
+					walkBone(childBone, part, cloth, feature, elements, cubes);
 				}
 			}
 		}
 	}
 
-	private static Cube toCube(JsonObject element, Cloth cloth) {
+	private static Cube toCube(JsonObject element, Cloth cloth, Feature feature) {
 		float[] from = vector(element.getAsJsonArray("from"), 0, 0, 0);
 		float[] to = vector(element.getAsJsonArray("to"), 0, 0, 0);
 		float[] pivot = vector(element.has("origin")
@@ -389,7 +483,10 @@ public final class MechanicianArmorGeometry {
 			float v1 = uv.get(3).getAsFloat();
 			float uvRotation = sourceFace.has("rotation")
 					? sourceFace.get("rotation").getAsFloat() : 0.0F;
-			faces.put(direction, new Face(u0, v0, u1, v1, uvRotation));
+			int textureIndex = sourceFace.has("texture")
+					? sourceFace.get("texture").getAsInt() : 0;
+			faces.put(direction,
+					new Face(u0, v0, u1, v1, uvRotation, textureIndex));
 		}
 		return new Cube(
 				Math.min(from[0], to[0]), 24.0F - Math.max(from[1], to[1]),
@@ -398,7 +495,7 @@ public final class MechanicianArmorGeometry {
 				Math.max(from[2], to[2]),
 				pivot[0], 24.0F - pivot[1], pivot[2],
 				rotation[0], rotation[1], rotation[2],
-				Math.abs(rotation[2]) >= 89.0F, faces, cloth);
+					Math.abs(rotation[2]) >= 89.0F, faces, cloth, feature);
 	}
 
 	private static Part partFor(String name) {
@@ -436,13 +533,34 @@ public final class MechanicianArmorGeometry {
 				array.get(1).getAsFloat(), array.get(2).getAsFloat()};
 	}
 
-	private record Geometry(int textureWidth, int textureHeight,
-							Identifier texture,
+	private record Geometry(Map<Integer, TextureInfo> textures,
 							Map<Part, List<Cube>> cubes) {
+		private Identifier texture(int index) {
+			return info(index).texture();
+		}
+
+		private int uvWidth(int index) {
+			return info(index).uvWidth();
+		}
+
+		private int uvHeight(int index) {
+			return info(index).uvHeight();
+		}
+
+		private TextureInfo info(int index) {
+			return textures.getOrDefault(index,
+					textures.getOrDefault(0, new TextureInfo(
+							Identifier.of("tkgun",
+									"textures/entity/mechanician_chestplate.png"),
+							TEXTURE_WIDTH, TEXTURE_HEIGHT)));
+		}
+	}
+
+	private record TextureInfo(Identifier texture, int uvWidth, int uvHeight) {
 	}
 
 	private record Face(float u0, float v0, float u1, float v1,
-						float rotation) {
+						float rotation, int textureIndex) {
 	}
 
 	private record Cloth(boolean back, float pivotX, float pivotY,
@@ -454,6 +572,7 @@ public final class MechanicianArmorGeometry {
 						float pivotX, float pivotY, float pivotZ,
 						float rotationX, float rotationY, float rotationZ,
 						boolean topFaceXFlip,
-						Map<String, Face> faces, Cloth cloth) {
+						Map<String, Face> faces, Cloth cloth,
+						Feature feature) {
 	}
 }

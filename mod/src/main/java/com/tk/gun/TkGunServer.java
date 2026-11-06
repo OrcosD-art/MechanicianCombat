@@ -66,6 +66,8 @@ public class TkGunServer implements ModInitializer {
 	public static net.minecraft.block.entity.BlockEntityType<
 			com.tk.gun.block.BackpackModificationTableBlockEntity>
 			BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
+	public static net.minecraft.block.Block ARMOR_MODIFICATION_TABLE;
+	public static net.minecraft.item.BlockItem ARMOR_MODIFICATION_TABLE_ITEM;
 	public static com.tk.gun.item.CombatBackpackItem COMBAT_BACKPACK;
 	public static java.util.List<com.tk.gun.item.CombatBackpackItem> COMBAT_BACKPACKS;
 	public static Item BACKPACK_CORE;
@@ -78,6 +80,9 @@ public class TkGunServer implements ModInitializer {
 	public static Item MECHANICIAN_CHESTPLATE;
 	public static Item MECHANICIAN_LEGGINGS;
 	public static Item MECHANICIAN_BOOTS;
+	public static Item PAULDRON_LEFT;
+	public static Item UNDYING_TOTEM_PART;
+	public static Item SOUL_CHAIN;
 	/** 只用来给创造模式标签当图标的物品（`视觉/创造模式标签.png`）。 */
 	public static Item TAB_ICON;
 	/** 素材 `子弹` 文件夹里的 5 种子弹（顺序：切割/幽匿/爆破/玫瑰石英/破甲）。 */
@@ -332,14 +337,10 @@ public class TkGunServer implements ModInitializer {
 		// —— 动画音效关键帧（GunSoundPayload 报过来、服务端广播给附近所有人）的每 tick 额度桶 ——
 		public long soundTick;
 		public int soundCount;
-		/**
-		 * **蹲射准备那一声栓声**的预定 tick（0 = 没有）。
-		 *
-		 * <p>用户 2026-10-17："将蹲射准备动作的音频替换为…栓声"。作者把这一声埋在 `Focus_ready`
-		 * 的 0.25s（快档 `fast_ready` 是 0.0833s）—— 这里按"那一拍占动画的比例 × 状态时长"换算成 tick，
-		 * 由**服务端**排（附近所有人都听得见），客户端就不再报这一条关键帧（见 BowgunRig）。
-		 */
+		/** Server-authored deploy cue tick (0 = none). */
 		public long aimSoundAt;
+		/** Added reload cue at 0.17s (0 = none). */
+		public long reloadAuxSoundAt;
 		/**
 		 * **翻滚 / 滑铲交替循环**里上一次是哪个：0 = 都没做过、1 = 刚翻滚、2 = 刚滑铲
 		 * （用户 2026-10-17："翻滚后下一次翻滚再按 Alt 设为滑铲，翻滚与滑铲循环进行"）。
@@ -638,6 +639,21 @@ public class TkGunServer implements ModInitializer {
 						com.tk.gun.item.MechanicianArmorPiece.BOOTS,
 						net.minecraft.item.ArmorItem.Type.BOOTS,
 						new Item.Settings()));
+			UNDYING_TOTEM_PART = Registry.register(
+					Registries.ITEM, TkGun.id("undying_totem"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C1,
+							new Item.Settings()));
+			PAULDRON_LEFT = Registry.register(
+					Registries.ITEM, TkGun.id("pauldorn_left"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C2,
+							new Item.Settings()));
+			SOUL_CHAIN = Registry.register(
+					Registries.ITEM, TkGun.id("soul_chain"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C3,
+							new Item.Settings()));
 	}
 
 	/**
@@ -674,6 +690,8 @@ public class TkGunServer implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		registerArmorItems();
+			ArmorAbilities.register();
+			SoulChainAbility.register();
 		ServerTickEvents.END_SERVER_TICK.register(
 				server -> enforceArmorRequirement(server));
 		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
@@ -686,6 +704,10 @@ public class TkGunServer implements ModInitializer {
 				Registries.SCREEN_HANDLER,
 				TkGun.id("backpack_modification_table"),
 				com.tk.gun.screen.BackpackModificationTableScreenHandler.TYPE);
+		Registry.register(
+				Registries.SCREEN_HANDLER,
+				TkGun.id("armor_modification_table"),
+				com.tk.gun.screen.ArmorModificationTableScreenHandler.TYPE);
 		BACKPACK_MODIFICATION_TABLE = Registry.register(
 				Registries.BLOCK,
 				TkGun.id("backpack_modification_table"),
@@ -711,6 +733,21 @@ public class TkGunServer implements ModInitializer {
 						.build());
 		com.tk.gun.block.BackpackModificationTableBlockEntity.TYPE =
 				BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
+		ARMOR_MODIFICATION_TABLE = Registry.register(
+				Registries.BLOCK,
+				TkGun.id("armor_modification_table"),
+				new com.tk.gun.block.ArmorModificationTableBlock(
+						net.minecraft.block.AbstractBlock.Settings.create()
+								.mapColor(net.minecraft.block.MapColor.STONE_GRAY)
+								.strength(3.5F)
+								.requiresTool()
+								.sounds(net.minecraft.sound.BlockSoundGroup.STONE)));
+		ARMOR_MODIFICATION_TABLE_ITEM = Registry.register(
+				Registries.ITEM,
+				TkGun.id("armor_modification_table"),
+				new net.minecraft.item.BlockItem(
+						ARMOR_MODIFICATION_TABLE,
+						new Item.Settings()));
 		BACKPACK_CORE = Registry.register(
 				Registries.ITEM,
 				TkGun.id("backpack_core"),
@@ -829,6 +866,7 @@ public class TkGunServer implements ModInitializer {
 						.icon(() -> new ItemStack(TAB_ICON))
 						.entries((context, entries) -> {
 							entries.add(BACKPACK_MODIFICATION_TABLE_ITEM);
+								entries.add(ARMOR_MODIFICATION_TABLE_ITEM);
 							for (Item gun : GunRegistry.items()) {
 								entries.add(gun);
 							}
@@ -844,6 +882,9 @@ public class TkGunServer implements ModInitializer {
 							entries.add(MECHANICIAN_CHESTPLATE);
 							entries.add(MECHANICIAN_LEGGINGS);
 							entries.add(MECHANICIAN_BOOTS);
+								entries.add(UNDYING_TOTEM_PART);
+								entries.add(PAULDRON_LEFT);
+								entries.add(SOUL_CHAIN);
 							entries.add(MOLTEN_GOLEM_SPAWN_EGG);
 							entries.add(ENTITY_REMOVAL_TOOL);
 							for (Item bullet : BULLET_ITEMS) {
@@ -872,6 +913,12 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.FortressSkillCooldownPayload.ID,
 				com.tk.gun.net.FortressSkillCooldownPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.ArmorAbilityPayload.ID,
+				com.tk.gun.net.ArmorAbilityPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.SoulChainPayload.ID,
+				com.tk.gun.net.SoulChainPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.MeleeImpactPayload.ID,
 				com.tk.gun.net.MeleeImpactPayload.CODEC);
@@ -1219,7 +1266,8 @@ public class TkGunServer implements ModInitializer {
 							&& switch (payload.sound()) {
 								case "glaive_slash02", "double_axe_swing01",
 										"anchor_slam01", "imp1", "1",
-										"claymore_swing", "slash" -> true;
+										"claymore_swing", "slash",
+										"skill_spark", "smash_ground2" -> true;
 								default -> false;
 							}) {
 						return;
@@ -1245,7 +1293,9 @@ public class TkGunServer implements ModInitializer {
 							return;
 						}
 					}
-					playSound(p, kf.id(), kf.volume(), kf.pitch());
+					Identifier soundId = "empty".equals(payload.sound())
+							&& isQuietStorm(p) ? TkGun.SND_HEARTBEAT2 : kf.id();
+					playSound(p, soundId, kf.volume(), kf.pitch());
 				}));
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.CombatBackpackFirePayload.ID,
 				(payload, context) -> context.server().execute(() ->
@@ -1449,17 +1499,10 @@ public class TkGunServer implements ModInitializer {
 		st.state = state;
 		st.stateStarted = player.getWorld().getTime();
 		st.stateUntil = ticks <= 0 ? 0 : st.stateStarted + ticks;
-		// **蹲射准备那一声 = 素材 `栓声.ogg`**（用户 2026-10-17："将蹲射准备动作的音频替换为…栓声"）。
-		// 作者把它埋在 `Focus_ready` 的 0.25s、`fast_ready` 的 0.0833s —— 按"那一拍占动画的比例 ×
-		// 这个状态的 tick 数"换算：AIM（24 tick / 1.0s）→ 6；AIM_FAST（14 tick / 0.667s）→ 2；
-		// AIM_SLIDE（7 tick，约 2 倍速）→ 1。统一放在这个**状态切换的唯一入口**里，所有进架枪的路
-		// （Z / 滑铲抢枪 / 换弹后重举 / 翻滚收势）都自动带上，不会漏也不会重复。
-		// 这一声由服务端放（附近所有人都听得见）；客户端那几段不再报 `bolt`，免得旁观者听到两声。
 		if (entering && (state == TkGun.State.AIM || state == TkGun.State.AIM_FAST
-				|| state == TkGun.State.AIM_ROLL
-				|| state == TkGun.State.AIM_SLIDE)) {
+				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE)) {
 			st.aimSoundAt = st.stateStarted + (state == TkGun.State.AIM ? 6
-					: (state == TkGun.State.AIM_FAST || state == TkGun.State.AIM_ROLL ? 2 : 1));
+					: (state == TkGun.State.AIM_FAST ? 2 : 1));
 		}
 		if (isFortressSkillState(state)) {
 			st.fortressSkillSoundMask = 0;
@@ -1488,6 +1531,15 @@ public class TkGunServer implements ModInitializer {
 	public static void playSound(ServerPlayerEntity player, Identifier id, float volume, float pitch) {
 		player.getServerWorld().playSound(null, player.getBlockPos(),
 				SoundEvent.of(id), SoundCategory.PLAYERS, volume, pitch);
+	}
+
+	private static boolean isQuietStorm(ServerPlayerEntity player) {
+		return TkGun.definition(player).id()
+				.equals(TkGun.id("abyssal_ancient_cannon"));
+	}
+
+	private static Identifier emptySound(ServerPlayerEntity player) {
+		return isQuietStorm(player) ? TkGun.SND_HEARTBEAT2 : TkGun.SND_DRY;
 	}
 
 	private static void handleBackpackAction(ServerPlayerEntity player,
@@ -3234,7 +3286,8 @@ public class TkGunServer implements ModInitializer {
 									   float volume, float pitch) {
 		TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(key);
 		if (sound != null) {
-			playSound(player, sound.id(), volume, pitch);
+			playSound(player, sound.id(), volume * sound.volume(),
+					pitch * sound.pitch());
 		}
 	}
 
@@ -3672,7 +3725,7 @@ public class TkGunServer implements ModInitializer {
 		//    然后才能开火"：扣扳机的前提是**举着枪**（右键按住 = `isUsingItem()`）。
 		//    客户端那边已经先拦了一道（右键没按就不发开火包），这里是权威兜底（老客户端 / 改包的）。
 		if (!player.isUsingItem() && !st.deployed) {
-			playSound(player, TkGun.SND_DRY, 0.45F, 1.6F);
+			playSound(player, emptySound(player), 0.45F, 1.6F);
 			TkGunTexts.say(player, TkGunTexts.needAimText(), true);
 			// 打一行日志：验收/排查时"这次没出膛到底是被谁拦的"要能一眼看出来
 			TkGun.LOGGER.info("[tkgun] 扣扳机被拒（没举枪：isUsingItem=false）玩家={}",
@@ -3681,7 +3734,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		// 开火资格由 GunStateMachine.canFire 统一决定。
 		if (!GunStateMachine.canFire(st.state)) {
-			playSound(player, TkGun.SND_DRY, 0.45F, 1.5F);
+			playSound(player, emptySound(player), 0.45F, 1.5F);
 			TkGunTexts.say(player, TkGunTexts.CANT_FIRE, true);
 			TkGun.LOGGER.info("[tkgun] 扣扳机被拒（状态 {} 不允许开火）玩家={}", st.state,
 					player.getName().getString());
@@ -3901,7 +3954,7 @@ public class TkGunServer implements ModInitializer {
 			// 当前模式的弹匣已经空了。
 			// ⚠️ 2026-10-17 用户："在任何状态下空弹匣不会自动装填" —— 所以**扣扳机不再触发装填**，
 			//    只响一声空仓 + 提示按 F。
-			playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+			playSound(player, emptySound(player), 0.5F, 1.3F);
 			TkGunTexts.say(player, TkGunTexts.MAG_EMPTY, true);
 			return false;
 		}
@@ -3915,7 +3968,7 @@ public class TkGunServer implements ModInitializer {
 				? com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1)
 				: st.magAmmoStack.copyWithCount(1);
 		if (st.deployed && !com.tk.gun.item.GunAmmoData.consumeExpected(player, ammoId, 1)) {
-			playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+			playSound(player, emptySound(player), 0.5F, 1.3F);
 			return false;
 		}
 		int shotIndex;
@@ -4016,7 +4069,7 @@ public class TkGunServer implements ModInitializer {
 			ItemStack selectedStack =
 					com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1);
 			if (selectedId.isEmpty()) {
-				playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+				playSound(player, emptySound(player), 0.5F, 1.3F);
 				return;
 			}
 			boolean sameAmmo = !st.magAmmo.isEmpty() && st.magAmmo.equals(selectedId);
@@ -4026,7 +4079,7 @@ public class TkGunServer implements ModInitializer {
 			int needed = sameAmmo ? st.mag : hipCapacity;
 			if (needed <= 0
 					|| !com.tk.gun.item.GunAmmoData.consumeExpected(player, selectedId, needed)) {
-				playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+				playSound(player, emptySound(player), 0.5F, 1.3F);
 				return;
 			}
 			if (!sameAmmo) {
@@ -4040,7 +4093,7 @@ public class TkGunServer implements ModInitializer {
 						|| !com.tk.gun.item.GunAmmoData.refund(player, oldTemplate, refundAmount))) {
 					// Roll back the new rounds if the old rounds cannot be returned.
 					com.tk.gun.item.GunAmmoData.refund(player, selectedStack, needed);
-					playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+					playSound(player, emptySound(player), 0.5F, 1.3F);
 					TkGun.LOGGER.warn("[tkgun] 换弹取消：弹仓没有空间返还旧弹 {} 发 玩家={}",
 							refundAmount, player.getName().getString());
 					return;
@@ -4053,7 +4106,7 @@ public class TkGunServer implements ModInitializer {
 			String focusAmmoId = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
 			if (focusAmmoId.isEmpty()
 					|| !reloadHipMagazineDuringFocus(player, st, focusAmmoId)) {
-				playSound(player, TkGun.SND_DRY, 0.5F, 1.3F);
+				playSound(player, emptySound(player), 0.5F, 1.3F);
 				return;
 			}
 			st.lastFocusAmmo = focusAmmoId;
@@ -4070,6 +4123,7 @@ public class TkGunServer implements ModInitializer {
 		// 服务端放的附近所有人都听得见，客户端那边就不重复放了（见 BowgunRig#onSoundKeyframe）。
 		// 原来那两声（铁活板门 + 弩上膛）是"没有真素材时的凑合"，现在撤掉。
 		playSound(player, TkGun.SND_RELOAD, 0.9F, 1.0F);
+		st.reloadAuxSoundAt = now + 3;
 		st.reloadClickAt = now + 17;
 		MinecraftServer server = player.getServer();
 		if (server != null) {
@@ -5214,7 +5268,7 @@ public class TkGunServer implements ModInitializer {
 		// 输入专注按键则使用 fast_ready 作为专注准备动画，此动画准备时间要快于通常准备动作，详情见
 		// 资源文件夹中的动画时间线"）。作者的时间线：`fast_ready` 0.6667s / `Focus_ready` 1.0s ——
 		// 所以状态时长 14 tick vs 24 tick（TkGun.AIM_TICKS_FAST / _NORMAL）；客户端 `pick` 里
-		// AIM_FAST 播的就是 `fast_ready`，蹲射准备那声栓声也会按它 0.0833s 那一拍排（+2 tick）。
+		// AIM_FAST 播的就是 `fast_ready`，准备音由动画关键帧自行上报。
 		// ⚠️ 2026-10-17 用户："取消加速状态下的快速专注功能" —— 冲刺窗口里按 Z 也走**普通**过门
 		// （`Focus_ready`，`AIM_TICKS_NORMAL`），不再切 `AIM_FAST`/`fast_ready`。（滑铲中按 Z 仍走
 		// `AIM_SLIDE` → `sliding_fast_ready`，那是另一条需求。）
@@ -5239,10 +5293,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		st.quickFocusGuardUntil = (fromRoll || fromSlide) ? now + 4 : 0;
 		setState(server, player, aimState, aimStateTicks);
-		// 音效：**蹲射准备 = 素材 `栓声.ogg`**（用户 2026-10-17："将蹲射准备动作的音频替换为…栓声"）。
-		// 作者把它埋在 `Focus_ready` 的 0.25s（24 tick 的状态 / 1.0s 动画 → 0.25×24 ≈ 6 tick），
-		// 这里由**服务端**排这一声（`aimSoundAt`）：时间点还是作者的，但附近所有人都听得见，
-		// 也不依赖客户端那条关键帧上报（BowgunRig 里这一段会跳过 `bolt`，免得旁观者听到两声）。
+		// 蹲射准备音由动画关键帧上报，经服务端广播；点位和动画倍速保持一致。
 		ServerWorld world = player.getServerWorld();
 		// 表现：起手一簇火星（⚠️ 2026-10-15 用户："不要使用那个傀儡的、它的那个攻击特效" ——
 		// 原来这里放的是 `energy_converge`，那是从**傀儡**那包 粒子.zip 里切出来的，已撤掉）
@@ -5466,24 +5517,26 @@ public class TkGunServer implements ModInitializer {
 			if (st.combo > 0 && now > st.comboWindowUntil) {
 				st.combo = 0;
 			}
-			// **蹲射准备那一声栓声**（用户 2026-10-17："将蹲射准备动作的音频替换为…栓声"）：
-			// 时间点 = 作者埋在 `Focus_ready` 0.25s / `fast_ready` 0.0833s 的那一拍（进状态时已换算成 tick）。
-			// 被翻滚 / 过热打断就不放了（那时候人已经不在架枪）。
-			if (st.aimSoundAt > 0 && now >= st.aimSoundAt) {
-				st.aimSoundAt = 0;
-				if (TkGun.State.isAiming(st.state) && TkGun.holdingGun(player)) {
-					playSound(player, TkGun.SND_BOLT, 1.0F, 1.0F);
-					TkGun.LOGGER.info("[tkgun] 蹲射准备 -> 栓声（素材 栓声.ogg）玩家={}",
-							player.getName().getString());
-				}
-			}
-			// 拉栓计时（**不出声**）：用户 2026-10-17："修正蹲射（专注状态）每次射击后都会播放栓声的问题，
-			// 使此声音只在进入蹲射状态时播放" —— 每发之后那声 `SND_BOLT` 删掉；栓声只由 `setState`
-			// 进架枪时排的那一拍（`aimSoundAt`，见 startFocus/startAim）放。
+			// 拉栓计时仅作为射击节奏闸；每发之后不额外播放栓声。
 			// ⚠️ `boltAt` 本身还在用：它是"上一发的拉栓没走完之前不许出下一发"的节奏闸（见 tickShots），
 			// 只把音效去掉，计时别删。
 			if (st.boltAt > 0 && now >= st.boltAt) {
 				st.boltAt = 0;
+			}
+			if (st.aimSoundAt > 0 && now >= st.aimSoundAt) {
+				st.aimSoundAt = 0;
+				if (TkGun.State.isAiming(st.state) && TkGun.holdingGun(player)) {
+					playSound(player, isQuietStorm(player)
+							? TkGun.SND_TENDRIL_CLICKS4 : TkGun.SND_BOLT,
+							1.0F, 1.0F);
+				}
+			}
+			if (st.reloadAuxSoundAt > 0 && now >= st.reloadAuxSoundAt) {
+				st.reloadAuxSoundAt = 0;
+				if (isQuietStorm(player) && st.state == TkGun.State.RELOAD
+						&& TkGun.holdingGun(player)) {
+					playSound(player, TkGun.SND_NEARBY_CLOSEST2, 1.0F, 1.0F);
+				}
 			}
 			// 换弹第二声：弹夹到位（v4 素材 `换弹2.ogg`，动画里埋在 0.833s 处）
 			if (st.reloadClickAt > 0 && now >= st.reloadClickAt) {

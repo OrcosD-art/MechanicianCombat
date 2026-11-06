@@ -184,9 +184,9 @@ public final class TkGun {
 	public static final double FORTRESS_SKILL_PATH_DAMAGE_MULTIPLIER = 1.5D;
 	/** Initial contact damage before the charged hit is released at knockback end. */
 	public static final float FORTRESS_SKILL_IMPACT_DAMAGE = 5.0F;
-	public static final int[] FORTRESS_SKILL_LOAD_SOUND_TICKS = {8, 12, 14};
+	public static final int[] FORTRESS_SKILL_LOAD_SOUND_TICKS = {0, 8, 12, 14};
 	public static final String[] FORTRESS_SKILL_LOAD_SOUND_KEYS = {
-			"reload2", "double_axe_swing01", "mag"
+			"skill_spark", "reload2", "double_axe_swing01", "mag"
 	};
 	public static final String FORTRESS_SKILL_READY_SOUND_KEY = "double_axe_swing01";
 	public static final int[] FORTRESS_SKILL_GATHER_SOUND_TICKS = {0, 10, 20, 30};
@@ -584,7 +584,13 @@ public final class TkGun {
 	public static final Identifier SND_GRAPESHOT_HIT = id("grapeshot_hit");
 	public static final Identifier SND_CROSSBOW_FIRE = id("crossbow_fire");
 	public static final Identifier SND_BOLT = id("bolt");         // 栓声.ogg
-	public static final Identifier SND_DRY = id("dryfire");       // 空弹仓.ogg
+	/** Quiet Storm deploy cues authored in the updated rig. */
+	public static final Identifier SND_TENDRIL_CLICKS4 = id("tendril_clicks_4");
+	/** Extra reload cue at 0.17s in the updated rig. */
+	public static final Identifier SND_NEARBY_CLOSEST2 = id("nearby_closest_2");
+	public static final Identifier SND_DRY = id("dryfire");         // 原版空仓提示音
+	/** Quiet Storm-only empty-chamber cue. */
+	public static final Identifier SND_HEARTBEAT2 = id("heartbeat_2");
 	public static final Identifier SND_VENT = id("vent");         // 散热.ogg
 	public static final Identifier SND_ROLL = id("roll");         // 翻滚.ogg
 	/** `弹匣.ogg`（v4 新给的：弹夹甩出/换弹时"啪"的一下）。 */
@@ -633,6 +639,10 @@ public final class TkGun {
 	public static final Identifier SND_SMASH_GROUND4 = id("smash_ground4");
 	/** ATK_hold_over authored mace ground impact (`smash_ground3.ogg`). */
 	public static final Identifier SND_SMASH_GROUND3 = id("smash_ground3");
+	/** Updated Veritas close-combat impact cue (`smash_ground2.ogg`). */
+	public static final Identifier SND_SMASH_GROUND2 = id("smash_ground2");
+	/** Updated Veritas close-combat spark cue (`skill_spark.ogg`). */
+	public static final Identifier SND_SKILL_SPARK = id("skill_spark");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 
@@ -656,7 +666,7 @@ public final class TkGun {
 			Map.entry("reload2", new KeyframeSound(SND_RELOAD2, 1.0F, 1.0F)), // 换弹2.ogg
 			Map.entry("vent", new KeyframeSound(SND_VENT, 1.0F, 1.0F)),       // 散热.ogg
 			Map.entry("mag", new KeyframeSound(SND_MAG, 1.0F, 1.0F)),         // 弹匣.ogg
-			Map.entry("empty", new KeyframeSound(SND_DRY, 1.0F, 1.0F)),       // 空弹仓.ogg
+			Map.entry("empty", new KeyframeSound(SND_DRY, 1.0F, 1.0F)),
 			Map.entry("roll", new KeyframeSound(SND_ROLL, 0.9F, 1.0F)),       // 翻滚.ogg
 			Map.entry("steam", new KeyframeSound(SND_VENT, 0.6F, 1.2F)),      // 滑铲摩擦
 			Map.entry("glaive_slash02",
@@ -682,6 +692,10 @@ public final class TkGun {
 					new KeyframeSound(SND_SMASH_GROUND1, 1.0F, 1.0F)),
 			Map.entry("smash_ground3",
 					new KeyframeSound(SND_SMASH_GROUND3, 1.0F, 1.0F)),
+			Map.entry("smash_ground2",
+					new KeyframeSound(SND_SMASH_GROUND2, 1.0F, 1.0F)),
+			Map.entry("skill_spark",
+					new KeyframeSound(SND_SKILL_SPARK, 2.0F, 1.0F)),
 			Map.entry("smash_ground_heavy",
 					new KeyframeSound(SND_SMASH_GROUND_HEAVY, 1.0F, 1.0F)),
 			Map.entry("smash_ground4",

@@ -213,6 +213,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 *       （`TkGunServer.reload` / `ejectMag` / `boltAt`），服务端放**附近所有人都能听见**，
 	 *       客户端放只有自己听得见 —— 两份一起响还会互相打架。</li>
 	 *   <li>`roll` / `steam` —— 这俩服务端没放，照作者意图由客户端补上（滑铲/翻滚是纯动作表现）。</li>
+	 *   <li>Quiet Storm deploy cues and the added reload cue forward their authored
+	 *       names to the server so nearby players hear one broadcast copy.</li>
 	 * </ul>
 	 */
 	private static void onSoundKeyframe(
@@ -233,12 +235,15 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (reportFocusSoundKeyframe(key)) {
 			return;
 		}
+			if (SERVER_TIMED_SOUND_KEYS.contains(key)) {
+				return;
+			}
 		if (SKILL_SOUND_ANIMS.contains(currentAnimationName)) {
 			return;
 		}
 		switch (key) {
-			case "roll" -> TkGunClient.sendSoundKeyframe(key);
-			case "steam" -> TkGunClient.sendSoundKeyframe(key);
+				case "roll" -> TkGunClient.sendSoundKeyframe(key);
+				case "steam" -> TkGunClient.sendSoundKeyframe(key);
 			default -> {
 				if (VERBOSE_DEMO) {
 					TkGun.LOGGER.info("[tkgun] 动画音效关键帧 {}（服务端那边会放同名音，客户端不重复）", key);
@@ -257,6 +262,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 		String upperBase = upperName.endsWith("_upper")
 				? upperName.substring(0, upperName.length() - "_upper".length())
 				: upperName;
+		if (SERVER_TIMED_SOUND_KEYS.contains(key)) {
+			return;
+		}
 		if ("skill_load_focus".equals(upperBase)) {
 			upperBase = "skill_load";
 		}
@@ -273,6 +281,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 
 	private static final Set<String> MELEE_SOUND_ANIMS =
 			Set.of("ATK_1", "ATK_2", "ATK_3", "ATK_3_hold", "ATK_4", "ATK_hold_over");
+	/** Played by the server timeline so split animation layers cannot drop them. */
+	private static final Set<String> SERVER_TIMED_SOUND_KEYS =
+			Set.of("tendril_clicks_4", "nearby_closest_2");
 	/** Melee clips that must leave leg ownership to the locomotion controller. */
 	private static final Set<String> MELEE_UPPER_ANIMS =
 			Set.of("ATK_1", "ATK_1_to_idle");
@@ -297,7 +308,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 *
 	 * <p>模型引用的全部（`Focus_*` / `Overheat`）：
 	 * <pre>
-	 * Focus_ready            0.25s   栓声（bolt）
+	 * Focus_ready            0.25s   tendril_clicks_4
 	 * fast_ready             0.0833s 栓声
 	 * Focus_over             0.25s 换弹 + 0.375s 换弹2      ← 以前这里**一声都没有**
 	 * Focus_shooting[2..7]   0.0417s 开火关键帧（**跳过**：服务端在出伤帧统一放枪击3）
@@ -330,12 +341,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// 只认表里那几个名字（`TkGun#KEYFRAME_SOUNDS`，服务端用同一张表查）——`shot`/`shot2` 不在表里：
 		// 那两声由服务端在**出伤帧**放，客户端不报。
 		if (!TkGun.KEYFRAME_SOUNDS.containsKey(key)) {
-			return false;
-		}
-		// ⚠️ `bolt` 在 `Focus_ready` / `fast_ready` 里**由服务端排**（`TkGunServer` 的 `aimSoundAt`，
-		//    时间点就是作者埋在 0.25s / 0.0833s 的那一拍）—— 这里跳过，不然旁观者会听到两声。
-		if ("bolt".equals(key) && ("Focus_ready".equals(currentAnimationName)
-				|| "fast_ready".equals(currentAnimationName))) {
 			return false;
 		}
 		// **报给服务端去放**（用户 2026-10-17："将音频文件加入 mod 中使旁观者也能听见"）：

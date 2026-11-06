@@ -24,7 +24,7 @@ public final class MechanicianArmorRenderer implements ArmorRenderer {
 		float headYaw = entity.getHeadYaw() - entity.getBodyYaw();
 		switch (item.piece()) {
 			case CHESTPLATE -> MechanicianArmorGeometry.render(
-					item.piece(), matrices, consumers, baseModel, light, entity,
+					item.piece(), stack, matrices, consumers, baseModel, light, entity,
 					limbAngle, limbDistance, headYaw,
 					MechanicianArmorGeometry.Part.BODY,
 					MechanicianArmorGeometry.Part.RIGHT_ARM,

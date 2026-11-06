@@ -14,26 +14,33 @@ public final class CombatBackpackHud {
 
 	public static void render(DrawContext context) {
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player == null || client.world == null || client.options.hudHidden
-				|| !BackpackUpgradeData.canUseLauncher(
-						CombatBackpackItem.equippedStack(client.player))) {
+		if (client.player == null || client.world == null || client.options.hudHidden) {
 			return;
 		}
 
 		int id = client.player.getId();
-		int phase = CombatBackpackClientState.statusPhase(id);
-		int charges = CombatBackpackClientState.charges(id);
-		int remaining = CombatBackpackClientState.remainingTicks(id);
 		BackpackUpgradeData.LauncherType launcherType =
 				BackpackUpgradeData.launcherType(
 						CombatBackpackItem.equippedStack(client.player));
+		boolean backpackVisible = BackpackUpgradeData.canUseLauncher(
+				CombatBackpackItem.equippedStack(client.player));
+		int bottomY = 30 + client.player.getStatusEffects().size() * 24;
+		if (backpackVisible) {
+			bottomY = renderBackpack(context, client, id, launcherType);
+		}
+		ArmorAbilityHud.render(context, client, bottomY + 4);
+	}
+
+	private static int renderBackpack(DrawContext context, MinecraftClient client,
+			int id, BackpackUpgradeData.LauncherType launcherType) {
+		int phase = CombatBackpackClientState.statusPhase(id);
+		int charges = CombatBackpackClientState.charges(id);
+		int remaining = CombatBackpackClientState.remainingTicks(id);
 		if (launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
-			renderJumpThruster(context, client, phase, remaining);
-			return;
+			return renderJumpThruster(context, client, phase, remaining);
 		}
 		if (launcherType == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
-			renderSummonAntenna(context, client, phase, remaining);
-			return;
+			return renderSummonAntenna(context, client, phase, remaining);
 		}
 		int maxCharges = launcherType == BackpackUpgradeData.LauncherType.AUTO ? 10 : 3;
 		String stateText = switch (phase) {
@@ -65,9 +72,10 @@ public final class CombatBackpackHud {
 		context.drawText(client.textRenderer, stateText, x + 6, y + 5, stateColour, true);
 		context.drawText(client.textRenderer, chargeText, x + 6, y + 15,
 				charges > 0 ? 0xFFFFF0A0 : 0xFFFF6666, true);
+		return y + height;
 	}
 
-	private static void renderSummonAntenna(DrawContext context,
+	private static int renderSummonAntenna(DrawContext context,
 			MinecraftClient client, int phase, int remaining) {
 		String stateText = switch (phase) {
 			case CombatBackpackStatusPayload.PHASE_COOLDOWN ->
@@ -107,9 +115,10 @@ public final class CombatBackpackHud {
 		context.drawText(client.textRenderer, stateText, x + 6, y + 5, colour, true);
 		context.drawText(client.textRenderer, chargeText, x + 6, y + 15,
 				0xFFFFF0A0, true);
+		return y + height;
 	}
 
-	private static void renderJumpThruster(DrawContext context,
+	private static int renderJumpThruster(DrawContext context,
 			MinecraftClient client, int phase, int remaining) {
 		String jumpKey = jumpBindingText(client);
 		String stateText = switch (phase) {
@@ -147,6 +156,7 @@ public final class CombatBackpackHud {
 				: phase == CombatBackpackStatusPayload.PHASE_COOLDOWN
 						? 0xFFFFB060 : 0xFFE8E8E8;
 		context.drawText(client.textRenderer, stateText, x + 6, y + 5, colour, true);
+		return y + 16;
 	}
 
 	private static String jumpBindingText(MinecraftClient client) {

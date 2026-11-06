@@ -159,6 +159,46 @@
                                          }
                                      ]
                       },
+    "smash_ground2":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "tkgun:smash_ground2",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "skill_spark":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "tkgun:skill_spark",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "tendril_clicks_4":  {
+                             "sounds":  [
+                                            {
+                                                "name":  "tkgun:tendril_clicks_4",
+                                                "stream":  false
+                                            }
+                                        ]
+                         },
+    "nearby_closest_2":  {
+                             "sounds":  [
+                                            {
+                                                "name":  "tkgun:nearby_closest_2",
+                                                "stream":  false
+                                            }
+                                        ]
+                         },
+    "heartbeat_2":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "tkgun:heartbeat_2",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
     "smash_ground4":  {
                           "sounds":  [
                                          {

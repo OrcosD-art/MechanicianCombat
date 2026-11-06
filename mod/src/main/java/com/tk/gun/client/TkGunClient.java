@@ -770,6 +770,7 @@ public class TkGunClient implements ClientModInitializer {
 		// 越肩视角的准星：中间 `- . -` + 枪口那个圈圈
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> GunReticle.render(context));
+			SoulChainWorldRenderer.register();
 		ClientPlayNetworking.registerGlobalReceiver(GunStatePayload.ID,
 				(payload, context) -> context.client().execute(() -> GunClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(
@@ -782,6 +783,24 @@ public class TkGunClient implements ClientModInitializer {
 				com.tk.gun.net.FortressSkillCooldownPayload.ID,
 				(payload, context) -> context.client().execute(
 						() -> FortressSkillCooldownClient.apply(payload)));
+			ClientPlayNetworking.registerGlobalReceiver(
+					com.tk.gun.net.ArmorAbilityPayload.ID,
+					(payload, context) -> context.client().execute(
+							() -> ArmorAbilityClientState.apply(payload)));
+			ClientPlayNetworking.registerGlobalReceiver(
+					com.tk.gun.net.SoulChainPayload.ID,
+					(payload, context) -> context.client().execute(() -> {
+						if (context.client().world != null) {
+							SoulChainClientState.apply(
+									payload,
+									context.client().world.getTime());
+							if (context.client().player != null) {
+								context.client().player.playSound(
+										net.minecraft.sound.SoundEvents.BLOCK_CHAIN_PLACE,
+										1.0F, 1.0F);
+							}
+						}
+					}));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunDemoPayload.ID,
 				(payload, context) -> context.client().execute(
 						() -> GunDebugHarness.setRemoteEnabled(payload.on())));
@@ -827,6 +846,7 @@ public class TkGunClient implements ClientModInitializer {
 
 		com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
 		com.tk.gun.client.screen.BackpackModificationTableScreen.registerClientScreen();
+			com.tk.gun.client.screen.ArmorModificationTableScreen.registerClientScreen();
 		for (com.tk.gun.item.CombatBackpackItem backpack :
 				com.tk.gun.TkGunServer.COMBAT_BACKPACKS) {
 			io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
@@ -865,6 +885,10 @@ public class TkGunClient implements ClientModInitializer {
 		JumpBackpackClientState.tick(client);
 		LocatorShriekBurst.tick(client);
 		AmmoSwitchHud.tick(client);
+			ArmorAbilityClientState.tick();
+			if (client.world != null) {
+				SoulChainClientState.tick(client.world.getTime());
+			}
 		ticks++;
 		// 第一次自检可能正好撞在资源重载中间（会误报 0/8），所以隔几秒再打两次
 		if ((ticks == 100 || ticks == 400 || ticks == 1200) && client.getResourceManager() != null) {
@@ -879,6 +903,8 @@ public class TkGunClient implements ClientModInitializer {
 			backpackActionDown = false;
 			CombatBackpackClientState.resetAll();
 			JumpBackpackClientState.resetAll();
+				ArmorAbilityClientState.reset();
+				SoulChainClientState.clear();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			return;
 		}
