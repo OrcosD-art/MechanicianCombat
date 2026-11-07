@@ -12,11 +12,20 @@ import java.util.Locale;
 /** Persistent module and cooldown state stored on the Mechanician chestplate. */
 public final class ArmorUpgradeData {
 	public static final int MAX_SHIELD_CHARGES = 3;
+	public static final int HELMET_EXPAND_TICKS = 10;
+	public static final int HELMET_FOLD_TICKS = 13;
 	private static final String SHIELD_COOLDOWN_UNTIL = "tkgun_shield_cooldown_until";
 	private static final String TOTEM_COOLDOWN_UNTIL = "tkgun_totem_cooldown_until";
 	private static final String SHIELD_CHARGES = "tkgun_shield_charges";
 	private static final String SHIELD_RECHARGE_KILLS = "tkgun_shield_recharge_kills";
 	private static final String SHIELD_RECHARGE_AT = "tkgun_shield_recharge_at";
+	private static final String SHIELD_RECHARGE_WINDOW_UNTIL =
+			"tkgun_shield_recharge_window_until";
+	private static final String HELMET_EXPANDED = "tkgun_helmet_expanded";
+	private static final String HELMET_TRANSITION_STARTED =
+			"tkgun_helmet_transition_started";
+	private static final String HELMET_TRANSITION_DURATION =
+			"tkgun_helmet_transition_duration";
 
 	private ArmorUpgradeData() {
 	}
@@ -80,6 +89,38 @@ public final class ArmorUpgradeData {
 				: MAX_SHIELD_CHARGES;
 	}
 
+	public static boolean helmetExpanded(ItemStack chest) {
+		if (!isChestplate(chest)) {
+			return false;
+		}
+		return customData(chest).getBoolean(HELMET_EXPANDED);
+	}
+
+	public static long helmetTransitionStarted(ItemStack chest) {
+		return longValue(chest, HELMET_TRANSITION_STARTED);
+	}
+
+	public static int helmetTransitionDuration(ItemStack chest) {
+		if (!isChestplate(chest)) {
+			return 0;
+		}
+		NbtCompound data = customData(chest);
+		return Math.max(0, data.getInt(HELMET_TRANSITION_DURATION));
+	}
+
+	public static void beginHelmetTransition(ItemStack chest, boolean expanded,
+											 long startedAt) {
+		if (!isChestplate(chest)) {
+			return;
+		}
+		int duration = expanded ? HELMET_EXPAND_TICKS : HELMET_FOLD_TICKS;
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, chest, nbt -> {
+			nbt.putBoolean(HELMET_EXPANDED, expanded);
+			nbt.putLong(HELMET_TRANSITION_STARTED, startedAt);
+			nbt.putInt(HELMET_TRANSITION_DURATION, duration);
+		});
+	}
+
 	public static int shieldRechargeKills(ItemStack chest) {
 		if (!isChestplate(chest)) {
 			return 0;
@@ -88,6 +129,10 @@ public final class ArmorUpgradeData {
 		return data.contains(SHIELD_RECHARGE_KILLS)
 				? Math.max(0, Math.min(3, data.getInt(SHIELD_RECHARGE_KILLS)))
 				: 0;
+	}
+
+	public static long shieldRechargeWindowUntil(ItemStack chest) {
+		return longValue(chest, SHIELD_RECHARGE_WINDOW_UNTIL);
 	}
 
 	public static void setShieldCooldownUntil(ItemStack chest, long until) {
@@ -123,6 +168,10 @@ public final class ArmorUpgradeData {
 				nbt.putInt(SHIELD_RECHARGE_KILLS, clamped);
 			}
 		});
+	}
+
+	public static void setShieldRechargeWindowUntil(ItemStack chest, long until) {
+		setLong(chest, SHIELD_RECHARGE_WINDOW_UNTIL, until);
 	}
 
 	private static String partKey(ArmorPartItem.Kind kind) {

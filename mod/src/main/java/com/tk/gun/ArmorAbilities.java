@@ -20,7 +20,8 @@ import net.minecraft.text.Text;
 /** Runtime effects supplied by modules installed in the Mechanician chestplate. */
 public final class ArmorAbilities {
 	public static final int SHIELD_COOLDOWN_TICKS = 40;
-	public static final int SHIELD_DEPLETED_COOLDOWN_TICKS = 300;
+	public static final int SHIELD_DEPLETED_COOLDOWN_TICKS = 600;
+	public static final int SHIELD_RECHARGE_WINDOW_TICKS = 200;
 	public static final int SHIELD_RECHARGE_INTERVAL_TICKS = 100;
 	public static final int SHIELD_RECHARGE_KILLS = 3;
 	public static final int TOTEM_COOLDOWN_TICKS = 1200;
@@ -69,6 +70,8 @@ public final class ArmorAbilities {
 		if (nextCharges == 0) {
 			ArmorUpgradeData.setShieldRechargeKills(chest, 0);
 			ArmorUpgradeData.setShieldRechargeAt(chest, 0L);
+			ArmorUpgradeData.setShieldRechargeWindowUntil(
+					chest, now + SHIELD_RECHARGE_WINDOW_TICKS);
 			ArmorUpgradeData.setShieldCooldownUntil(
 					chest, now + SHIELD_DEPLETED_COOLDOWN_TICKS);
 		} else {
@@ -152,11 +155,15 @@ public final class ArmorAbilities {
 		if (ArmorUpgradeData.shieldCooldownUntil(chest) <= now) {
 			return;
 		}
+		if (ArmorUpgradeData.shieldRechargeWindowUntil(chest) < now) {
+			return;
+		}
 		int kills = ArmorUpgradeData.shieldRechargeKills(chest) + 1;
 		if (kills >= SHIELD_RECHARGE_KILLS) {
 			ArmorUpgradeData.setShieldRechargeKills(chest, 0);
 			ArmorUpgradeData.setShieldCooldownUntil(chest, 0L);
 			ArmorUpgradeData.setShieldRechargeAt(chest, 0L);
+			ArmorUpgradeData.setShieldRechargeWindowUntil(chest, 0L);
 			ArmorUpgradeData.setShieldCharges(
 					chest, ArmorUpgradeData.MAX_SHIELD_CHARGES);
 		} else {
@@ -182,6 +189,7 @@ public final class ArmorAbilities {
 			if (cooldown > 0L && now >= cooldown) {
 				ArmorUpgradeData.setShieldRechargeKills(chest, 0);
 				ArmorUpgradeData.setShieldRechargeAt(chest, 0L);
+				ArmorUpgradeData.setShieldRechargeWindowUntil(chest, 0L);
 				ArmorUpgradeData.setShieldCharges(
 						chest, ArmorUpgradeData.MAX_SHIELD_CHARGES);
 			}
@@ -224,6 +232,8 @@ public final class ArmorAbilities {
 				ArmorUpgradeData.hasPart(chest, ArmorPartItem.Kind.C3),
 				ArmorUpgradeData.shieldCharges(chest),
 				ArmorUpgradeData.shieldRechargeKills(chest),
+				(int) Math.max(0,
+						ArmorUpgradeData.shieldRechargeWindowUntil(chest) - now),
 				(int) Math.max(0, ArmorUpgradeData.shieldCooldownUntil(chest) - now),
 				(int) Math.max(0, ArmorUpgradeData.totemCooldownUntil(chest) - now)));
 	}

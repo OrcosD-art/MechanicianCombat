@@ -1,6 +1,7 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.client.WarBannerSkillClientState;
 import com.tk.gun.item.BackpackLauncherRules;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.feature.HeldItemFeatureRenderer;
@@ -8,6 +9,7 @@ import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.Arm;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -33,7 +35,18 @@ public abstract class OffhandStorageThirdPersonMixin {
 					target = "Lnet/minecraft/class_1309;method_6079()Lnet/minecraft/class_1799;"))
 	private ItemStack tkgun$hideStoredOffhandThirdPerson(LivingEntity entity) {
 		ItemStack offhand = entity.getStackInHand(net.minecraft.util.Hand.OFF_HAND);
-		return BackpackLauncherRules.hasActiveLauncher(entity)
+		return (WarBannerSkillClientState.isActive(entity.getId())
+				&& entity.getMainArm() == Arm.LEFT)
+				|| BackpackLauncherRules.hasActiveLauncher(entity)
 				? ItemStack.EMPTY : offhand;
+	}
+
+	@Redirect(method = "method_17162",
+			at = @At(value = "INVOKE",
+					target = "Lnet/minecraft/class_1309;method_6047()Lnet/minecraft/class_1799;"))
+	private ItemStack tkgun$hideSkillAnimationRightHand(LivingEntity entity) {
+		return WarBannerSkillClientState.isActive(entity.getId())
+				&& entity.getMainArm() == Arm.RIGHT
+				? ItemStack.EMPTY : entity.getMainHandStack();
 	}
 }

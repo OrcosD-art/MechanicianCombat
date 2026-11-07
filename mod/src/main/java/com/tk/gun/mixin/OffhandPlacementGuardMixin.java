@@ -19,7 +19,7 @@ public abstract class OffhandPlacementGuardMixin {
 	@Inject(method = "method_7593", at = @At("HEAD"), cancellable = true)
 	private void tkgun$guardOffhandInsertion(int slotIndex, int button, SlotActionType actionType,
 												  PlayerEntity player, CallbackInfo ci) {
-		if (slotIndex < 0 || actionType == SlotActionType.QUICK_MOVE) {
+		if (slotIndex < 0) {
 			return;
 		}
 		ScreenHandler handler = (ScreenHandler) (Object) this;
@@ -29,6 +29,19 @@ public abstract class OffhandPlacementGuardMixin {
 
 		Slot clicked = handler.getSlot(slotIndex);
 		boolean clickedOffhand = isOffhand(clicked, player);
+		if (clickedOffhand
+				&& BackpackLauncherRules.isVirtualBattleBanner(clicked.getStack())) {
+			ci.cancel();
+			return;
+		}
+		if (actionType == SlotActionType.SWAP && button == 40
+				&& hasVirtualBattleBannerOffhand(handler, player)) {
+			ci.cancel();
+			return;
+		}
+		if (actionType == SlotActionType.QUICK_MOVE) {
+			return;
+		}
 		ItemStack staged = switch (actionType) {
 			case PICKUP, QUICK_CRAFT -> clickedOffhand
 					? handler.getCursorStack() : ItemStack.EMPTY;
@@ -59,5 +72,17 @@ public abstract class OffhandPlacementGuardMixin {
 	private static boolean isOffhand(Slot slot, PlayerEntity player) {
 		return slot.inventory == player.getInventory()
 				&& slot.getIndex() == PlayerInventory.OFF_HAND_SLOT;
+	}
+
+	private static boolean hasVirtualBattleBannerOffhand(
+			ScreenHandler handler, PlayerEntity player) {
+		for (Slot slot : handler.slots) {
+			if (isOffhand(slot, player)
+					&& BackpackLauncherRules.isVirtualBattleBanner(
+							slot.getStack())) {
+				return true;
+			}
+		}
+		return false;
 	}
 }

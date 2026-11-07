@@ -1,6 +1,7 @@
 package com.tk.gun.client;
 
 import com.tk.gun.item.MechanicianArmorPiece;
+import com.tk.gun.item.MechanicianUndersuitItem;
 import io.wispforest.accessories.api.client.AccessoryRenderer;
 import io.wispforest.accessories.api.slot.SlotReference;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -32,6 +33,15 @@ public final class MechanicianUndersuitRenderer implements AccessoryRenderer {
 				MechanicianArmorPiece.UNDERSUIT, matrices, consumers,
 				playerModel, light, reference.entity(), limbAngle,
 				limbDistance, headYaw);
+		if (MechanicianUndersuitItem.isWearingOuterSet(
+				reference.entity())) {
+			HelmetClientState.Pose pose =
+					HelmetClientState.pose(reference.entity());
+			MechanicianArmorGeometry.renderHelmet(
+					matrices, consumers, playerModel, light,
+					reference.entity(), limbAngle, limbDistance,
+					headYaw, pose.animation(), pose.seconds());
+		}
 	}
 
 	@Override

@@ -29,6 +29,8 @@ public final class MechanicianArmorRenderer implements ArmorRenderer {
 					MechanicianArmorGeometry.Part.BODY,
 					MechanicianArmorGeometry.Part.RIGHT_ARM,
 					MechanicianArmorGeometry.Part.LEFT_ARM);
+			case HELMET -> {
+			}
 			case LEGGINGS, BOOTS -> MechanicianArmorGeometry.render(
 					item.piece(), matrices, consumers, baseModel, light, entity,
 					limbAngle, limbDistance, headYaw,

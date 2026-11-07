@@ -32,6 +32,12 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 			System.getProperty("tkgun.posebridge") != null;
 	private static final Set<String> TRACED_PARTS = ConcurrentHashMap.newKeySet();
 	private static final Map<Integer, PoseSnapshot> POSES = new ConcurrentHashMap<>();
+	private static final Set<String> REQUIRED_UPPER_CHANNELS = Set.of(
+			"body.rotation", "body.position",
+			"chest.rotation", "chest.position",
+			"head.rotation", "head.position",
+			"arm_left.rotation", "arm_left.position",
+			"arm_right.rotation", "arm_right.position");
 	private static ClientWorld cachedWorld;
 	private static long lastPruneTime = Long.MIN_VALUE;
 	private static final Map<Identifier, Map<String, Set<String>>> ANIMATION_CHANNELS =
@@ -74,6 +80,10 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		for (String animation : activeAnimations) {
 			channels.addAll(knownChannels.getOrDefault(animation, Set.of()));
 		}
+		// The GeckoLib rig has already evaluated these bones for this frame.
+		// Do not let a one-tick animation-name/cache mismatch drop the entire
+		// upper body back to the vanilla pose.
+		channels.addAll(REQUIRED_UPPER_CHANNELS);
 		BonePose chest = pose.get("chest");
 		// The walk_* chest bob is added by the renderer, not authored in JSON.
 		if (chest != null && chest.y() != 0.0F) {

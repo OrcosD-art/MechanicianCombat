@@ -5,11 +5,13 @@ import com.tk.gun.api.AbyssalAncientCannonGun;
 import com.tk.gun.api.GunDefinition;
 import com.tk.gun.api.GunRegistry;
 import com.tk.gun.api.VeritasEtJustitiaGun;
+import com.tk.gun.entity.WarBannerEntity;
 import com.tk.gun.item.BowgunItem;
 import com.tk.gun.net.GunFirePayload;
 import com.tk.gun.net.GunStatePayload;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -26,6 +28,10 @@ import net.minecraft.entity.attribute.EntityAttributeInstance;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.projectile.ArrowEntity;
 import net.minecraft.entity.projectile.TridentEntity;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.LightBlock;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -43,6 +49,7 @@ import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.RaycastContext;
 
@@ -75,6 +82,8 @@ public class TkGunServer implements ModInitializer {
 	public static Item AUTO_PORTABLE_LAUNCHER;
 	public static Item SUMMON_ANTENNA;
 	public static Item JUMP_BACKPACK_THRUSTER;
+	public static Item MISSILE_BOX;
+	public static Item WAR_BANNER;
 	public static Item BACKPACK_COOLDOWN_RESET;
 	public static Item MECHANICIAN_UNDERSUIT;
 	public static Item MECHANICIAN_CHESTPLATE;
@@ -122,9 +131,36 @@ public class TkGunServer implements ModInitializer {
 	private static final int SUMMON_ANTENNA_ALIVE_COOLDOWN_TICKS = 300;
 	private static final double SUMMON_ANTENNA_TARGET_RADIUS = 20.0D;
 	private static final double SUMMON_ANTENNA_FALLBACK_RANGE = 8.0D;
+	private static final int MISSILE_BOX_MAX_TARGETS = 6;
+	private static final int MISSILE_BOX_MARK_INTERVAL_TICKS = 1;
+	private static final int MISSILE_BOX_SHOT_INTERVAL_TICKS = 2;
+	private static final int MISSILE_BOX_COOLDOWN_TICKS = 120;
+	private static final int MISSILE_BOX_GLOW_TICKS = 140;
+	private static final double MISSILE_BOX_TARGET_RADIUS = 32.0D;
+	private static final double MISSILE_BOX_TURN_RADIANS =
+			Math.toRadians(6.0D);
+	private static final double MISSILE_BOX_COLD_DISTANCE = 2.0D;
+	private static final double MISSILE_BOX_COLD_SPEED = 0.09D;
+	private static final double MISSILE_BOX_IGNITED_SPEED = 1.6D;
+	private static final int MISSILE_BOX_COLD_MAX_TICKS = 40;
+	private static final int WAR_BANNER_SKILL_TICKS = 18;
+	private static final int WAR_BANNER_COOLDOWN_TICKS = 20 * 60;
+	private static final int[] WAR_BANNER_SOUND_TICKS = {1, 3, 12, 13};
+	private static final String[] WAR_BANNER_SOUND_KEYS = {
+			"skill_spark", "double_axe_swing01",
+			"smash_air2", "double_axe_swing01"
+	};
 	private static final Map<UUID, BackpackCharge> BACKPACK_STATES = new HashMap<>();
 	private static final Map<UUID, Long> BACKPACK_PROJECTILES = new HashMap<>();
+	private static final Map<UUID, MissileTracker> MISSILE_TRACKERS = new HashMap<>();
+	private static final Map<UUID, UUID> WAR_BANNERS = new HashMap<>();
+	private static final Map<UUID, WarBannerLight> WAR_BANNER_LIGHTS =
+			new HashMap<>();
 	private static final int BACKPACK_PROJECTILE_TRACK_TICKS = 1200;
+
+	private record WarBannerLight(ServerWorld world, BlockPos pos,
+			BlockState previous, BlockState placed) {
+	}
 
 	private static final class BackpackCharge {
 		int charges;
@@ -158,7 +194,10 @@ public class TkGunServer implements ModInitializer {
 		long jumpStartedAt;
 		long jumpReadyUntil;
 		long jumpCloseUntil;
-		long jumpCooldownUntil;
+		int jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		boolean jumpEnergyLocked;
+		long nextJumpEnergyUseAt;
+		long nextJumpEnergyRecoveryAt;
 		boolean specialThrustActive;
 		long specialThrustUntil;
 		double jumpOriginY;
@@ -171,6 +210,40 @@ public class TkGunServer implements ModInitializer {
 		boolean jumpAirborne;
 		boolean jumpKeyHeld;
 		boolean jumpThrustSoundPlayed;
+		boolean missileAiming;
+		boolean missileFiring;
+		long missileNextMarkAt;
+		long missileCooldownUntil;
+		long missileNextShotAt;
+		int missileShotIndex;
+		final java.util.List<UUID> missileTargets = new java.util.ArrayList<>();
+		final double[] missilePorts = new double[18];
+		double missileHalfHorizontalTan;
+		double missileHalfVerticalTan;
+	}
+
+	private static final class MissileTracker {
+		final ServerWorld world;
+		final UUID projectileUuid;
+		final int targetEntityId;
+		final long expiresAt;
+		final Vec3d coldOrigin;
+		final Vec3d coldDirection;
+		final long launchedAt;
+		boolean tracking;
+
+		private MissileTracker(ServerWorld world, UUID projectileUuid,
+							   int targetEntityId, long expiresAt,
+							   Vec3d coldOrigin, Vec3d coldDirection,
+							   long launchedAt) {
+			this.world = world;
+			this.projectileUuid = projectileUuid;
+			this.targetEntityId = targetEntityId;
+			this.expiresAt = expiresAt;
+			this.coldOrigin = coldOrigin;
+			this.coldDirection = coldDirection;
+			this.launchedAt = launchedAt;
+		}
 	}
 
 	/** 每玩家运行时状态 */
@@ -188,6 +261,10 @@ public class TkGunServer implements ModInitializer {
 		public boolean airborneIdle;
 		/** The landing has met the vanilla raw fall-damage condition. */
 		public boolean landingRollArmed;
+		/** War Banner deployment animation and sound synchronization. */
+		public long battleBannerCastStarted;
+		public long battleBannerCastUntil;
+		public int battleBannerSoundMask;
 		/** Silent Storm skill launch bookkeeping. */
 		public long skillJumpStartedAt;
 		public boolean skillJumpAirborne;
@@ -491,6 +568,7 @@ public class TkGunServer implements ModInitializer {
 	/** 熔铁矢专用三叉戟实体（资源模型渲染，独立于原版 minecraft:trident）。 */
 	public static EntityType<com.tk.gun.entity.MoltenTridentEntity> MOLTEN_TRIDENT_ENTITY;
 	public static EntityType<com.tk.gun.entity.MoltenGolemEntity> MOLTEN_GOLEM;
+	public static EntityType<com.tk.gun.entity.WarBannerEntity> WAR_BANNER_ENTITY;
 	public static Item MOLTEN_GOLEM_SPAWN_EGG;
 	public static Item ENTITY_REMOVAL_TOOL;
 	/** 下一次开火时把弹丸位置反解成"枪口偏移"打进日志（`/tkgun probe`，自检用）。 */
@@ -690,10 +768,13 @@ public class TkGunServer implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		registerArmorItems();
-			ArmorAbilities.register();
-			SoulChainAbility.register();
+		ArmorAbilities.register();
+		ArmorHelmetController.register();
+		SoulChainAbility.register();
 		ServerTickEvents.END_SERVER_TICK.register(
 				server -> enforceArmorRequirement(server));
+		ServerLifecycleEvents.SERVER_STOPPING.register(
+				server -> removeAllWarBannerLights());
 		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
 		PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
 				!TkGun.holdingGun(player));
@@ -778,6 +859,18 @@ public class TkGunServer implements ModInitializer {
 				new com.tk.gun.item.BackpackPartItem(
 						com.tk.gun.item.BackpackPartItem.Kind.JUMP_THRUSTER,
 						new Item.Settings().maxCount(1)));
+			MISSILE_BOX = Registry.register(
+					Registries.ITEM,
+					TkGun.id("missile_box"),
+					new com.tk.gun.item.BackpackPartItem(
+							com.tk.gun.item.BackpackPartItem.Kind.MISSILE_BOX,
+							new Item.Settings().maxCount(1)));
+			WAR_BANNER = Registry.register(
+					Registries.ITEM,
+					TkGun.id("war_banner"),
+					new com.tk.gun.item.BackpackPartItem(
+							com.tk.gun.item.BackpackPartItem.Kind.BATTLE_BANNER,
+							new Item.Settings().maxCount(1)));
 		BACKPACK_COOLDOWN_RESET = Registry.register(
 				Registries.ITEM,
 				TkGun.id("backpack_cooldown_reset"),
@@ -877,6 +970,8 @@ public class TkGunServer implements ModInitializer {
 							entries.add(AUTO_PORTABLE_LAUNCHER);
 							entries.add(SUMMON_ANTENNA);
 							entries.add(JUMP_BACKPACK_THRUSTER);
+								entries.add(MISSILE_BOX);
+								entries.add(WAR_BANNER);
 							entries.add(BACKPACK_COOLDOWN_RESET);
 							entries.add(MECHANICIAN_UNDERSUIT);
 							entries.add(MECHANICIAN_CHESTPLATE);
@@ -909,6 +1004,14 @@ public class TkGunServer implements ModInitializer {
 								com.tk.gun.entity.MoltenTridentEntity::new, SpawnGroup.MISC)
 						.dimensions(0.5F, 0.5F)
 						.build("molten_trident"));
+		WAR_BANNER_ENTITY = Registry.register(Registries.ENTITY_TYPE,
+				TkGun.id("war_banner"),
+				EntityType.Builder.<com.tk.gun.entity.WarBannerEntity>create(
+								com.tk.gun.entity.WarBannerEntity::new, SpawnGroup.MISC)
+						.dimensions(1.0F, 3.0F)
+						.eyeHeight(2.0F)
+						.disableSaving()
+						.build("war_banner"));
 		PayloadTypeRegistry.playS2C().register(GunStatePayload.ID, GunStatePayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.FortressSkillCooldownPayload.ID,
@@ -938,6 +1041,9 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.GunLocatorVentPayload.ID,
 				com.tk.gun.net.GunLocatorVentPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.WarBannerSkillPayload.ID,
+				com.tk.gun.net.WarBannerSkillPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(GunFirePayload.ID, GunFirePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
 				com.tk.gun.net.GunJumpPayload.CODEC);
@@ -1251,6 +1357,9 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.CombatBackpackFirePayload.ID,
 				com.tk.gun.net.CombatBackpackFirePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.MissileBoxPayload.ID,
+				com.tk.gun.net.MissileBoxPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
 				com.tk.gun.net.CombatBackpackViewPayload.ID,
 				com.tk.gun.net.CombatBackpackViewPayload.CODEC);
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunSoundPayload.ID, (payload, context) ->
@@ -1300,6 +1409,10 @@ public class TkGunServer implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.CombatBackpackFirePayload.ID,
 				(payload, context) -> context.server().execute(() ->
 						handleBackpackAction(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.MissileBoxPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleMissileBoxAction(context.player(), payload)));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.CombatBackpackViewPayload.ID,
 				(payload, context) -> context.server().execute(() ->
@@ -1553,6 +1666,11 @@ public class TkGunServer implements ModInitializer {
 		}
 		BackpackCharge state = backpackState(player, now);
 		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			handleWarBannerAction(player, state, now);
+			return;
+		}
+		if (state.launcherType
 				== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
 			syncBackpackStatus(player, state, now);
 			sendBackpackFireResult(player);
@@ -1595,6 +1713,433 @@ public class TkGunServer implements ModInitializer {
 		} else {
 			launchBackpackProjectile(player, payload, target, state);
 		}
+	}
+
+	private static void handleWarBannerAction(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		PState skillState = state(player);
+		if (!player.isOnGround() || TkGun.holdingGun(player)
+				|| now < skillState.battleBannerCastUntil
+				|| player.getItemCooldownManager().isCoolingDown(WAR_BANNER)
+				|| hasActiveWarBanner(player)
+				|| !player.getOffHandStack().isOf(WAR_BANNER)) {
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		skillState.battleBannerCastStarted = now;
+		skillState.battleBannerCastUntil = now + WAR_BANNER_SKILL_TICKS;
+		skillState.battleBannerSoundMask = 0;
+		com.tk.gun.net.WarBannerSkillPayload payload =
+				new com.tk.gun.net.WarBannerSkillPayload(
+						player.getId(), now, WAR_BANNER_SKILL_TICKS);
+		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
+		}
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void tickWarBannerCast(ServerPlayerEntity player,
+			PState st, long now) {
+		if (st.battleBannerCastStarted <= 0L) {
+			return;
+		}
+		int elapsed = (int) (now - st.battleBannerCastStarted);
+		for (int index = 0; index < WAR_BANNER_SOUND_TICKS.length; index++) {
+			int bit = 1 << index;
+			if ((st.battleBannerSoundMask & bit) != 0
+					|| elapsed < WAR_BANNER_SOUND_TICKS[index]) {
+				continue;
+			}
+			st.battleBannerSoundMask |= bit;
+			playMeleeSound(player, WAR_BANNER_SOUND_KEYS[index], 1.0F, 1.0F);
+		}
+		if (now < st.battleBannerCastUntil) {
+			return;
+		}
+		st.battleBannerCastStarted = 0L;
+		st.battleBannerCastUntil = 0L;
+		st.battleBannerSoundMask = 0;
+		if (!(player.getWorld() instanceof ServerWorld world)) {
+			return;
+		}
+		WarBannerEntity banner = new WarBannerEntity(WAR_BANNER_ENTITY, world);
+		banner.setOwnerUuid(player.getUuid());
+		Vec3d locator = warBannerGroundLocatorPosition(player, world);
+		Vec3d spawn = locator.subtract(
+				0.0D, WarBannerEntity.LOCATOR_HEIGHT, 0.0D);
+		banner.refreshPositionAndAngles(spawn.x, spawn.y, spawn.z,
+				player.getBodyYaw(), 0.0F);
+		if (world.spawnEntity(banner)) {
+			WAR_BANNERS.put(player.getUuid(), banner.getUuid());
+			placeWarBannerLight(world, banner.getUuid(), locator);
+			TkGun.LOGGER.info(
+					"[tkgun] War Banner spawned at {} locator={} player={}",
+					spawn, locator, player.getName().getString());
+		}
+	}
+
+	private static Vec3d warBannerGroundLocatorPosition(
+			ServerPlayerEntity player, ServerWorld world) {
+		double yaw = Math.toRadians(player.getBodyYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		Vec3d right = new Vec3d(-Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		// Tail-frame locator from flag_skill.bbmodel:
+		// x=0.6364, y=1.8320, z=0.7277 blocks; source +Z is the model's back.
+		Vec3d handLocator = player.getPos()
+				.add(right.multiply(0.6364D))
+				.subtract(forward.multiply(0.7277D));
+		Vec3d probeStart = handLocator.add(0.0D, 1.0D, 0.0D);
+		Vec3d probeEnd = handLocator.add(0.0D, -3.0D, 0.0D);
+		var hit = world.raycast(new RaycastContext(
+				probeStart, probeEnd, RaycastContext.ShapeType.COLLIDER,
+				RaycastContext.FluidHandling.NONE, player));
+		double groundY = hit.getType()
+				== net.minecraft.util.hit.HitResult.Type.BLOCK
+				? hit.getPos().y : player.getY();
+		return new Vec3d(handLocator.x, groundY, handLocator.z);
+	}
+
+	private static boolean hasActiveWarBanner(ServerPlayerEntity player) {
+		UUID entityUuid = WAR_BANNERS.get(player.getUuid());
+		if (entityUuid == null) {
+			return false;
+		}
+		Entity banner = player.getServerWorld().getEntity(entityUuid);
+		if (banner instanceof WarBannerEntity && banner.isAlive()) {
+			return true;
+		}
+		WAR_BANNERS.remove(player.getUuid());
+		return false;
+	}
+
+	public static void onWarBannerExpired(WarBannerEntity banner) {
+		UUID ownerUuid = banner.getOwnerUuid();
+		if (ownerUuid == null || !(banner.getWorld() instanceof ServerWorld world)) {
+			return;
+		}
+		removeWarBannerLight(banner.getUuid());
+		UUID current = WAR_BANNERS.get(ownerUuid);
+		if (current != null && current.equals(banner.getUuid())) {
+			WAR_BANNERS.remove(ownerUuid);
+		}
+		ServerPlayerEntity owner = world.getServer().getPlayerManager()
+				.getPlayer(ownerUuid);
+		if (owner != null) {
+			owner.getItemCooldownManager().set(
+					WAR_BANNER, WAR_BANNER_COOLDOWN_TICKS);
+		}
+	}
+
+	private static void placeWarBannerLight(ServerWorld world, UUID bannerUuid,
+			Vec3d locator) {
+		BlockPos origin = BlockPos.ofFloored(
+				locator.x, locator.y + 0.5D, locator.z);
+		for (int offset = 0; offset < 3; offset++) {
+			BlockPos pos = origin.up(offset);
+			BlockState previous = world.getBlockState(pos);
+			if (!previous.isAir() && !previous.isReplaceable()) {
+				continue;
+			}
+			BlockState light = Blocks.LIGHT.getDefaultState()
+					.with(LightBlock.LEVEL_15, 15);
+			if (world.setBlockState(pos, light, Block.NOTIFY_ALL)) {
+				WAR_BANNER_LIGHTS.put(bannerUuid,
+						new WarBannerLight(world, pos, previous, light));
+			}
+			return;
+		}
+	}
+
+	private static void tickWarBannerLights(MinecraftServer server) {
+		Iterator<Map.Entry<UUID, WarBannerLight>> iterator =
+				WAR_BANNER_LIGHTS.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry<UUID, WarBannerLight> entry = iterator.next();
+			WarBannerLight light = entry.getValue();
+			if (light.world().getEntity(entry.getKey())
+					instanceof WarBannerEntity banner
+					&& banner.isAlive()) {
+				continue;
+			}
+			restoreWarBannerLight(light);
+			iterator.remove();
+		}
+	}
+
+	private static void removeWarBannerLight(UUID bannerUuid) {
+		WarBannerLight light = WAR_BANNER_LIGHTS.remove(bannerUuid);
+		if (light != null) {
+			restoreWarBannerLight(light);
+		}
+	}
+
+	private static void restoreWarBannerLight(WarBannerLight light) {
+		if (light.world().getBlockState(light.pos()).equals(light.placed())) {
+			light.world().setBlockState(
+					light.pos(), light.previous(), Block.NOTIFY_ALL);
+		}
+	}
+
+	private static void removeAllWarBannerLights() {
+		for (WarBannerLight light : WAR_BANNER_LIGHTS.values()) {
+			restoreWarBannerLight(light);
+		}
+		WAR_BANNER_LIGHTS.clear();
+	}
+
+	private static void handleMissileBoxAction(ServerPlayerEntity player,
+			com.tk.gun.net.MissileBoxPayload payload) {
+		ItemStack backpack = com.tk.gun.item.CombatBackpackItem.equippedStack(player);
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(backpack)) {
+			clearMissileState(player);
+			return;
+		}
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		if (now < state.missileCooldownUntil) {
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		updateMissileAim(state, payload, now);
+		if (!payload.release()) {
+			if (!state.missileAiming && !state.missileFiring) {
+				if (!player.getStackInHand(Hand.OFF_HAND).isOf(Items.FIREWORK_ROCKET)) {
+					return;
+				}
+				clearMissileTargets(player, state);
+				state.missileAiming = true;
+				state.missileNextMarkAt = now;
+			}
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		if (!state.missileAiming) {
+			return;
+		}
+		state.missileAiming = false;
+		copyMissilePorts(state, payload.ports());
+		state.missileFiring = !state.missileTargets.isEmpty();
+		state.missileNextShotAt = now;
+		state.missileShotIndex = 0;
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void updateMissileAim(BackpackCharge state,
+			com.tk.gun.net.MissileBoxPayload payload, long now) {
+		if (!Double.isFinite(payload.cameraX()) || !Double.isFinite(payload.cameraY())
+				|| !Double.isFinite(payload.cameraZ())
+				|| !Double.isFinite(payload.cameraYaw())
+				|| !Double.isFinite(payload.cameraPitch())) {
+			return;
+		}
+		state.aimCameraX = payload.cameraX();
+		state.aimCameraY = payload.cameraY();
+		state.aimCameraZ = payload.cameraZ();
+		state.aimYaw = payload.cameraYaw();
+		state.aimPitch = payload.cameraPitch();
+		state.missileHalfHorizontalTan = Math.max(0.02D,
+				Math.min(4.0D, payload.halfHorizontalTan()));
+		state.missileHalfVerticalTan = Math.max(0.02D,
+				Math.min(4.0D, payload.halfVerticalTan()));
+		state.aimUpdatedAt = now;
+	}
+
+	private static void copyMissilePorts(BackpackCharge state, double[] ports) {
+		if (ports == null || ports.length < state.missilePorts.length) {
+			return;
+		}
+		System.arraycopy(ports, 0, state.missilePorts, 0,
+				state.missilePorts.length);
+	}
+
+	private static void tickMissileBox(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		ItemStack backpack = com.tk.gun.item.CombatBackpackItem.equippedStack(player);
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(backpack)) {
+			clearMissileState(player);
+			return;
+		}
+		if (state.missileCooldownUntil > 0 && now >= state.missileCooldownUntil) {
+			state.missileCooldownUntil = 0;
+		}
+		if (state.missileAiming) {
+			ItemStack ammo = player.getStackInHand(Hand.OFF_HAND);
+			if (!ammo.isOf(Items.FIREWORK_ROCKET)) {
+				clearMissileTargets(player, state);
+				state.missileAiming = false;
+				return;
+			}
+			int limit = Math.min(MISSILE_BOX_MAX_TARGETS, ammo.getCount());
+			if (now >= state.missileNextMarkAt
+					&& state.missileTargets.size() < limit) {
+				LivingEntity target = nextMissileTarget(player, state);
+				if (target != null) {
+					state.missileTargets.add(target.getUuid());
+					target.addStatusEffect(new StatusEffectInstance(
+							StatusEffects.GLOWING, MISSILE_BOX_GLOW_TICKS,
+							0, false, false, true), player);
+					player.getServerWorld().playSound(null, player.getBlockPos(),
+							SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
+							SoundCategory.PLAYERS,
+							TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+				}
+				state.missileNextMarkAt = now
+						+ MISSILE_BOX_MARK_INTERVAL_TICKS;
+			}
+			return;
+		}
+		if (!state.missileFiring || now < state.missileNextShotAt) {
+			return;
+		}
+		if (state.missileShotIndex >= state.missileTargets.size()) {
+			finishMissileVolley(player, state, now);
+			return;
+		}
+		UUID targetId = state.missileTargets.get(state.missileShotIndex);
+		int sequence = state.missileShotIndex++;
+		Entity targetEntity = player.getServerWorld().getEntity(targetId);
+		if (!(targetEntity instanceof LivingEntity target)
+				|| !target.isAlive()) {
+			state.missileNextShotAt = now;
+			return;
+		}
+		if (!fireMissileAt(player, state, target, sequence, now)) {
+			finishMissileVolley(player, state, now);
+			return;
+		}
+		if (state.missileShotIndex >= state.missileTargets.size()) {
+			finishMissileVolley(player, state, now);
+		} else {
+			state.missileNextShotAt = now + MISSILE_BOX_SHOT_INTERVAL_TICKS;
+		}
+	}
+
+	private static LivingEntity nextMissileTarget(ServerPlayerEntity player,
+			BackpackCharge state) {
+		ServerWorld world = player.getServerWorld();
+		Vec3d camera = new Vec3d(
+				state.aimCameraX, state.aimCameraY, state.aimCameraZ);
+		Vec3d forward = Vec3d.fromPolar(
+				(float) state.aimPitch, (float) state.aimYaw).normalize();
+		double yaw = Math.toRadians(state.aimYaw);
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		Vec3d up = right.crossProduct(forward).normalize();
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		for (LivingEntity candidate : world.getEntitiesByClass(
+				LivingEntity.class,
+				player.getBoundingBox().expand(MISSILE_BOX_TARGET_RADIUS),
+				entity -> entity != player && entity.isAlive()
+						&& !entity.isSpectator() && entity.canHit()
+						&& !CombatTargeting.isGolem(entity)
+						&& !state.missileTargets.contains(entity.getUuid()))) {
+			Vec3d center = candidate.getBoundingBox().getCenter();
+			if (player.squaredDistanceTo(center)
+					> MISSILE_BOX_TARGET_RADIUS * MISSILE_BOX_TARGET_RADIUS) {
+				continue;
+			}
+			Vec3d offset = center.subtract(camera);
+			double depth = offset.dotProduct(forward);
+			if (depth <= 0.0D
+					|| Math.abs(offset.dotProduct(right))
+							> depth * state.missileHalfHorizontalTan
+					|| Math.abs(offset.dotProduct(up))
+							> depth * state.missileHalfVerticalTan
+					|| !hasBlockLineOfSight(player, camera, center)) {
+				continue;
+			}
+			double distance = offset.lengthSquared();
+			if (distance < nearestDistance) {
+				nearest = candidate;
+				nearestDistance = distance;
+			}
+		}
+		return nearest;
+	}
+
+	private static boolean fireMissileAt(ServerPlayerEntity player,
+			BackpackCharge state, LivingEntity target, int sequence, long now) {
+		ItemStack stored = player.getStackInHand(Hand.OFF_HAND);
+		if (!stored.isOf(Items.FIREWORK_ROCKET)) {
+			return false;
+		}
+		double yaw = Math.toRadians(player.getBodyYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		Vec3d right = new Vec3d(-Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		double side = (sequence & 1) == 0 ? 1.0D : -1.0D;
+		Vec3d spawn = player.getBoundingBox().getCenter()
+				.add(right.multiply(side * 0.60D))
+				.subtract(forward.multiply(0.80D))
+				.add(0.0D, 0.15D, 0.0D);
+		Vec3d coldDirection = right.multiply(side * 0.72D)
+				.subtract(forward.multiply(0.62D))
+				.add(0.0D, 0.14D, 0.0D)
+				.normalize();
+		ItemStack launched = stored.copyWithCount(1);
+		com.tk.gun.item.BackpackFireworkData.markNoSelfDamage(launched);
+		Entity projectile = createBackpackProjectile(
+				player, launched, spawn, coldDirection);
+		if (projectile == null || !player.getServerWorld().spawnEntity(projectile)) {
+			return false;
+		}
+		projectile.setSilent(true);
+		projectile.setNoGravity(true);
+		if (projectile instanceof net.minecraft.entity.projectile.FireworkRocketEntity rocket) {
+			((com.tk.gun.mixin.FireworkRocketEntityAccessor) rocket)
+					.tkgun$setLifeTime(MISSILE_BOX_COLD_MAX_TICKS
+							+ BACKPACK_PROJECTILE_TRACK_TICKS);
+		}
+		projectile.setVelocity(coldDirection.multiply(MISSILE_BOX_COLD_SPEED));
+		projectile.velocityModified = true;
+		player.getServerWorld().playSound(null, spawn.x, spawn.y, spawn.z,
+				SoundEvent.of(TkGun.SND_MISSILE_COLD_LAUNCH), SoundCategory.PLAYERS,
+				0.8F, 1.0F);
+		projectile.addCommandTag(CombatTargeting.BACKPACK_PROJECTILE_TAG);
+		BACKPACK_PROJECTILES.put(projectile.getUuid(),
+				now + BACKPACK_PROJECTILE_TRACK_TICKS);
+		MISSILE_TRACKERS.put(projectile.getUuid(),
+				new MissileTracker(player.getServerWorld(), projectile.getUuid(),
+						target.getId(), now + BACKPACK_PROJECTILE_TRACK_TICKS,
+						spawn, coldDirection, now));
+		stored.decrement(1);
+		player.getInventory().markDirty();
+		target.removeStatusEffect(StatusEffects.GLOWING);
+		return true;
+	}
+
+	private static void finishMissileVolley(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		state.missileFiring = false;
+		state.missileNextShotAt = 0;
+		state.missileShotIndex = 0;
+		state.missileCooldownUntil = now + MISSILE_BOX_COOLDOWN_TICKS;
+		clearMissileTargets(player, state);
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void clearMissileTargets(ServerPlayerEntity player,
+			BackpackCharge state) {
+		for (UUID targetId : state.missileTargets) {
+			if (player.getServerWorld().getEntity(targetId)
+					instanceof LivingEntity living) {
+				living.removeStatusEffect(StatusEffects.GLOWING);
+			}
+		}
+		state.missileTargets.clear();
+	}
+
+	private static void clearMissileState(ServerPlayerEntity player) {
+		BackpackCharge state = BACKPACK_STATES.get(player.getUuid());
+		if (state == null) {
+			return;
+		}
+		clearMissileTargets(player, state);
+		state.missileAiming = false;
+		state.missileFiring = false;
+		state.missileNextMarkAt = 0;
+		state.missileNextShotAt = 0;
+		state.missileCooldownUntil = 0;
+		state.missileShotIndex = 0;
 	}
 
 	private static void handleBackpackView(ServerPlayerEntity player,
@@ -1848,8 +2393,11 @@ public class TkGunServer implements ModInitializer {
 		}
 		clearBackpackTarget(state, now);
 		state.cooldownUntil = 0;
-		state.jumpCooldownUntil = 0;
 		state.jumpCloseUntil = 0;
+		state.jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		state.jumpEnergyLocked = false;
+		state.nextJumpEnergyUseAt = 0;
+		state.nextJumpEnergyRecoveryAt = 0;
 		state.summonReadyUntil = 0;
 		state.summonCastUntil = 0;
 		state.nextChargeAt = 0;
@@ -1895,13 +2443,23 @@ public class TkGunServer implements ModInitializer {
 			state.jumpReadyUntil = 0;
 			state.jumpThrustTicksUsed = 0;
 			state.jumpCloseUntil = 0;
-			state.jumpCooldownUntil = 0;
+			state.jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+			state.jumpEnergyLocked = false;
+			state.nextJumpEnergyUseAt = 0;
+			state.nextJumpEnergyRecoveryAt = 0;
 			state.specialThrustActive = false;
 			state.specialThrustUntil = 0;
 			state.jumpLastGroundAt = 0;
 			state.jumpAirborne = false;
 			state.jumpKeyHeld = false;
 			state.jumpThrustSoundPlayed = false;
+			clearMissileTargets(player, state);
+			state.missileAiming = false;
+			state.missileFiring = false;
+			state.missileNextMarkAt = 0;
+			state.missileNextShotAt = 0;
+			state.missileCooldownUntil = 0;
+			state.missileShotIndex = 0;
 			if (!player.isCreative() || !player.getAbilities().flying) {
 				player.setNoGravity(false);
 			}
@@ -2053,6 +2611,20 @@ public class TkGunServer implements ModInitializer {
 				: com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY;
 	}
 
+	private static int missilePhase(BackpackCharge state, long now) {
+		if (state.launcherType
+				!= com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_NONE;
+		}
+		if (state.missileAiming || state.missileFiring) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_AIM;
+		}
+		if (now < state.missileCooldownUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_CD;
+		}
+		return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_NONE;
+	}
+
 	private static int maxBackpackCharges(
 			com.tk.gun.item.BackpackUpgradeData.LauncherType type) {
 		return type == com.tk.gun.item.BackpackUpgradeData.LauncherType.AUTO
@@ -2069,11 +2641,12 @@ public class TkGunServer implements ModInitializer {
 										   BackpackCharge state, long now) {
 		ServerWorld world = owner.getServerWorld();
 		int phase = backpackPhase(state, now);
-		int remaining = phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN
-				? (int) Math.max(0, state.launcherType
-						== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER
-								? state.jumpCooldownUntil - now
-								: state.cooldownUntil - now)
+		int missilePhase = missilePhase(state, now);
+		int remaining = missilePhase
+				== com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_CD
+				? (int) Math.max(0, state.missileCooldownUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN
+				? (int) Math.max(0, state.cooldownUntil - now)
 				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_READY
 						? (int) Math.max(0, state.summonReadyUntil - now)
 				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST
@@ -2086,10 +2659,9 @@ public class TkGunServer implements ModInitializer {
 				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING
 						? state.specialThrustActive
 								? (int) Math.max(0, state.specialThrustUntil - now)
-								: Math.max(0, TkGun.JUMP_BACKPACK_THRUST_TICKS
-										- state.jumpThrustTicksUsed)
+									: state.jumpEnergyPixels
 				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_CLOSE
-						? (int) Math.max(0, state.jumpCooldownUntil - now) : 0;
+						? (int) Math.max(0, state.jumpCloseUntil - now) : 0;
 		boolean targetPhase =
 				phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_MARKED
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
@@ -2105,8 +2677,10 @@ public class TkGunServer implements ModInitializer {
 							case AUTO -> 2;
 							case SUMMON_ANTENNA -> 3;
 							case JUMP_THRUSTER -> 4;
+							case BATTLE_BANNER -> 5;
 							default -> 0;
-						});
+				}, missilePhase, state.jumpEnergyPixels,
+				state.jumpEnergyLocked);
 		for (ServerPlayerEntity viewer : world.getPlayers()) {
 			ServerPlayNetworking.send(viewer, payload);
 		}
@@ -2132,6 +2706,8 @@ public class TkGunServer implements ModInitializer {
 				tickSummonAntenna(player, state, now);
 			} else if (state.launcherType
 					== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+				tickJumpEnergy(player, state, now);
+				tickMissileBox(player, state, now);
 				tickJumpBackpack(player, state, now);
 			} else {
 				tickPortableBackpack(player, state, now);
@@ -2176,8 +2752,7 @@ public class TkGunServer implements ModInitializer {
 			boolean wasHeld = state.jumpKeyHeld;
 			boolean canThrust = pressed && !TkGun.holdingGun(player)
 					&& player.isAlive() && !player.isSpectator()
-					&& state.jumpThrustTicksUsed
-					< TkGun.JUMP_BACKPACK_THRUST_TICKS;
+						&& !state.jumpEnergyLocked && state.jumpEnergyPixels > 0;
 			state.jumpKeyHeld = canThrust;
 			if (!canThrust) {
 				state.jumpThrustSoundPlayed = false;
@@ -2189,6 +2764,7 @@ public class TkGunServer implements ModInitializer {
 		state.jumpKeyHeld = pressed;
 		if (!pressed || TkGun.holdingGun(player) || !player.isAlive()
 				|| player.isSpectator() || player.hasVehicle() || player.isFallFlying()
+				|| state.jumpEnergyLocked || state.jumpEnergyPixels <= 0
 				|| jumpBackpackPhase(state, now)
 						!= com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY) {
 			return;
@@ -2200,7 +2776,6 @@ public class TkGunServer implements ModInitializer {
 				: now + TkGun.JUMP_BACKPACK_READY_TICKS;
 		state.jumpThrustTicksUsed = 0;
 		state.jumpCloseUntil = 0;
-		state.jumpCooldownUntil = 0;
 		state.jumpOriginY = player.getY();
 		state.jumpStartX = player.getX();
 		state.jumpStartZ = player.getZ();
@@ -2225,17 +2800,14 @@ public class TkGunServer implements ModInitializer {
 			if (now < state.jumpReadyUntil) {
 				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY_TO_FLY;
 			}
-			if (state.jumpKeyHeld && state.jumpThrustTicksUsed
-					< TkGun.JUMP_BACKPACK_THRUST_TICKS) {
+			if (state.jumpKeyHeld && !state.jumpEnergyLocked
+					&& state.jumpEnergyPixels > 0) {
 				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
 			}
 			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
 		}
 		if (now < state.jumpCloseUntil) {
 			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_CLOSE;
-		}
-		if (now < state.jumpCooldownUntil) {
-			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN;
 		}
 		return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY;
 	}
@@ -2253,7 +2825,8 @@ public class TkGunServer implements ModInitializer {
 		}
 		BackpackCharge state = backpackState(player, now);
 		if (state.specialThrustActive || state.jumpAirborne
-				|| now < state.jumpCloseUntil || now < state.jumpCooldownUntil) {
+				|| now < state.jumpCloseUntil
+				|| state.jumpEnergyLocked || state.jumpEnergyPixels <= 0) {
 			return false;
 		}
 		state.specialThrustActive = true;
@@ -2268,7 +2841,7 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	private static void finishBackpackSpecialThrust(ServerPlayerEntity player,
-			long now, boolean cooldown) {
+			long now) {
 		BackpackCharge state = BACKPACK_STATES.get(player.getUuid());
 		if (state == null || !state.specialThrustActive) {
 			return;
@@ -2276,13 +2849,87 @@ public class TkGunServer implements ModInitializer {
 		state.specialThrustActive = false;
 		state.specialThrustUntil = 0;
 		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
-		state.jumpCooldownUntil = cooldown
-				? now + TkGun.JUMP_BACKPACK_COOLDOWN_TICKS : 0;
 		syncBackpackStatus(player, state, now);
-		TkGun.LOGGER.info("[tkgun] jump thruster gun action ended -> close={} cooldown={} player={}",
+		TkGun.LOGGER.info("[tkgun] jump thruster gun action ended -> close={} energy={} player={}",
 				TkGun.JUMP_BACKPACK_CLOSE_TICKS,
-				cooldown ? TkGun.JUMP_BACKPACK_COOLDOWN_TICKS : 0,
+				state.jumpEnergyPixels,
 				player.getName().getString());
+	}
+
+	private static void tickJumpEnergy(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		int maximum = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		int step = TkGun.JUMP_BACKPACK_ENERGY_STEP_PIXELS;
+		if (state.jumpEnergyLocked) {
+			if (state.nextJumpEnergyRecoveryAt <= 0L) {
+				state.nextJumpEnergyRecoveryAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+			} else if (now >= state.nextJumpEnergyRecoveryAt) {
+				state.jumpEnergyPixels = Math.min(maximum,
+						state.jumpEnergyPixels + step);
+				if (state.jumpEnergyPixels >= maximum) {
+					state.jumpEnergyLocked = false;
+					state.nextJumpEnergyRecoveryAt = 0L;
+				} else {
+					state.nextJumpEnergyRecoveryAt =
+							now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+				}
+			}
+			return;
+		}
+
+		boolean thrusting = state.specialThrustActive
+				|| (state.jumpAirborne && state.jumpKeyHeld
+				&& now >= state.jumpReadyUntil);
+		if (thrusting) {
+			state.nextJumpEnergyRecoveryAt = 0L;
+			if (state.nextJumpEnergyUseAt <= 0L) {
+				state.nextJumpEnergyUseAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+			} else if (now >= state.nextJumpEnergyUseAt) {
+				state.jumpEnergyPixels = Math.max(0,
+						state.jumpEnergyPixels - step);
+				state.nextJumpEnergyUseAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+				if (state.jumpEnergyPixels <= 0) {
+					state.jumpEnergyPixels = 0;
+					state.jumpEnergyLocked = true;
+					state.nextJumpEnergyUseAt = 0L;
+					state.nextJumpEnergyRecoveryAt =
+							now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+					state.jumpKeyHeld = false;
+					state.jumpThrustSoundPlayed = false;
+					state.specialThrustActive = false;
+					state.specialThrustUntil = 0L;
+					state.jumpCloseUntil =
+							now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
+				}
+			}
+			return;
+		}
+
+		state.nextJumpEnergyUseAt = 0L;
+		boolean falling = state.jumpAirborne && !player.isOnGround()
+				&& jumpBackpackPhase(state, now)
+				== com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
+		boolean grounded = player.isOnGround();
+		int recoveryTicks = falling
+				? TkGun.JUMP_BACKPACK_ENERGY_FALL_RECOVERY_TICKS
+				: grounded ? TkGun.JUMP_BACKPACK_ENERGY_GROUND_RECOVERY_TICKS : 0;
+		if (recoveryTicks > 0 && state.jumpEnergyPixels < maximum) {
+			if (state.nextJumpEnergyRecoveryAt <= 0L) {
+				state.nextJumpEnergyRecoveryAt =
+						now + recoveryTicks;
+			} else if (now >= state.nextJumpEnergyRecoveryAt) {
+				state.jumpEnergyPixels = Math.min(maximum,
+						state.jumpEnergyPixels + step);
+				state.nextJumpEnergyRecoveryAt =
+						state.jumpEnergyPixels >= maximum ? 0L
+								: now + recoveryTicks;
+			}
+		} else {
+			state.nextJumpEnergyRecoveryAt = 0L;
+		}
 	}
 
 	private static void tickJumpBackpack(ServerPlayerEntity player,
@@ -2323,8 +2970,8 @@ public class TkGunServer implements ModInitializer {
 			player.setNoGravity(false);
 			return;
 		}
-		if (state.jumpKeyHeld && state.jumpThrustTicksUsed
-				< TkGun.JUMP_BACKPACK_THRUST_TICKS) {
+		if (state.jumpKeyHeld && !state.jumpEnergyLocked
+				&& state.jumpEnergyPixels > 0) {
 			player.setNoGravity(true);
 			player.removeStatusEffect(StatusEffects.SLOW_FALLING);
 			playJumpThrustActivationSound(player, state);
@@ -2361,8 +3008,7 @@ public class TkGunServer implements ModInitializer {
 		if (!state.jumpAirborne || now - state.jumpStartedAt < 2L) {
 			return;
 		}
-		if (player.isOnGround() || player.isTouchingWater()
-				|| now >= state.jumpStartedAt + 20L * 15L) {
+		if (player.isOnGround() || player.isTouchingWater()) {
 			finishJumpBackpack(player, state, now);
 		}
 	}
@@ -2384,7 +3030,6 @@ public class TkGunServer implements ModInitializer {
 		state.jumpAirborne = false;
 		state.jumpKeyHeld = false;
 		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
-		state.jumpCooldownUntil = now + TkGun.JUMP_BACKPACK_COOLDOWN_TICKS;
 		player.setNoGravity(false);
 		player.fallDistance = 0.0F;
 		Vec3d velocity = player.getVelocity();
@@ -2395,9 +3040,9 @@ public class TkGunServer implements ModInitializer {
 				(player.getX() - state.jumpStartX) * (player.getX() - state.jumpStartX)
 				+ (player.getZ() - state.jumpStartZ) * (player.getZ() - state.jumpStartZ));
 		TkGun.LOGGER.info("[tkgun] jump backpack landed -> close, height={}, distance={}, "
-						+ "cooldown={} ticks player={}",
+						+ "energy={} player={}",
 				round3(state.jumpMaxY - state.jumpOriginY), round3(horizontal),
-				TkGun.JUMP_BACKPACK_COOLDOWN_TICKS, player.getName().getString());
+				state.jumpEnergyPixels, player.getName().getString());
 	}
 
 	private static void tickAutoBackpack(ServerPlayerEntity player,
@@ -2654,6 +3299,7 @@ public class TkGunServer implements ModInitializer {
 		if (state == null) {
 			return;
 		}
+		clearMissileTargets(player, state);
 		if (state.jumpAirborne) {
 			player.setNoGravity(false);
 		}
@@ -2831,20 +3477,120 @@ public class TkGunServer implements ModInitializer {
 				iterator.remove();
 			}
 		}
+		Iterator<Map.Entry<UUID, MissileTracker>> missiles =
+				MISSILE_TRACKERS.entrySet().iterator();
+		while (missiles.hasNext()) {
+			Map.Entry<UUID, MissileTracker> entry = missiles.next();
+			MissileTracker tracker = entry.getValue();
+			Entity projectile = tracker.world.getEntity(tracker.projectileUuid);
+			Entity target = tracker.world.getEntityById(tracker.targetEntityId);
+			if (projectile == null || !projectile.isAlive()
+					|| !(target instanceof LivingEntity living) || !living.isAlive()
+					|| now >= tracker.expiresAt) {
+				missiles.remove();
+				continue;
+			}
+			if (!tracker.tracking) {
+				boolean reachedColdDistance = projectile.getPos()
+						.squaredDistanceTo(tracker.coldOrigin)
+						>= MISSILE_BOX_COLD_DISTANCE * MISSILE_BOX_COLD_DISTANCE;
+				boolean coldTimedOut = now - tracker.launchedAt
+						>= MISSILE_BOX_COLD_MAX_TICKS;
+				if (!reachedColdDistance && !coldTimedOut) {
+					projectile.setVelocity(tracker.coldDirection.multiply(
+							MISSILE_BOX_COLD_SPEED));
+					projectile.velocityModified = true;
+					continue;
+				}
+				tracker.tracking = true;
+				projectile.setNoGravity(false);
+				projectile.setSilent(false);
+				if (projectile instanceof net.minecraft.entity.projectile.FireworkRocketEntity rocket) {
+					playBackpackLaunchSound(tracker.world,
+							projectile.getPos(), rocket.getStack());
+				}
+			}
+			Vec3d currentVelocity = projectile.getVelocity();
+			Vec3d current = currentVelocity.lengthSquared() < 1.0E-8D
+					? projectile.getRotationVector()
+					: currentVelocity.normalize();
+			Vec3d desired = living.getBoundingBox().getCenter()
+					.subtract(projectile.getPos()).normalize();
+			Vec3d steered = rotateTowards(current, desired,
+					MISSILE_BOX_TURN_RADIANS);
+			projectile.setVelocity(steered.multiply(
+					MISSILE_BOX_IGNITED_SPEED));
+			projectile.velocityModified = true;
+		}
+	}
+
+	private static Vec3d rotateTowards(Vec3d current, Vec3d target,
+									   double maxRadians) {
+		double dot = Math.max(-1.0D, Math.min(1.0D,
+				current.dotProduct(target)));
+		double angle = Math.acos(dot);
+		if (angle <= maxRadians || angle < 1.0E-5D) {
+			return target.normalize();
+		}
+		double denominator = Math.sin(angle);
+		if (Math.abs(denominator) < 1.0E-6D) {
+			Vec3d fallback = current.crossProduct(new Vec3d(0.0D, 1.0D, 0.0D));
+			if (fallback.lengthSquared() < 1.0E-6D) {
+				fallback = current.crossProduct(new Vec3d(1.0D, 0.0D, 0.0D));
+			}
+			return fallback.normalize();
+		}
+		double t = maxRadians / angle;
+		double a = Math.sin((1.0D - t) * angle) / denominator;
+		double b = Math.sin(t * angle) / denominator;
+		return current.multiply(a).add(target.normalize().multiply(b)).normalize();
 	}
 
 	private static void enforceLauncherOffhandStorage(ServerPlayerEntity player) {
-		if (!com.tk.gun.item.BackpackLauncherRules.hasActiveLauncher(player)) {
-			return;
-		}
 		if (player.isUsingItem() && player.getActiveHand() == Hand.OFF_HAND) {
 			player.stopUsingItem();
 		}
 		net.minecraft.entity.player.PlayerInventory inventory = player.getInventory();
 		ItemStack offhand = inventory.getStack(
 				net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT);
+		boolean bannerInstalled = com.tk.gun.item.BackpackLauncherRules
+				.isBattleBannerInstalled(player);
+		if (bannerInstalled) {
+			if (com.tk.gun.item.BackpackLauncherRules
+					.isVirtualBattleBanner(offhand)) {
+				return;
+			}
+			ItemStack displaced = offhand.copy();
+			inventory.setStack(
+					net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT,
+					com.tk.gun.item.BackpackLauncherRules
+							.createVirtualBattleBanner());
+			if (!displaced.isEmpty() && !inventory.insertStack(displaced)) {
+				player.dropItem(displaced, false);
+			}
+			inventory.markDirty();
+			player.playerScreenHandler.syncState();
+			if (player.currentScreenHandler != player.playerScreenHandler) {
+				player.currentScreenHandler.syncState();
+			}
+			return;
+		}
+		if (com.tk.gun.item.BackpackLauncherRules
+				.isVirtualBattleBanner(offhand)) {
+			offhand.setCount(0);
+			inventory.markDirty();
+			player.playerScreenHandler.syncState();
+			return;
+		}
+		if (!com.tk.gun.item.BackpackLauncherRules.hasActiveLauncher(player)) {
+			return;
+		}
+		boolean missileBox = com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player));
 		if (offhand.isEmpty()
-				|| com.tk.gun.item.BackpackLauncherRules.isLaunchable(offhand)) {
+				|| (missileBox
+						? offhand.isOf(Items.FIREWORK_ROCKET)
+						: com.tk.gun.item.BackpackLauncherRules.isLaunchable(offhand))) {
 			return;
 		}
 		ItemStack displaced = offhand.copy();
@@ -3656,7 +4402,7 @@ public class TkGunServer implements ModInitializer {
 		st.slideUntil = 0;                     // 滑铲立刻收
 		st.slideMeasuring = false;
 		if (wasSliding) {
-			finishBackpackSpecialThrust(player, now, false);
+			finishBackpackSpecialThrust(player, now);
 		}
 		st.fastAimUntil = now + 60;            // 之后这一小段里右键都算"快"
 		clearDodgeCooldownsForFocus(st);
@@ -4531,7 +5277,7 @@ public class TkGunServer implements ModInitializer {
 		st.heat = TkGun.HEAT_MAX;
 		if (TkGun.definition(player).id()
 				.equals(TkGun.id("veritas_et_justitia"))) {
-			playSound(player, TkGun.SND_CLAYMORE_SWING, 1.0F, 1.0F);
+			playSound(player, TkGun.SND_VERITAS_FOCUS_EMPTY, 1.0F, 1.0F);
 		}
 		// 音效：**交给 `Overheat` 自己的音效关键帧** —— 作者在那段 0.4167s 处配了 `散热.ogg`
 		// （用户 2026-10-17："将专注相关的音效替换为…模型所引用的音频"）。原来这里那声即时 `vent`
@@ -4859,7 +5605,7 @@ public class TkGunServer implements ModInitializer {
 		if (fromSlide) {
 			st.slideUntil = 0L;
 			st.slideMeasuring = false;
-			finishBackpackSpecialThrust(player, now, false);
+			finishBackpackSpecialThrust(player, now);
 		}
 		GunStateMachine.clearDash(player);
 		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_LOAD,
@@ -5224,7 +5970,7 @@ public class TkGunServer implements ModInitializer {
 			lockAimAfterDodge(st, now);
 			st.slideUntil = 0;
 			st.slideMeasuring = false;
-			finishBackpackSpecialThrust(player, now, false);
+			finishBackpackSpecialThrust(player, now);
 			st.lastSlideFastFocusAt = now;
 			st.state = TkGun.State.IDLE;
 			st.stateUntil = 0;
@@ -5453,11 +6199,13 @@ public class TkGunServer implements ModInitializer {
 		tickBolts();
 		tickBackpackProjectiles(server);
 		tickBackpackStates(server);
+		tickWarBannerLights(server);
 		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
 			enforceLauncherOffhandStorage(player);
 			removeGunFromOffhand(player);
 			PState st = state(player);
 			long now = player.getWorld().getTime();
+			tickWarBannerCast(player, st, now);
 			tickRollFallback(player, st, now);
 			boolean holdingGunNow = TkGun.holdingGun(player);
 			syncBetterCombatAttackFlag(player, holdingGunNow);
@@ -5980,7 +6728,7 @@ public class TkGunServer implements ModInitializer {
 		} else if (st.skillJumpAirborne
 				|| now >= st.skillJumpStartedAt + 2L) {
 			if (st.skillJumpThrusterFlight) {
-				finishBackpackSpecialThrust(player, now, true);
+				finishBackpackSpecialThrust(player, now);
 				st.skillJumpThrusterFlight = false;
 			}
 			completeDodgeCooldownAfterSkillJump(st);
@@ -5997,7 +6745,7 @@ public class TkGunServer implements ModInitializer {
 				: TkGun.SKILL_JUMP_MAX_TICKS;
 		if (now >= st.skillJumpStartedAt + jumpLifetime) {
 			if (st.skillJumpThrusterFlight) {
-				finishBackpackSpecialThrust(player, now, true);
+				finishBackpackSpecialThrust(player, now);
 				st.skillJumpThrusterFlight = false;
 				player.setNoGravity(false);
 			}
@@ -6218,7 +6966,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		st.skillFallImpactDone = true;
 		if (st.skillJumpThrusterFlight) {
-			finishBackpackSpecialThrust(player, now, true);
+			finishBackpackSpecialThrust(player, now);
 			st.skillJumpThrusterFlight = false;
 		}
 		st.skillFallTargetUuid = null;
@@ -6420,7 +7168,7 @@ public class TkGunServer implements ModInitializer {
 			double left = slideDistance - Math.sqrt(dx * dx + dz * dz);
 			if (left <= 0.05D) {
 				st.slideUntil = now;            // 到量就收，后面走收势/结束逻辑
-				finishBackpackSpecialThrust(player, now, false);
+				finishBackpackSpecialThrust(player, now);
 			} else {
 				double speed = Math.min(v0 * remain, left);
 				Vec3d v = player.getVelocity();
@@ -6439,7 +7187,7 @@ public class TkGunServer implements ModInitializer {
 		} else if (st.slideMeasuring) {
 			// 滑完把**实测位移**打进日志：用户要 3~4 格，这条数字就是验收标准，别靠看
 			st.slideMeasuring = false;
-			finishBackpackSpecialThrust(player, now, false);
+			finishBackpackSpecialThrust(player, now);
 			GunStateMachine.extendSpeedBoostAfterSlide(player, st, now);
 			// 滑铲结束后再锁 1 秒；从起铲时刻算会让最后一段滑行吃掉冷却。
 			st.dodgeBlockUntil = Math.max(st.dodgeBlockUntil, now + 20);
@@ -6510,7 +7258,7 @@ public class TkGunServer implements ModInitializer {
 	public static void startSlideReady(ServerPlayerEntity player) {
 		PState st = state(player);
 		st.slideUntil = 0;                      // 立刻结束滑行
-		finishBackpackSpecialThrust(player, player.getWorld().getTime(), false);
+		finishBackpackSpecialThrust(player, player.getWorld().getTime());
 		// 收势之后的一小段时间内右键 = 快速部署（AIM_FAST）——"滑铲里按右键更快进架枪"
 		st.fastAimUntil = player.getWorld().getTime() + 60;
 		setState(player.getServer(), player, TkGun.State.SLIDE_READY, TkGun.SLIDE_READY_TICKS);

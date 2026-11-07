@@ -20,7 +20,9 @@ public abstract class OffhandSwapGuardClientMixin {
 				&& action.getAction() == PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
 			MinecraftClient client = MinecraftClient.getInstance();
 			if (client.player != null
-					&& (TkGun.isGun(client.player.getMainHandStack())
+					&& (BackpackLauncherRules.isVirtualBattleBanner(
+							client.player.getOffHandStack())
+					|| TkGun.isGun(client.player.getMainHandStack())
 					|| (BackpackLauncherRules.hasActiveLauncher(client.player)
 					&& !BackpackLauncherRules.isLaunchable(client.player.getMainHandStack())))) {
 				ci.cancel();

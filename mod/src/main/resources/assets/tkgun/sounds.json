@@ -358,5 +358,29 @@
                                               "stream":  false
                                           }
                                       ]
+                       },
+    "veritas_melee_charge":  {
+                                 "sounds":  [
+                                                {
+                                                    "name":  "tkgun:veritas_melee_charge",
+                                                    "stream":  false
+                                                }
+                                            ]
+                             },
+    "veritas_focus_empty":  {
+                                "sounds":  [
+                                               {
+                                                   "name":  "tkgun:veritas_focus_empty",
+                                                   "stream":  false
+                                               }
+                                           ]
+                            },
+    "missile_cold_launch":  {
+                                "sounds":  [
+                                               {
+                                                   "name":  "tkgun:missile_cold_launch",
+                                                   "stream":  false
+                                               }
+                                           ]
                        }
 }

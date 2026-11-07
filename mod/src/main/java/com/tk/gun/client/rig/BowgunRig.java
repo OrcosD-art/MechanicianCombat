@@ -554,6 +554,13 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// Silent Storm's Focus_hold is already the canonical Fortress aim pose.
 		// Applying its source-only open clip afterwards shifts the assembled gun.
 		boolean silentStorm = gunId.equals(TkGun.id("abyssal_ancient_cannon"));
+		if (!GunClientState.focusish(entity.getId())
+				&& "run".equals(TkGunClient.walkAnimation(entity.getId()))) {
+			// The run clip already animates the complete gun subtree with the
+			// canonical Fortress gun keys. Applying the separate folded pose here
+			// would override those keys and tilt the gun differently.
+			return PlayState.STOP;
+		}
 		if (!silentStorm && entry.state == TkGun.State.FIRE && entry.focus) {
 			return state.setAndContinue(rawFor("gun_open_hold"));
 		}
@@ -728,7 +735,14 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// `roll_to_idle` 站定。静止时仍用作者的完整 `roll_to_idle`。
 		if (e.active() && e.state == TkGun.State.ROLL_TO_IDLE
 				&& TkGunClient.hasMovementInput(entity.getId())) {
-			return null;
+			if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+					&& TkGun.definition(player).id().equals(
+							TkGun.id("veritas_et_justitia"))) {
+				return null;
+			}
+			// Keep the authored recovery on the upper body while the lower layer
+			// switches immediately to walk/run_lower.
+			return "roll_to_idle_upper";
 		}
 		// **腰射开火一旦起手，就播完整段**（用户 2026-10-18："瞄准腰射时松开右键射击动画
 		// 会被强制结束"）。旧逻辑把 `holdingGunUp()` 当成 FIRE 层是否存在的条件；右键一松，

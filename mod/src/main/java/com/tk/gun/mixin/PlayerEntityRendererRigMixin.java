@@ -1,6 +1,8 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.client.HelmetClientState;
+import com.tk.gun.client.WarBannerHeldRenderer;
 import com.tk.gun.client.rig.BowgunRigClient;
 import com.tk.gun.item.MechanicianUndersuitItem;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
@@ -31,6 +33,7 @@ public abstract class PlayerEntityRendererRigMixin {
 	@Inject(method = "<init>(Lnet/minecraft/class_5617$class_5618;Z)V", at = @At("TAIL"))
 	private void tkgun$rememberContext(EntityRendererFactory.Context ctx, boolean slim, CallbackInfo ci) {
 		BowgunRigClient.setContext(ctx);
+		WarBannerHeldRenderer.setContext(ctx);
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
@@ -53,6 +56,8 @@ public abstract class PlayerEntityRendererRigMixin {
 			};
 		}
 		BowgunRigClient.renderIfHolding(player, yaw, tickDelta, matrices, consumers, light);
+		WarBannerHeldRenderer.renderIfActive(
+				player, yaw, tickDelta, matrices, consumers, light);
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
@@ -88,6 +93,7 @@ public abstract class PlayerEntityRendererRigMixin {
 													CallbackInfo ci) {
 		if (!TkGun.holdingGun(player)) {
 			tkgun$hideUndersuitBody(player);
+			tkgun$updateHelmetHair(player);
 			return;
 		}
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
@@ -95,6 +101,7 @@ public abstract class PlayerEntityRendererRigMixin {
 			model.sneaking = false;
 		}
 		tkgun$hideUndersuitBody(player);
+		tkgun$updateHelmetHair(player);
 	}
 
 	/**
@@ -133,6 +140,17 @@ public abstract class PlayerEntityRendererRigMixin {
 			model.leftPants.visible = false;
 			model.rightPants.visible = false;
 			model.jacket.visible = false;
+		}
+	}
+
+	@Unique
+	private void tkgun$updateHelmetHair(AbstractClientPlayerEntity player) {
+		if (!MechanicianUndersuitItem.isWearingOuterSet(player)) {
+			return;
+		}
+		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
+		if (renderer.getModel() instanceof PlayerEntityModel<?> model) {
+			model.hat.visible = !HelmetClientState.shouldHideHair(player);
 		}
 	}
 }

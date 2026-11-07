@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r650-2026-11-04";
+	public static final String BUILD = "r682-2026-11-07";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -239,11 +239,15 @@ public final class TkGun {
 	public static final int SLIDE_THRUSTER_DURATION_MULTIPLIER = 2;
 	/** Jump backpack: at most five seconds of held thrust. */
 	public static final int JUMP_BACKPACK_READY_TICKS = 5;
-	public static final int JUMP_BACKPACK_THRUST_TICKS = 100;
 	public static final int JUMP_BACKPACK_START_BOOST_TICKS = 5;
 	public static final double JUMP_BACKPACK_START_SPEED_MULTIPLIER = 1.25D;
 	public static final int JUMP_BACKPACK_CLOSE_TICKS = 8;
-	public static final int JUMP_BACKPACK_COOLDOWN_TICKS = 60;
+	public static final int JUMP_BACKPACK_ENERGY_MAX_PIXELS = 28;
+	public static final int JUMP_BACKPACK_ENERGY_STEP_PIXELS = 2;
+	public static final int JUMP_BACKPACK_ENERGY_DRAIN_TICKS = 5;
+	public static final int JUMP_BACKPACK_ENERGY_FALL_RECOVERY_TICKS = 20;
+	public static final int JUMP_BACKPACK_ENERGY_GROUND_RECOVERY_TICKS = 10;
+	public static final int JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS = 5;
 	public static final double JUMP_BACKPACK_BOOST_RISE = 0.15D;
 	public static final double JUMP_BACKPACK_FORWARD_SPEED = 0.75D;
 	public static final double JUMP_BACKPACK_MIN_START_RISE = 0.5D;
@@ -643,6 +647,15 @@ public final class TkGun {
 	public static final Identifier SND_SMASH_GROUND2 = id("smash_ground2");
 	/** Updated Veritas close-combat spark cue (`skill_spark.ogg`). */
 	public static final Identifier SND_SKILL_SPARK = id("skill_spark");
+	/** Updated Veritas ATK_3_hold charge cue (`近战蓄力1.mp3`). */
+	public static final Identifier SND_VERITAS_MELEE_CHARGE =
+			id("veritas_melee_charge");
+	/** Veritas focus magazine depletion cue (`枢德蹲射空仓.mp3`). */
+	public static final Identifier SND_VERITAS_FOCUS_EMPTY =
+			id("veritas_focus_empty");
+	/** Mechanical missile-bay cold-launch cue (`机械声2.mp3`). */
+	public static final Identifier SND_MISSILE_COLD_LAUNCH =
+			id("missile_cold_launch");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 
@@ -680,6 +693,8 @@ public final class TkGun {
 					new KeyframeSound(SND_CLAYMORE_SWING, 1.0F, 1.0F)),
 			Map.entry("imp1", new KeyframeSound(SND_IMPACT, 1.0F, 1.0F)),
 			Map.entry("1", new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
+			Map.entry("1.mp3",
+					new KeyframeSound(SND_VERITAS_MELEE_CHARGE, 1.0F, 1.0F)),
 			Map.entry("anchor_slam01",
 					new KeyframeSound(SND_ANCHOR_SLAM1, 1.0F, 1.0F)),
 			Map.entry("smash_air1",

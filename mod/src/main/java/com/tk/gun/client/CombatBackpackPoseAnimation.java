@@ -41,6 +41,8 @@ public final class CombatBackpackPoseAnimation {
 			case FLYING -> "flying";
 			case CLOSE -> "close";
 			case CD, READY -> "jump_cooldown";
+			case MISSILE_AIM -> "misslie_aim";
+			case MISSILE_CD -> "misslie_CD";
 			default -> null;
 		};
 	}
@@ -76,6 +78,47 @@ public final class CombatBackpackPoseAnimation {
 			// GeckoLib animation rotations are additive to the bind pose and stored
 			// in radians. The authored JSON stores degrees. Writing those raw values
 			// caused values such as 45 degrees to become 45 radians.
+			float baseX = initial == null ? 0.0F : initial.getRotX();
+			float baseY = initial == null ? 0.0F : initial.getRotY();
+			float baseZ = initial == null ? 0.0F : initial.getRotZ();
+			bone.setRotX(baseX + (float) Math.toRadians(rotation.x()));
+			bone.setRotY(baseY + (float) Math.toRadians(rotation.y()));
+			bone.setRotZ(baseZ + (float) Math.toRadians(rotation.z()));
+		}
+		if (position != null) {
+			bone.setPosX(position.x());
+			bone.setPosY(position.y());
+			bone.setPosZ(position.z());
+		}
+		if (scale != null) {
+			bone.setScaleX(scale.x());
+			bone.setScaleY(scale.y());
+			bone.setScaleZ(scale.z());
+		}
+	}
+
+	/** Applies missile-bay motion on top of the backpack's current base pose. */
+	public static void applyMissileOverlay(GeoBone bone,
+			CombatBackpackAnimation.Phase phase, double seconds) {
+		if (phase != CombatBackpackAnimation.Phase.MISSILE_AIM
+				&& phase != CombatBackpackAnimation.Phase.MISSILE_CD) {
+			return;
+		}
+		if (!"missile_left".equals(bone.getName())
+				&& !"missile_right".equals(bone.getName())) {
+			return;
+		}
+		Clip clip = clips().get(clipName(phase));
+		BoneChannels channels =
+				clip == null ? null : clip.bones().get(bone.getName());
+		if (channels == null) {
+			return;
+		}
+		BoneSnapshot initial = bone.getInitialSnapshot();
+		Vec3 rotation = sample(channels.rotation(), seconds);
+		Vec3 position = sample(channels.position(), seconds);
+		Vec3 scale = sample(channels.scale(), seconds);
+		if (rotation != null) {
 			float baseX = initial == null ? 0.0F : initial.getRotX();
 			float baseY = initial == null ? 0.0F : initial.getRotY();
 			float baseZ = initial == null ? 0.0F : initial.getRotZ();

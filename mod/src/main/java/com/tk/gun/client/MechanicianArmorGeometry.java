@@ -10,6 +10,7 @@ import com.tk.gun.item.MechanicianArmorPiece;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.model.ModelPart;
 import net.minecraft.client.render.OverlayTexture;
+import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -26,6 +27,7 @@ import software.bernie.geckolib.cache.texture.AnimatableTexture;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -80,7 +82,7 @@ public final class MechanicianArmorGeometry {
 			}
 			renderPart(geometry, part, matrices, consumers, baseModel, light,
 					entity, limbAngle, limbDistance, headYaw,
-					EnumSet.allOf(Feature.class));
+					EnumSet.allOf(Feature.class), null);
 		}
 	}
 
@@ -93,6 +95,19 @@ public final class MechanicianArmorGeometry {
 		render(piece, matrices, consumers, baseModel, light, entity,
 				limbAngle, limbDistance, headYaw,
 				EnumSet.noneOf(Feature.class), parts);
+	}
+
+	public static void renderHelmet(MatrixStack matrices,
+									VertexConsumerProvider consumers,
+									BipedEntityModel<?> baseModel, int light,
+									LivingEntity entity, float limbAngle,
+									float limbDistance, float headYaw,
+									String animation, float seconds) {
+		Geometry geometry = get(MechanicianArmorPiece.HELMET);
+		renderPart(geometry, Part.HEAD, matrices, consumers, baseModel, light,
+				entity, limbAngle, limbDistance, headYaw,
+				EnumSet.noneOf(Feature.class),
+				new AnimationPose(animation, seconds));
 	}
 
 	public static void render(MechanicianArmorPiece piece, ItemStack stack,
@@ -130,7 +145,7 @@ public final class MechanicianArmorGeometry {
 		Geometry geometry = get(piece);
 		for (Part part : parts) {
 			renderPart(geometry, part, matrices, consumers, baseModel, light,
-					entity, limbAngle, limbDistance, headYaw, installed);
+					entity, limbAngle, limbDistance, headYaw, installed, null);
 		}
 	}
 
@@ -140,7 +155,8 @@ public final class MechanicianArmorGeometry {
 								   BipedEntityModel<?> baseModel, int light,
 								   LivingEntity entity, float limbAngle,
 								   float limbDistance, float headYaw,
-								   Set<Feature> installed) {
+								   Set<Feature> installed,
+								   AnimationPose animation) {
 		List<Cube> cubes = geometry.cubes.get(part);
 		if (cubes == null || cubes.isEmpty()) {
 			return;
@@ -152,12 +168,26 @@ public final class MechanicianArmorGeometry {
 			net.minecraft.client.model.ModelTransform origin =
 					modelPart.getDefaultTransform();
 			for (Cube cube : cubes) {
+				// The helmet bbmodel includes the vanilla head cube as an editing
+				// reference. Keep the player's face and skin; only A/B/C are armor.
+				if (animation != null && part == Part.HEAD
+						&& "\u5934".equals(cube.boneName)) {
+					continue;
+				}
 				if (cube.feature != null && !installed.contains(cube.feature)) {
+					continue;
+				}
+				BoneTransform bone = sampleBone(
+						geometry, cube.boneName, animation);
+				if (Math.abs(bone.scaleX) < 1.0E-4F
+						|| Math.abs(bone.scaleY) < 1.0E-4F
+						|| Math.abs(bone.scaleZ) < 1.0E-4F) {
 					continue;
 				}
 				renderCube(matrices, consumers, geometry, cube, light,
 						entity, limbAngle, limbDistance, headYaw,
-						origin.pivotX, origin.pivotY, origin.pivotZ);
+						origin.pivotX, origin.pivotY, origin.pivotZ,
+						bone);
 			}
 		} finally {
 			matrices.pop();
@@ -181,9 +211,11 @@ public final class MechanicianArmorGeometry {
 								   LivingEntity entity, float limbAngle,
 								   float limbDistance, float headYaw,
 								   float bonePivotX, float bonePivotY,
-								   float bonePivotZ) {
+								   float bonePivotZ, BoneTransform bone) {
 		matrices.push();
 		try {
+			applyBoneTransform(matrices, cube, bone,
+					bonePivotX, bonePivotY, bonePivotZ);
 			if (cube.cloth != null) {
 				animateCloth(matrices, cube.cloth, entity, limbAngle,
 						limbDistance, headYaw);
@@ -214,6 +246,93 @@ public final class MechanicianArmorGeometry {
 		} finally {
 			matrices.pop();
 		}
+	}
+
+	private static void applyBoneTransform(MatrixStack matrices, Cube cube,
+										   BoneTransform bone,
+										   float modelPivotX,
+										   float modelPivotY,
+										   float modelPivotZ) {
+		float pivotX = (cube.bonePivotX - modelPivotX) * PIXEL;
+		float pivotY = (cube.bonePivotY - modelPivotY) * PIXEL;
+		float pivotZ = (cube.bonePivotZ - modelPivotZ) * PIXEL;
+		matrices.translate(pivotX, pivotY, pivotZ);
+		matrices.translate(bone.positionX * PIXEL,
+				-bone.positionY * PIXEL, bone.positionZ * PIXEL);
+		if (bone.rotationZ != 0.0F) {
+			matrices.multiply(RotationAxis.POSITIVE_Z.rotationDegrees(
+					bone.rotationZ));
+		}
+		if (bone.rotationY != 0.0F) {
+			matrices.multiply(RotationAxis.NEGATIVE_Y.rotationDegrees(
+					bone.rotationY));
+		}
+		if (bone.rotationX != 0.0F) {
+			// Bone-space keyframes use Blockbench's Y-up convention. The armor
+			// cube conversion reflects Y into Minecraft's Y-down model space, so
+			// animated bone rotations need the opposite X/Y axes and unchanged Z.
+			matrices.multiply(RotationAxis.POSITIVE_X.rotationDegrees(
+					bone.rotationX));
+		}
+		matrices.scale(bone.scaleX, bone.scaleY, bone.scaleZ);
+		matrices.translate(-pivotX, -pivotY, -pivotZ);
+	}
+
+	private static BoneTransform sampleBone(Geometry geometry,
+											String boneName,
+											AnimationPose animation) {
+		if (animation == null || boneName == null) {
+			return BoneTransform.IDENTITY;
+		}
+		AnimationClip clip = geometry.animations.get(animation.name());
+		if (clip == null) {
+			return BoneTransform.IDENTITY;
+		}
+		BoneClip bone = clip.bones.get(boneName);
+		if (bone == null) {
+			return BoneTransform.IDENTITY;
+		}
+		float time = MathHelper.clamp(animation.seconds,
+				0.0F, clip.length);
+		float[] position = sample(bone.position, time, 0.0F, 0.0F, 0.0F);
+		float[] rotation = sample(bone.rotation, time, 0.0F, 0.0F, 0.0F);
+		float[] scale = sample(bone.scale, time, 1.0F, 1.0F, 1.0F);
+		return new BoneTransform(
+				position[0], position[1], position[2],
+				rotation[0], rotation[1], rotation[2],
+				scale[0], scale[1], scale[2]);
+	}
+
+	private static float[] sample(List<Keyframe> frames, float time,
+								  float defaultX, float defaultY,
+								  float defaultZ) {
+		if (frames.isEmpty()) {
+			return new float[]{defaultX, defaultY, defaultZ};
+		}
+		Keyframe first = frames.get(0);
+		if (time <= first.time) {
+			return new float[]{first.x, first.y, first.z};
+		}
+		Keyframe last = frames.get(frames.size() - 1);
+		if (time >= last.time) {
+			return new float[]{last.x, last.y, last.z};
+		}
+		for (int index = 1; index < frames.size(); index++) {
+			Keyframe right = frames.get(index);
+			if (time > right.time) {
+				continue;
+			}
+			Keyframe left = frames.get(index - 1);
+			float span = right.time - left.time;
+			float amount = span <= 1.0E-6F
+					? 1.0F : (time - left.time) / span;
+			return new float[]{
+					MathHelper.lerp(amount, left.x, right.x),
+					MathHelper.lerp(amount, left.y, right.y),
+					MathHelper.lerp(amount, left.z, right.z)
+			};
+		}
+		return new float[]{last.x, last.y, last.z};
 	}
 
 	private static void animateCloth(MatrixStack matrices, Cloth cloth,
@@ -295,7 +414,9 @@ public final class MechanicianArmorGeometry {
 						.color(255, 255, 255, 255)
 						.texture(uvs[i][0], uvs[i][1])
 						.overlay(OverlayTexture.DEFAULT_UV)
-						.light(light)
+						.light(cube.feature == Feature.C3
+								? LightmapTextureManager.MAX_LIGHT_COORDINATE
+								: light)
 						.normal(entry, normal[0], normal[1], normal[2]);
 			}
 		}
@@ -370,8 +491,10 @@ public final class MechanicianArmorGeometry {
 			case "EAST" -> new float[]{1.0F, 0.0F, 0.0F};
 			case "NORTH" -> new float[]{0.0F, 0.0F, -1.0F};
 			case "SOUTH" -> new float[]{0.0F, 0.0F, 1.0F};
-			case "UP" -> new float[]{0.0F, 1.0F, 0.0F};
-			default -> new float[]{0.0F, -1.0F, 0.0F};
+			// Projected armor vertices use Minecraft's Y-down model space:
+			// the geometric top face faces -Y, while the bottom faces +Y.
+			case "UP" -> new float[]{0.0F, -1.0F, 0.0F};
+			default -> new float[]{0.0F, 1.0F, 0.0F};
 		};
 	}
 
@@ -393,7 +516,7 @@ public final class MechanicianArmorGeometry {
 		for (JsonElement topLevel : document.getAsJsonArray("outliner")) {
 			if (topLevel.isJsonObject()) {
 				walkBone(topLevel.getAsJsonObject(), null, null, null,
-						elements, cubes);
+						null, 0.0F, 0.0F, 0.0F, elements, cubes);
 			}
 		}
 		Map<Integer, TextureInfo> textures = new HashMap<>();
@@ -413,15 +536,91 @@ public final class MechanicianArmorGeometry {
 					sourceTexture.has("uv_height")
 							? sourceTexture.get("uv_height").getAsInt() : TEXTURE_HEIGHT));
 		}
-		return new Geometry(textures, cubes);
+		return new Geometry(textures, cubes, loadAnimations(document));
+	}
+
+	private static Map<String, AnimationClip> loadAnimations(
+			JsonObject document) {
+		Map<String, AnimationClip> animations = new HashMap<>();
+		if (!document.has("animations")
+				|| !document.get("animations").isJsonArray()) {
+			return animations;
+		}
+		for (JsonElement animationElement :
+				document.getAsJsonArray("animations")) {
+			JsonObject animation = animationElement.getAsJsonObject();
+			String name = animation.get("name").getAsString();
+			float length = animation.has("length")
+					? animation.get("length").getAsFloat() : 0.0F;
+			Map<String, BoneClip> bones = new HashMap<>();
+			if (animation.has("animators")
+					&& animation.get("animators").isJsonObject()) {
+				for (JsonElement animatorElement :
+						animation.getAsJsonObject("animators")
+								.asMap().values()) {
+					JsonObject animator = animatorElement.getAsJsonObject();
+					String boneName = animator.has("name")
+							? animator.get("name").getAsString() : "";
+					if (boneName.isEmpty() || !animator.has("keyframes")) {
+						continue;
+					}
+					List<Keyframe> position = new ArrayList<>();
+					List<Keyframe> rotation = new ArrayList<>();
+					List<Keyframe> scale = new ArrayList<>();
+					for (JsonElement keyframeElement :
+							animator.getAsJsonArray("keyframes")) {
+						JsonObject keyframe = keyframeElement.getAsJsonObject();
+						if (!keyframe.has("data_points")
+								|| keyframe.getAsJsonArray("data_points")
+								.isEmpty()) {
+							continue;
+						}
+						JsonObject point = keyframe.getAsJsonArray(
+								"data_points").get(0).getAsJsonObject();
+						Keyframe frame = new Keyframe(
+								keyframe.get("time").getAsFloat(),
+								point.get("x").getAsFloat(),
+								point.get("y").getAsFloat(),
+								point.get("z").getAsFloat());
+						switch (keyframe.get("channel").getAsString()) {
+							case "position" -> position.add(frame);
+							case "rotation" -> rotation.add(frame);
+							case "scale" -> scale.add(frame);
+							default -> {
+							}
+						}
+					}
+					Comparator<Keyframe> byTime =
+							Comparator.comparingDouble(frame -> frame.time);
+					position.sort(byTime);
+					rotation.sort(byTime);
+					scale.sort(byTime);
+					bones.put(boneName,
+							new BoneClip(position, rotation, scale));
+				}
+			}
+			animations.put(name, new AnimationClip(length, bones));
+		}
+		return animations;
 	}
 
 	private static void walkBone(JsonObject bone, Part inheritedPart,
 								 Cloth inheritedCloth,
 								 Feature inheritedFeature,
+								 String inheritedBoneName,
+								 float inheritedPivotX,
+								 float inheritedPivotY,
+								 float inheritedPivotZ,
 								 Map<String, JsonObject> elements,
 								 Map<Part, List<Cube>> cubes) {
 		String name = bone.has("name") ? bone.get("name").getAsString() : "";
+		String boneName = name.isEmpty() ? inheritedBoneName : name;
+		float[] boneOrigin = vector(
+				bone.has("origin") ? bone.getAsJsonArray("origin") : null,
+				inheritedPivotX, inheritedPivotY, inheritedPivotZ);
+		float bonePivotX = boneOrigin[0];
+		float bonePivotY = 24.0F - boneOrigin[1];
+		float bonePivotZ = boneOrigin[2];
 		Part part = partFor(name);
 		if (part == null) {
 			part = inheritedPart;
@@ -445,19 +644,24 @@ public final class MechanicianArmorGeometry {
 				JsonObject element = elements.get(child.getAsString());
 				if (element != null && part != null) {
 					cubes.computeIfAbsent(part, ignored -> new ArrayList<>())
-							.add(toCube(element, cloth, feature));
+							.add(toCube(element, cloth, feature, boneName,
+									bonePivotX, bonePivotY, bonePivotZ));
 				}
 			} else if (child.isJsonObject()) {
 				JsonObject childBone = child.getAsJsonObject();
 				if (!"locator".equals(childBone.has("type")
 						? childBone.get("type").getAsString() : "bone")) {
-					walkBone(childBone, part, cloth, feature, elements, cubes);
+					walkBone(childBone, part, cloth, feature, boneName,
+							bonePivotX, bonePivotY, bonePivotZ,
+							elements, cubes);
 				}
 			}
 		}
 	}
 
-	private static Cube toCube(JsonObject element, Cloth cloth, Feature feature) {
+	private static Cube toCube(JsonObject element, Cloth cloth, Feature feature,
+							   String boneName, float bonePivotX,
+							   float bonePivotY, float bonePivotZ) {
 		float[] from = vector(element.getAsJsonArray("from"), 0, 0, 0);
 		float[] to = vector(element.getAsJsonArray("to"), 0, 0, 0);
 		float[] pivot = vector(element.has("origin")
@@ -495,7 +699,8 @@ public final class MechanicianArmorGeometry {
 				Math.max(from[2], to[2]),
 				pivot[0], 24.0F - pivot[1], pivot[2],
 				rotation[0], rotation[1], rotation[2],
-					Math.abs(rotation[2]) >= 89.0F, faces, cloth, feature);
+				Math.abs(rotation[2]) >= 89.0F, faces, cloth, feature,
+				boneName, bonePivotX, bonePivotY, bonePivotZ);
 	}
 
 	private static Part partFor(String name) {
@@ -534,7 +739,8 @@ public final class MechanicianArmorGeometry {
 	}
 
 	private record Geometry(Map<Integer, TextureInfo> textures,
-							Map<Part, List<Cube>> cubes) {
+							Map<Part, List<Cube>> cubes,
+							Map<String, AnimationClip> animations) {
 		private Identifier texture(int index) {
 			return info(index).texture();
 		}
@@ -563,6 +769,31 @@ public final class MechanicianArmorGeometry {
 						float rotation, int textureIndex) {
 	}
 
+	private record AnimationPose(String name, float seconds) {
+	}
+
+	private record AnimationClip(float length,
+								 Map<String, BoneClip> bones) {
+	}
+
+	private record BoneClip(List<Keyframe> position,
+							List<Keyframe> rotation,
+							List<Keyframe> scale) {
+	}
+
+	private record Keyframe(float time, float x, float y, float z) {
+	}
+
+	private record BoneTransform(
+			float positionX, float positionY, float positionZ,
+			float rotationX, float rotationY, float rotationZ,
+			float scaleX, float scaleY, float scaleZ) {
+		private static final BoneTransform IDENTITY = new BoneTransform(
+				0.0F, 0.0F, 0.0F,
+				0.0F, 0.0F, 0.0F,
+				1.0F, 1.0F, 1.0F);
+	}
+
 	private record Cloth(boolean back, float pivotX, float pivotY,
 						 float pivotZ) {
 	}
@@ -573,6 +804,8 @@ public final class MechanicianArmorGeometry {
 						float rotationX, float rotationY, float rotationZ,
 						boolean topFaceXFlip,
 						Map<String, Face> faces, Cloth cloth,
-						Feature feature) {
+						Feature feature, String boneName,
+						float bonePivotX, float bonePivotY,
+						float bonePivotZ) {
 	}
 }

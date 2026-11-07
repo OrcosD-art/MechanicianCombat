@@ -1,5 +1,8 @@
 package com.tk.gun.block;
 
+import com.tk.gun.item.BackpackPartItem;
+import com.tk.gun.item.BackpackUpgradeData;
+import com.tk.gun.item.CombatBackpackItem;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
@@ -39,15 +42,57 @@ public final class BackpackModificationTableBlockEntity extends BlockEntity {
 
 	public void dropInventory(World world, BlockPos pos) {
 		if (world instanceof ServerWorld) {
+			ItemStack backpack = inventory.getStack(BACKPACK_SLOT);
 			for (int slot = 0; slot < inventory.size(); slot++) {
 				ItemStack stack = inventory.getStack(slot);
-				if (!stack.isEmpty()) {
+				if (!stack.isEmpty()
+						&& !isInstalledPartAlreadyStored(backpack, stack, slot)) {
 					Block.dropStack(world, pos, stack);
 				}
 			}
 			inventory.clear();
 			markDirty();
 		}
+	}
+
+	private static boolean isInstalledPartAlreadyStored(ItemStack backpack,
+														ItemStack stack,
+														int inventorySlot) {
+		if (!(backpack.getItem() instanceof CombatBackpackItem)
+				|| !(stack.getItem() instanceof BackpackPartItem part)) {
+			return false;
+		}
+		int partSlot = inventorySlot - PART_SLOT_START;
+		return switch (part.kind()) {
+			case CORE -> BackpackUpgradeData.hasCore(backpack)
+					&& partSlot == storedSlot(
+							BackpackUpgradeData.coreSlot(backpack), 0);
+			case LAUNCHER, AUTO_LAUNCHER, SUMMON_ANTENNA, JUMP_THRUSTER,
+					BATTLE_BANNER ->
+					BackpackUpgradeData.hasLauncher(backpack)
+							&& partSlot == storedSlot(
+									BackpackUpgradeData.launcherSlot(backpack), 1)
+							&& part.kind() == kindFor(
+									BackpackUpgradeData.launcherType(backpack));
+			case MISSILE_BOX -> BackpackUpgradeData.hasMissileBox(backpack)
+					&& partSlot == storedSlot(
+							BackpackUpgradeData.missileBoxSlot(backpack), 3);
+		};
+	}
+
+	private static int storedSlot(int stored, int fallback) {
+		return stored >= 0 && stored < PART_SLOT_COUNT ? stored : fallback;
+	}
+
+	private static BackpackPartItem.Kind kindFor(
+			BackpackUpgradeData.LauncherType type) {
+		return switch (type) {
+			case AUTO -> BackpackPartItem.Kind.AUTO_LAUNCHER;
+			case SUMMON_ANTENNA -> BackpackPartItem.Kind.SUMMON_ANTENNA;
+			case JUMP_THRUSTER -> BackpackPartItem.Kind.JUMP_THRUSTER;
+			case BATTLE_BANNER -> BackpackPartItem.Kind.BATTLE_BANNER;
+			case PORTABLE, NONE -> BackpackPartItem.Kind.LAUNCHER;
+		};
 	}
 
 	@Override

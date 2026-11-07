@@ -5,6 +5,7 @@ import net.minecraft.util.Identifier;
 
 public enum MechanicianArmorPiece {
 	UNDERSUIT("undersuit"),
+	HELMET("helmet"),
 	CHESTPLATE("chestplate"),
 	LEGGINGS("leggings"),
 	BOOTS("boots");

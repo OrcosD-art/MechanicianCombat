@@ -36,16 +36,17 @@ import java.util.UUID;
  */
 public class TkGunClient implements ClientModInitializer {
 	/** 专注由潜行键切换，测试端绑定为 Z。 */
-	/** F 键主动装填；空弹匣不会自动装填。 */
-	public static final KeyBinding RELOAD_KEY = KeyBindingHelper.registerKeyBinding(
-			new KeyBinding("key.tkgun.reload", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F, "category.tkgun"));
-	public static final KeyBinding AMMO_UI_KEY = KeyBindingHelper.registerKeyBinding(
-			new KeyBinding("key.tkgun.ammo_ui", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_K, "category.tkgun"));
+	/** 持枪时沿用原版“交换副手”键主动装填；原版交换包由双端防护拦截。 */
 	public static final KeyBinding BACKPACK_ACTION_KEY = KeyBindingHelper.registerKeyBinding(
 			new KeyBinding("key.tkgun.backpack_action", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.tkgun"));
+	public static final KeyBinding HELMET_TOGGLE_KEY = KeyBindingHelper.registerKeyBinding(
+			new KeyBinding("key.tkgun.helmet_toggle", InputUtil.Type.KEYSYM,
+					GLFW.GLFW_KEY_G, "category.tkgun"));
 	private static boolean attackWasDown = false;
 	private static boolean meleeAttackDown = false;
 	private static boolean backpackActionDown = false;
+	private static boolean missileBoxHeld = false;
+	private static boolean helmetToggleKeyDown = false;
 	/** 左键已经连着按了多少 tick（用来区分"轻点"和"按住连发"）。 */
 	private static int attackHeldTicks = 0;
 	/** Z（或改键后的那个键）上一 tick 是否按着 —— 自己做边沿检测，不依赖原版 KeyBinding。 */
@@ -700,6 +701,7 @@ public class TkGunClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		com.tk.gun.client.rig.BowgunPlayerAnimatorPose.register();
 		JumpBackpackPlayerAnimation.register();
+		WarBannerPlayerAnimation.register();
 		if (!CombatRollHook.isInstalled()) {
 			fallbackRollKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
 					"key.tkgun.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
@@ -727,6 +729,9 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
 				com.tk.gun.TkGunServer.MOLTEN_GOLEM,
 				com.tk.gun.client.entity.MoltenGolemEntityRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.WAR_BANNER_ENTITY,
+				com.tk.gun.client.entity.WarBannerEntityRenderer::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.HEAT_VENT, HeatVentParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -765,6 +770,8 @@ public class TkGunClient implements ClientModInitializer {
 				(context, tickCounter) -> GunHud.render(context));
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> CombatBackpackHud.render(context));
+			net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+					(context, tickCounter) -> JumpEnergyHud.render(context));
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> OffhandStorageHud.render(context));
 		// 越肩视角的准星：中间 `- . -` + 枪口那个圈圈
@@ -787,6 +794,14 @@ public class TkGunClient implements ClientModInitializer {
 					com.tk.gun.net.ArmorAbilityPayload.ID,
 					(payload, context) -> context.client().execute(
 							() -> ArmorAbilityClientState.apply(payload)));
+			ClientPlayNetworking.registerGlobalReceiver(
+					com.tk.gun.net.HelmetStatePayload.ID,
+					(payload, context) -> context.client().execute(
+							() -> HelmetClientState.apply(payload)));
+			ClientPlayNetworking.registerGlobalReceiver(
+					com.tk.gun.net.WarBannerSkillPayload.ID,
+					(payload, context) -> context.client().execute(
+							() -> WarBannerSkillClientState.apply(payload)));
 			ClientPlayNetworking.registerGlobalReceiver(
 					com.tk.gun.net.SoulChainPayload.ID,
 					(payload, context) -> context.client().execute(() -> {
@@ -821,7 +836,10 @@ public class TkGunClient implements ClientModInitializer {
 								payload.phase(),
 								payload.charges(),
 								payload.remainingTicks(),
-								payload.launcherType());
+									payload.launcherType(),
+									payload.missilePhase(),
+									payload.jumpEnergyPixels(),
+									payload.jumpEnergyLocked());
 					JumpBackpackClientState.applyStatus(
 							payload.ownerEntityId(), payload.phase(),
 							payload.remainingTicks());
@@ -877,6 +895,7 @@ public class TkGunClient implements ClientModInitializer {
 		if (resourceManager != lastResourceManager) {
 			lastResourceManager = resourceManager;
 			CombatBackpackPoseAnimation.clearCache();
+		WarBannerHeldPose.clearCache();
 			CombatBackpackGeoRenderer.clearPoseDiagnostics();
 			MechanicianArmorGeometry.clearCache();
 		}
@@ -885,6 +904,9 @@ public class TkGunClient implements ClientModInitializer {
 		JumpBackpackClientState.tick(client);
 		LocatorShriekBurst.tick(client);
 		AmmoSwitchHud.tick(client);
+		if (client.world != null) {
+			WarBannerSkillClientState.tick(client.world.getTime());
+		}
 			ArmorAbilityClientState.tick();
 			if (client.world != null) {
 				SoulChainClientState.tick(client.world.getTime());
@@ -901,9 +923,13 @@ public class TkGunClient implements ClientModInitializer {
 			jumpKeyDown = false;
 			MOVES.clear();
 			backpackActionDown = false;
+				missileBoxHeld = false;
+			helmetToggleKeyDown = false;
 			CombatBackpackClientState.resetAll();
 			JumpBackpackClientState.resetAll();
 				ArmorAbilityClientState.reset();
+				HelmetClientState.reset();
+				WarBannerSkillClientState.reset();
 				SoulChainClientState.clear();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			return;
@@ -911,6 +937,17 @@ public class TkGunClient implements ClientModInitializer {
 		// Backpack X is intentionally handled before focus, roll, reload and other
 		// state-specific input so those input locks cannot consume or suppress it.
 		handleBackpackActionKey(client);
+		InputUtil.Key helmetKey = bindingKey(
+				HELMET_TOGGLE_KEY, GLFW.GLFW_KEY_G);
+		boolean helmetKeyRaw = isInputDown(client, helmetKey);
+		if (client.currentScreen == null && helmetKeyRaw
+				&& !helmetToggleKeyDown
+				&& com.tk.gun.item.MechanicianUndersuitItem
+						.isWearingOuterSet(client.player)) {
+			ClientPlayNetworking.send(
+					new com.tk.gun.net.HelmetTogglePayload());
+		}
+		helmetToggleKeyDown = helmetKeyRaw;
 		boolean holdingGunNow = TkGun.holdingGun(client.player);
 		boolean jumpDown = client.currentScreen == null
 				&& client.options.jumpKey.isPressed();
@@ -1007,7 +1044,8 @@ public class TkGunClient implements ClientModInitializer {
 			}
 		}
 		// F 键主动装填。
-		InputUtil.Key reloadKey = bindingKey(RELOAD_KEY, GLFW.GLFW_KEY_F);
+		InputUtil.Key reloadKey = bindingKey(
+				client.options.swapHandsKey, GLFW.GLFW_KEY_F);
 		int reloadKeyCode = reloadKey.getCode();
 		boolean reloadRaw = isInputDown(client, reloadKey);
 		boolean reloadDown = client.currentScreen == null && reloadRaw;
@@ -1032,7 +1070,10 @@ public class TkGunClient implements ClientModInitializer {
 		// 记录物理按下状态（而不是“界面关闭时的按下”），
 		// 这样在界面里按住/松开按键后关闭界面，不会又补触发一次。
 		reloadKeyDown = reloadRaw;
-		InputUtil.Key ammoUiKey = bindingKey(AMMO_UI_KEY, GLFW.GLFW_KEY_K);
+		// Ammo ring reuses vanilla Pick Block; its vanilla action is cancelled
+		// while a gun is held by PickItemAmmoRingMixin.
+		InputUtil.Key ammoUiKey = bindingKey(
+				client.options.pickItemKey, GLFW.GLFW_KEY_K);
 		int ammoUiKeyCode = ammoUiKey.getCode();
 		boolean ammoUiRaw = isInputDown(client, ammoUiKey);
 		boolean ammoUiDown = client.currentScreen == null && ammoUiRaw;
@@ -1184,11 +1225,22 @@ public class TkGunClient implements ClientModInitializer {
 	public static void handleBackpackActionKey(MinecraftClient client) {
 		InputUtil.Key backpackActionKey = bindingKey(BACKPACK_ACTION_KEY, GLFW.GLFW_KEY_X);
 		boolean backpackActionRaw = isInputDown(client, backpackActionKey);
-		if (backpackActionRaw && !backpackActionDown && client.currentScreen == null
-				&& client.player != null
+		if (client.currentScreen == null && client.player != null
 				&& com.tk.gun.item.BackpackUpgradeData.canUseLauncher(
 						com.tk.gun.item.CombatBackpackItem.equippedStack(client.player))) {
-			CombatBackpackClientState.trigger(client.player);
+			boolean missileBox = com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(
+					com.tk.gun.item.CombatBackpackItem.equippedStack(client.player));
+			if (missileBox && backpackActionRaw && !backpackActionDown) {
+				missileBoxHeld = CombatBackpackClientState
+						.triggerMissileBoxStart(client.player);
+			} else if (missileBox && backpackActionRaw && missileBoxHeld) {
+				CombatBackpackClientState.sendMissileBoxView(client.player);
+			} else if (missileBox && !backpackActionRaw && missileBoxHeld) {
+				CombatBackpackClientState.releaseMissileBox(client.player);
+				missileBoxHeld = false;
+			} else if (backpackActionRaw && !backpackActionDown && !missileBox) {
+				CombatBackpackClientState.trigger(client.player);
+			}
 		}
 		backpackActionDown = backpackActionRaw;
 	}

@@ -23,7 +23,9 @@ public abstract class OffhandSwapGuardMixin {
 			return;
 		}
 		var mainHand = field_14140.getMainHandStack();
-		if (TkGun.isGun(mainHand)
+		if (BackpackLauncherRules.isVirtualBattleBanner(
+				field_14140.getOffHandStack())
+				|| TkGun.isGun(mainHand)
 				|| (BackpackLauncherRules.hasActiveLauncher(field_14140)
 				&& !BackpackLauncherRules.isLaunchable(mainHand))) {
 			ci.cancel();

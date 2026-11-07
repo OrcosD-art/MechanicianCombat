@@ -5,11 +5,13 @@ import java.util.Map;
 
 public final class CombatBackpackAnimation {
 	public enum Phase {
-		AIM, CD, READY, MAINTENANCE, READY_TO_FLY, FLYING, CLOSE
+		AIM, CD, READY, MAINTENANCE, READY_TO_FLY, FLYING, CLOSE,
+		MISSILE_AIM, MISSILE_CD
 	}
 
 	private static final int PREVIEW_RENDER_ID = -1;
 	private static final Map<Integer, Phase> PHASES = new HashMap<>();
+	private static final Map<Integer, Phase> MISSILE_PHASES = new HashMap<>();
 	private static int renderingPlayer = -1;
 	private static boolean manualJumpRendering;
 
@@ -23,10 +25,12 @@ public final class CombatBackpackAnimation {
 
 	public static void clear(int playerId) {
 		PHASES.remove(playerId);
+		MISSILE_PHASES.remove(playerId);
 	}
 
 	public static void clearAll() {
 		PHASES.clear();
+		MISSILE_PHASES.clear();
 		renderingPlayer = -1;
 		manualJumpRendering = false;
 	}
@@ -41,6 +45,18 @@ public final class CombatBackpackAnimation {
 
 	public static Phase renderingPhase() {
 		return phase(renderingPlayer);
+	}
+
+	public static void setMissilePhase(int playerId, Phase phase) {
+		if (phase == Phase.MISSILE_AIM || phase == Phase.MISSILE_CD) {
+			MISSILE_PHASES.put(playerId, phase);
+		} else {
+			MISSILE_PHASES.remove(playerId);
+		}
+	}
+
+	public static Phase missilePhase(int playerId) {
+		return MISSILE_PHASES.getOrDefault(playerId, Phase.READY);
 	}
 
 	public static void clearRenderingPlayer() {

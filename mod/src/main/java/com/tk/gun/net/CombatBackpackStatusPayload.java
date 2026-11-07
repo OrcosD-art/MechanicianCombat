@@ -8,7 +8,10 @@ import net.minecraft.network.packet.CustomPayload;
 /** Authoritative backpack phase, charge count and timed-window state. */
 public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 										  int phase, int charges,
-										  int remainingTicks, int launcherType)
+										  int remainingTicks, int launcherType,
+										  int missilePhase,
+										  int jumpEnergyPixels,
+										  boolean jumpEnergyLocked)
 		implements CustomPayload {
 	public static final int PHASE_READY = 0;
 	public static final int PHASE_MARKED = 1;
@@ -24,6 +27,9 @@ public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 	public static final int PHASE_FLYING = 11;
 	public static final int PHASE_FALLING = 12;
 	public static final int PHASE_CLOSE = 13;
+	public static final int MISSILE_NONE = 0;
+	public static final int MISSILE_AIM = 1;
+	public static final int MISSILE_CD = 2;
 
 	public static final CustomPayload.Id<CombatBackpackStatusPayload> ID =
 			new CustomPayload.Id<>(TkGun.id("backpack_status"));
@@ -37,11 +43,15 @@ public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 						buf.writeByte(value.charges());
 						buf.writeVarInt(value.remainingTicks());
 						buf.writeByte(value.launcherType());
+						buf.writeByte(value.missilePhase());
+						buf.writeVarInt(Math.max(0, value.jumpEnergyPixels()));
+						buf.writeBoolean(value.jumpEnergyLocked());
 					},
 					buf -> new CombatBackpackStatusPayload(
 							buf.readVarInt(), buf.readVarInt(), buf.readUnsignedByte(),
 							buf.readUnsignedByte(), buf.readVarInt(),
-							buf.readUnsignedByte()));
+							buf.readUnsignedByte(), buf.readUnsignedByte(),
+							buf.readVarInt(), buf.readBoolean()));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

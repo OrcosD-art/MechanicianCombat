@@ -10,6 +10,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.item.ItemStack;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.Vec3d;
 
@@ -28,6 +29,9 @@ public final class CombatBackpackClientState {
 		int firingRequestedAt;
 		int targetEntityId = -1;
 		int phase = CombatBackpackStatusPayload.PHASE_READY;
+		int missilePhase = CombatBackpackStatusPayload.MISSILE_NONE;
+		int jumpEnergyPixels = com.tk.gun.TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		boolean jumpEnergyLocked;
 		int charges;
 		int remainingTicks;
 		boolean aimLatched;
@@ -35,6 +39,10 @@ public final class CombatBackpackClientState {
 		CombatBackpackAnimation.Phase animationPhase = CombatBackpackAnimation.Phase.READY;
 		boolean animationInitialized;
 		int animationStartedAt;
+		CombatBackpackAnimation.Phase missileAnimationPhase =
+				CombatBackpackAnimation.Phase.READY;
+		boolean missileAnimationInitialized;
+		int missileAnimationStartedAt;
 		int openSoundAt = -1;
 		int closeSoundAt = -1;
 	}
@@ -54,6 +62,10 @@ public final class CombatBackpackClientState {
 				|| launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
 			return;
 		}
+		if (launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			sendAction(player);
+			return;
+		}
 		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_COOLDOWN
 				|| entry.firingRequested) {
@@ -64,6 +76,32 @@ public final class CombatBackpackClientState {
 			entry.firingRequestedAt = ticks;
 		}
 		sendAction(player);
+	}
+
+	public static boolean triggerMissileBoxStart(ClientPlayerEntity player) {
+		ItemStack backpack = CombatBackpackItem.equippedStack(player);
+		if (!BackpackUpgradeData.canUseMissileBox(backpack)
+				|| !player.getOffHandStack().isOf(net.minecraft.item.Items.FIREWORK_ROCKET)) {
+			return false;
+		}
+		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
+		if (entry.missilePhase == CombatBackpackStatusPayload.MISSILE_AIM
+				|| entry.missilePhase == CombatBackpackStatusPayload.MISSILE_CD) {
+			return false;
+		}
+		sendMissileBoxAction(player, false);
+		entry.missilePhase = CombatBackpackStatusPayload.MISSILE_AIM;
+		entry.launcherType = BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+		updateMissileAnimationPhase(player.getId(), entry);
+		return true;
+	}
+
+	public static void releaseMissileBox(ClientPlayerEntity player) {
+		sendMissileBoxAction(player, true);
+	}
+
+	public static void sendMissileBoxView(ClientPlayerEntity player) {
+		sendMissileBoxAction(player, false);
 	}
 
 	public static void tick(MinecraftClient client) {
@@ -79,6 +117,7 @@ public final class CombatBackpackClientState {
 				state.targetEntityId = -1;
 			}
 			updateAnimationPhase(pair.getKey(), state);
+			updateMissileAnimationPhase(pair.getKey(), state);
 			boolean suppressMechanismSounds = client.player != null
 					&& TkGun.holdingGun(client.player)
 					&& state.launcherType
@@ -142,6 +181,42 @@ public final class CombatBackpackClientState {
 				halfHorizontalTan, halfVerticalTan));
 	}
 
+	private static void sendMissileBoxAction(ClientPlayerEntity player,
+											 boolean release) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		Camera camera = client.gameRenderer.getCamera();
+		Vec3d cameraPos = camera.getPos();
+		double verticalFov = Math.toRadians(
+				Math.max(1.0D, Math.min(170.0D, GunCamera.renderedFovDegrees())));
+		double halfVerticalTan = Math.tan(verticalFov * 0.5D);
+		int framebufferWidth = Math.max(1, client.getWindow().getFramebufferWidth());
+		int framebufferHeight = Math.max(1, client.getWindow().getFramebufferHeight());
+		double halfHorizontalTan = halfVerticalTan
+				* framebufferWidth / (double) framebufferHeight;
+
+		String[] names = {
+				"port1_right", "port2_right", "port3_right",
+				"port1_left", "port2_left", "port3_left"
+		};
+		java.util.Map<String, Vec3d> positions =
+				CombatBackpackGeoRenderer.missilePortPositions(player.getId());
+		double[] ports = new double[18];
+		for (int index = 0; index < names.length; index++) {
+			Vec3d position = positions.get(names[index]);
+			if (position == null) {
+				position = player.getBoundingBox().getCenter();
+			}
+			ports[index * 3] = position.x;
+			ports[index * 3 + 1] = position.y;
+			ports[index * 3 + 2] = position.z;
+		}
+		ClientPlayNetworking.send(new com.tk.gun.net.MissileBoxPayload(
+				release,
+				cameraPos.x, cameraPos.y, cameraPos.z,
+				camera.getYaw(), camera.getPitch(),
+				halfHorizontalTan, halfVerticalTan, ports));
+	}
+
 	private static void sendView(ClientPlayerEntity player) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		Camera camera = client.gameRenderer.getCamera();
@@ -152,16 +227,25 @@ public final class CombatBackpackClientState {
 	}
 
 	public static void applyStatus(int ownerEntityId, int targetEntityId, int phase,
-								   int charges, int remainingTicks, int launcherType) {
+								   int charges, int remainingTicks, int launcherType,
+								   int missilePhase, int jumpEnergyPixels,
+								   boolean jumpEnergyLocked) {
 		Entry entry = ENTRIES.computeIfAbsent(ownerEntityId, ignored -> new Entry());
 		entry.targetEntityId = Math.max(-1, targetEntityId);
 		entry.phase = Math.max(CombatBackpackStatusPayload.PHASE_READY,
 				Math.min(CombatBackpackStatusPayload.PHASE_CLOSE, phase));
+		entry.missilePhase = Math.max(CombatBackpackStatusPayload.MISSILE_NONE,
+				Math.min(CombatBackpackStatusPayload.MISSILE_CD, missilePhase));
+		entry.jumpEnergyPixels = Math.max(0, Math.min(
+				com.tk.gun.TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS,
+				jumpEnergyPixels));
+		entry.jumpEnergyLocked = jumpEnergyLocked;
 		entry.launcherType = switch (launcherType) {
 			case 1 -> BackpackUpgradeData.LauncherType.PORTABLE;
 			case 2 -> BackpackUpgradeData.LauncherType.AUTO;
 			case 3 -> BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
 			case 4 -> BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+			case 5 -> BackpackUpgradeData.LauncherType.BATTLE_BANNER;
 			default -> BackpackUpgradeData.LauncherType.NONE;
 		};
 		entry.charges = Math.max(0, Math.min(MAX_CHARGES, charges));
@@ -175,6 +259,7 @@ public final class CombatBackpackClientState {
 		JumpBackpackClientState.applyStatus(ownerEntityId, entry.phase,
 				entry.remainingTicks);
 		updateAnimationPhase(ownerEntityId, entry);
+		updateMissileAnimationPhase(ownerEntityId, entry);
 	}
 
 	private static boolean hasActiveTarget(ClientPlayerEntity player, Entry entry) {
@@ -253,6 +338,23 @@ public final class CombatBackpackClientState {
 		}
 	}
 
+	private static void updateMissileAnimationPhase(int playerId, Entry entry) {
+		CombatBackpackAnimation.Phase next =
+				entry.missilePhase == CombatBackpackStatusPayload.MISSILE_AIM
+						? CombatBackpackAnimation.Phase.MISSILE_AIM
+						: entry.missilePhase == CombatBackpackStatusPayload.MISSILE_CD
+						? CombatBackpackAnimation.Phase.MISSILE_CD
+						: CombatBackpackAnimation.Phase.READY;
+		if (entry.missileAnimationInitialized
+				&& next == entry.missileAnimationPhase) {
+			return;
+		}
+		entry.missileAnimationInitialized = true;
+		entry.missileAnimationPhase = next;
+		entry.missileAnimationStartedAt = ticks;
+		CombatBackpackAnimation.setMissilePhase(playerId, next);
+	}
+
 	private static int localPlayerId() {
 		MinecraftClient client = MinecraftClient.getInstance();
 		return client.player == null ? -1 : client.player.getId();
@@ -288,6 +390,31 @@ public final class CombatBackpackClientState {
 		Entry entry = ENTRIES.get(playerId);
 		return entry == null ? 0.0D
 				: Math.max(0, ticks - entry.animationStartedAt) + tickDelta;
+	}
+
+	public static int missilePhase(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? CombatBackpackStatusPayload.MISSILE_NONE
+				: entry.missilePhase;
+	}
+
+	public static int jumpEnergyPixels(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? com.tk.gun.TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS
+				: entry.jumpEnergyPixels;
+	}
+
+	public static boolean jumpEnergyLocked(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry != null && entry.jumpEnergyLocked;
+	}
+
+	public static double missileAnimationAgeTicks(int playerId, float tickDelta) {
+		Entry entry = ENTRIES.get(playerId);
+		if (entry == null) {
+			return 0.0D;
+		}
+		return Math.max(0, ticks - entry.missileAnimationStartedAt) + tickDelta;
 	}
 
 	public static int targetEntityId(int ownerEntityId) {
@@ -338,6 +465,9 @@ public final class CombatBackpackClientState {
 					|| entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_DORMANT
 					? CombatBackpackAnimation.Phase.CD
 					: CombatBackpackAnimation.Phase.READY;
+		}
+		if (entry.launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			return CombatBackpackAnimation.Phase.CD;
 		}
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_READY && entry.aimLatched) {
 			return CombatBackpackAnimation.Phase.AIM;

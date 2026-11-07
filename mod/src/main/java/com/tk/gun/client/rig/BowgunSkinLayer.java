@@ -1,6 +1,7 @@
 package com.tk.gun.client.rig;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.client.HelmetClientState;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
@@ -67,7 +68,7 @@ public class BowgunSkinLayer extends GeoRenderLayer<BowgunRig> {
 			return;
 		}
 		// 头部已经戴了装备（默认是原版头盔）时不要再叠第二层皮肤，否则头发/帽子会从头盔里穿出来。
-		if ("head".equals(bone.getName()) && hasHeadEquipment()) {
+		if ("head".equals(bone.getName()) && shouldHideHeadLayer()) {
 			return;
 		}
 		float[] spec = LAYER2.get(bone.getName());
@@ -86,12 +87,15 @@ public class BowgunSkinLayer extends GeoRenderLayer<BowgunRig> {
 		}
 	}
 
-	private boolean hasHeadEquipment() {
+	private boolean shouldHideHeadLayer() {
 		if (!(this.renderer instanceof BowgunRigRenderer rig)) {
 			return false;
 		}
-		return rig.getCurrentEntity() instanceof LivingEntity living
-				&& !living.getEquippedStack(EquipmentSlot.HEAD).isEmpty();
+		if (!(rig.getCurrentEntity() instanceof LivingEntity living)) {
+			return false;
+		}
+		return !living.getEquippedStack(EquipmentSlot.HEAD).isEmpty()
+				|| HelmetClientState.shouldHideHair(living);
 	}
 
 	/** 复制一份方块：UV 整体平移 (du,dv)，顶点沿面法线外扩 {@code inflate}（格）。 */

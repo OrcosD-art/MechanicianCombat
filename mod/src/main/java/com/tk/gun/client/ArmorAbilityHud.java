@@ -59,8 +59,17 @@ public final class ArmorAbilityHud {
 		if (cooldown > 0) {
 			text += "  冷却 " + seconds(cooldown) + "秒";
 			if (ArmorAbilityClientState.shieldCharges() == 0) {
-				text += "  击杀 " + ArmorAbilityClientState.shieldRechargeKills()
-						+ "/" + com.tk.gun.ArmorAbilities.SHIELD_RECHARGE_KILLS;
+				if (ArmorAbilityClientState.shieldRechargeWindowTicks() > 0) {
+					text += "  重充能 "
+							+ ArmorAbilityClientState.shieldRechargeKills()
+							+ "/" + com.tk.gun.ArmorAbilities.SHIELD_RECHARGE_KILLS
+							+ " 窗口 "
+							+ seconds(ArmorAbilityClientState
+									.shieldRechargeWindowTicks())
+							+ "秒";
+				} else {
+					text += "  击杀恢复失败";
+				}
 			}
 		}
 		return text;

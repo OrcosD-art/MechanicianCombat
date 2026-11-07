@@ -1,6 +1,8 @@
 package com.tk.gun.item;
 
 import com.tk.gun.TkGunServer;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -8,6 +10,9 @@ import net.minecraft.item.TridentItem;
 
 /** Shared server/client rules for the portable launcher's occupied offhand. */
 public final class BackpackLauncherRules {
+	private static final String VIRTUAL_BATTLE_BANNER =
+			"tkgun_virtual_war_banner";
+
 	public static boolean hasActiveLauncher(LivingEntity entity) {
 		if (entity == null) {
 			return false;
@@ -16,7 +21,34 @@ public final class BackpackLauncherRules {
 				CombatBackpackItem.equippedStack(entity));
 		return type == BackpackUpgradeData.LauncherType.PORTABLE
 				|| type == BackpackUpgradeData.LauncherType.AUTO
-				|| type == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+				|| type == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA
+				|| type == BackpackUpgradeData.LauncherType.BATTLE_BANNER
+				|| (type == BackpackUpgradeData.LauncherType.JUMP_THRUSTER
+				&& BackpackUpgradeData.canUseMissileBox(
+						CombatBackpackItem.equippedStack(entity)));
+	}
+
+	public static boolean isBattleBannerInstalled(LivingEntity entity) {
+		return entity != null
+				&& BackpackUpgradeData.launcherType(
+						CombatBackpackItem.equippedStack(entity))
+						== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
+	}
+
+	public static ItemStack createVirtualBattleBanner() {
+		ItemStack stack = new ItemStack(TkGunServer.WAR_BANNER);
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, stack,
+				nbt -> nbt.putBoolean(VIRTUAL_BATTLE_BANNER, true));
+		return stack;
+	}
+
+	public static boolean isVirtualBattleBanner(ItemStack stack) {
+		return stack != null && !stack.isEmpty()
+				&& stack.isOf(TkGunServer.WAR_BANNER)
+				&& stack.getOrDefault(
+						DataComponentTypes.CUSTOM_DATA,
+						NbtComponent.DEFAULT)
+				.copyNbt().getBoolean(VIRTUAL_BATTLE_BANNER);
 	}
 
 	public static boolean isLaunchable(ItemStack stack) {

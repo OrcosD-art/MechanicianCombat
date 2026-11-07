@@ -9,6 +9,7 @@ public final class ArmorAbilityClientState {
 	private static boolean soulChainInstalled;
 	private static int shieldCharges;
 	private static int shieldRechargeKills;
+	private static int shieldRechargeWindowTicks;
 	private static int shieldCooldownTicks;
 	private static int totemCooldownTicks;
 
@@ -18,12 +19,14 @@ public final class ArmorAbilityClientState {
 		soulChainInstalled = payload.soulChainInstalled();
 		shieldCharges = payload.shieldCharges();
 		shieldRechargeKills = payload.shieldRechargeKills();
+		shieldRechargeWindowTicks = payload.shieldRechargeWindowTicks();
 		shieldCooldownTicks = payload.shieldCooldownTicks();
 		totemCooldownTicks = payload.totemCooldownTicks();
 	}
 
 	public static void tick() {
 		shieldCooldownTicks = Math.max(0, shieldCooldownTicks - 1);
+		shieldRechargeWindowTicks = Math.max(0, shieldRechargeWindowTicks - 1);
 		totemCooldownTicks = Math.max(0, totemCooldownTicks - 1);
 	}
 
@@ -33,6 +36,7 @@ public final class ArmorAbilityClientState {
 		soulChainInstalled = false;
 		shieldCharges = 0;
 		shieldRechargeKills = 0;
+		shieldRechargeWindowTicks = 0;
 		shieldCooldownTicks = 0;
 		totemCooldownTicks = 0;
 	}
@@ -59,6 +63,10 @@ public final class ArmorAbilityClientState {
 
 	public static int shieldRechargeKills() {
 		return shieldRechargeKills;
+	}
+
+	public static int shieldRechargeWindowTicks() {
+		return shieldRechargeWindowTicks;
 	}
 
 	public static int totemCooldownTicks() {

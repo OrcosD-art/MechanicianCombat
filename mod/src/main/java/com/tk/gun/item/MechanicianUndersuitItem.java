@@ -54,6 +54,20 @@ public final class MechanicianUndersuitItem extends AccessoryItem implements Geo
 	}
 
 	/**
+	 * Client-safe visual condition. The server removes all outer armor whenever
+	 * the undersuit is absent, so the three armor slots are authoritative during
+	 * rendering without requiring an Accessories capability lookup.
+	 */
+	public static boolean isWearingOuterSet(LivingEntity entity) {
+		return isPiece(entity.getEquippedStack(EquipmentSlot.CHEST),
+					MechanicianArmorPiece.CHESTPLATE)
+				&& isPiece(entity.getEquippedStack(EquipmentSlot.LEGS),
+					MechanicianArmorPiece.LEGGINGS)
+				&& isPiece(entity.getEquippedStack(EquipmentSlot.FEET),
+					MechanicianArmorPiece.BOOTS);
+	}
+
+	/**
 	 * The core backpack supplies the dodge actuator while the complete suit
 	 * protects the wearer, so this remains available outside gun states.
 	 */

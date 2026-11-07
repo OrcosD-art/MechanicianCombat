@@ -52,6 +52,11 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	private static final java.util.Map<Integer, Long> REAR_SAMPLE_TICKS = new java.util.HashMap<>();
 	private static final java.util.Map<Integer, Vec3d> SUMMON_LOCATORS = new java.util.HashMap<>();
 	private static final java.util.Map<Integer, Long> SUMMON_LOCATOR_TICKS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer,
+			java.util.Map<String, Vec3d>> MISSILE_PORT_POSITIONS =
+			new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Long> MISSILE_PORT_TICKS =
+			new java.util.HashMap<>();
 	private static final java.util.Map<Integer, Vec3d> CANONICAL_FRONT_OFFSETS =
 			new java.util.HashMap<>();
 	private static final java.util.Map<Integer, AimFilter> AIM_FILTERS =
@@ -66,6 +71,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	private boolean allowAutoAimCubeRender;
 	private boolean flamePass;
 	private boolean attachedCoreInstalled;
+	private boolean attachedMissileBox;
 	private BackpackUpgradeData.LauncherType attachedLauncherType =
 			BackpackUpgradeData.LauncherType.NONE;
 	private boolean attachedJumpThruster;
@@ -124,6 +130,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		this.attachedJumpThruster = this.attachedLauncherType
 				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
 		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
+		this.attachedMissileBox = BackpackUpgradeData.canUseMissileBox(stack);
 		CombatBackpackAnimation.beginModificationPreview();
 		try {
 			// method_3166 is GeckoLib's item-render entrypoint in this mapping set.
@@ -134,6 +141,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
 			this.attachedJumpThruster = false;
 			this.attachedCoreInstalled = false;
+			this.attachedMissileBox = false;
 		}
 	}
 
@@ -157,6 +165,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		this.attachedJumpThruster = this.attachedLauncherType
 				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
 		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
+		this.attachedMissileBox = BackpackUpgradeData.canUseMissileBox(stack);
 		CombatBackpackAnimation.setManualJumpRendering(attachedJumpThruster);
 		this.renderPerspective = ModelTransformationMode.NONE;
 		try {
@@ -181,6 +190,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
 			this.attachedJumpThruster = false;
 			this.attachedCoreInstalled = false;
+			this.attachedMissileBox = false;
 			this.flamePass = false;
 			doPostRenderCleanup();
 		}
@@ -246,6 +256,19 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			return null;
 		}
 		return SUMMON_LOCATORS.get(playerId);
+	}
+
+	public static java.util.Map<String, Vec3d> missilePortPositions(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.world == null) {
+			return java.util.Map.of();
+		}
+		Long tick = MISSILE_PORT_TICKS.get(playerId);
+		if (tick == null || Math.abs(client.world.getTime() - tick) > 3L) {
+			return java.util.Map.of();
+		}
+		return java.util.Map.copyOf(MISSILE_PORT_POSITIONS.getOrDefault(
+				playerId, java.util.Map.of()));
 	}
 
 	@Override
@@ -337,11 +360,15 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
 		boolean jumpThruster = attachedJumpThruster;
-		if (jumpThruster && currentEntity != null) {
+		if ((jumpThruster || attachedMissileBox) && currentEntity != null) {
 			double seconds = CombatBackpackClientState.animationAgeTicks(
 					currentEntity.getId(), tickDelta) / 20.0D;
 			CombatBackpackPoseAnimation.apply(bone,
 					CombatBackpackAnimation.phase(currentEntity.getId()), seconds);
+			CombatBackpackPoseAnimation.applyMissileOverlay(bone,
+					CombatBackpackAnimation.missilePhase(currentEntity.getId()),
+					CombatBackpackClientState.missileAnimationAgeTicks(
+							currentEntity.getId(), tickDelta) / 20.0D);
 		}
 		Quaternionf aimRotation = null;
 		if (currentEntity != null && launcherInstalled && !summonLauncher
@@ -423,6 +450,10 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
 		boolean jumpThruster = attachedJumpThruster;
+		if (!attachedMissileBox && (bone.getName().startsWith("missile_")
+				|| bone.getName().startsWith("port"))) {
+			return;
+		}
 		if (("C3".equals(bone.getName()) || "auto_C3".equals(bone.getName()))
 				&& suppressC3Cubes) {
 			return;
@@ -555,7 +586,9 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 	private void recordLocator(MatrixStack matrices, GeoBone bone, LivingEntity entity,
 			boolean autoLauncher) {
 		String boneName = bone.getName();
-		if (!boneName.equals("front") && !boneName.equals("rear")) {
+		boolean missilePort = boneName.matches("port[123]_(left|right)");
+		if (!boneName.equals("front") && !boneName.equals("rear")
+				&& !missilePort) {
 			return;
 		}
 		matrices.push();
@@ -582,10 +615,15 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 					== CombatBackpackAnimation.Phase.READY) {
 				CANONICAL_FRONT_OFFSETS.put(entity.getId(), local);
 			}
-		} else {
+		} else if ("rear".equals(boneName)) {
 			REAR_POSITIONS.put(entity.getId(), worldPos);
 			REAR_LOCAL_OFFSETS.put(entity.getId(), local);
 			REAR_SAMPLE_TICKS.put(entity.getId(), entity.getWorld().getTime());
+		} else {
+			MISSILE_PORT_POSITIONS.computeIfAbsent(
+					entity.getId(), ignored -> new java.util.HashMap<>())
+					.put(boneName, worldPos);
+			MISSILE_PORT_TICKS.put(entity.getId(), entity.getWorld().getTime());
 		}
 	}
 
