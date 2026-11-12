@@ -20,7 +20,7 @@ public final class CombatRollHook {
 			animationTicks("roll_to_idle", 3) + ANIMATION_END_HOLD_TICKS;
 
 	private static int animationTicks(String animation, int fallback) {
-		String path = "assets/tkgun/animations/entity/bowgun_rig.animation.json";
+		String path = "assets/mechaniciancombat/animations/entity/bowgun_rig.animation.json";
 		try (java.io.InputStream in = CombatRollHook.class.getClassLoader().getResourceAsStream(path)) {
 			if (in == null) {
 				return fallback;
@@ -32,7 +32,7 @@ public final class CombatRollHook {
 					.get("animation_length").getAsDouble();
 			return Math.max(1, (int) Math.ceil(length * 20.0D));
 		} catch (Throwable throwable) {
-			TkGun.LOGGER.warn("[tkgun] 读取 `{}` 动画长度失败，状态退回 {} tick：{}",
+			TkGun.LOGGER.warn("[mechaniciancombat] 读取 `{}` 动画长度失败，状态退回 {} tick：{}",
 					animation, fallback, throwable.toString());
 			return fallback;
 		}

@@ -19,8 +19,8 @@ public final class FortressDestroyerGun {
 			TkGun.id("textures/entity/bowgun_gun.png"),
 			64,
 			64,
-			"item.tkgun.bowgun",
-			"tooltip.tkgun.bowgun.description"
+			"item.mechaniciancombat.bowgun",
+			"tooltip.mechaniciancombat.bowgun.description"
 	);
 
 	private FortressDestroyerGun() {

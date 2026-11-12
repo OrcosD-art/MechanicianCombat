@@ -121,6 +121,9 @@ public final class GunClientState {
 		TkGun.State previousState = e.state;
 		boolean newShotFrame = e.shotSeq != payload.shotSeq();
 		boolean sameFrame = e.state == newState && !newShotFrame;
+		if (newState == TkGun.State.MELEE && (!sameFrame || newShotFrame)) {
+			SkillSparkParticle.clearForEntity(payload.playerId());
+		}
 		if (newState == TkGun.State.MELEE) {
 			e.meleeGraceUntil = 0;
 		} else if (previousState == TkGun.State.MELEE) {
@@ -480,7 +483,7 @@ public final class GunClientState {
 			case OVERHEAT:
 				return "Overheat";
 			case INSPECT:
-				return "Focus_over_shooting";        // 过载连射那段（只在 /tkgun 调试里看到）
+				return "Focus_over_shooting";        // 过载连射那段（只在 /mechaniciancombat 调试里看到）
 			case SLIDE:
 				return "sliding";
 			case SLIDE_READY:

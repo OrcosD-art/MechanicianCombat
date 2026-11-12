@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "net.combat_roll.internals.RollManager")
 public abstract class CombatRollInputGuardMixin {
 	@Inject(method = "isRollAvailable", at = @At("HEAD"), cancellable = true)
-	private void tkgun$guardDodgeSequence(PlayerEntity player,
+	private void mechaniciancombat$guardDodgeSequence(PlayerEntity player,
 										  CallbackInfoReturnable<Boolean> cir) {
 		if (player instanceof ClientPlayerEntity && TkGun.holdingGun(player)
 				&& GunClientState.combatRollSuppressed(player.getId())) {

@@ -15,12 +15,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientCommonNetworkHandler.class)
 public abstract class OffhandSwapGuardClientMixin {
 	@Inject(method = "method_52787", at = @At("HEAD"), cancellable = true)
-	private void tkgun$rejectGunOffhandSwap(Packet<?> packet, CallbackInfo ci) {
+	private void mechaniciancombat$rejectGunOffhandSwap(Packet<?> packet, CallbackInfo ci) {
 		if (packet instanceof PlayerActionC2SPacket action
 				&& action.getAction() == PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
 			MinecraftClient client = MinecraftClient.getInstance();
 			if (client.player != null
-					&& (BackpackLauncherRules.isVirtualBattleBanner(
+					&& (BackpackLauncherRules.isBattleBannerInstalled(
+							client.player)
+					|| BackpackLauncherRules.isVirtualBattleBanner(
 							client.player.getOffHandStack())
 					|| TkGun.isGun(client.player.getMainHandStack())
 					|| (BackpackLauncherRules.hasActiveLauncher(client.player)

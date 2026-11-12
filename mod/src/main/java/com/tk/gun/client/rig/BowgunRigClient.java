@@ -39,7 +39,7 @@ public final class BowgunRigClient {
 		}
 		if (renderer == null) {
 			renderer = new BowgunRigRenderer(context);
-			TkGun.LOGGER.info("[tkgun] rig 渲染器就绪（GeckoLib: geo=tkgun:bowgun_rig 动画=animations/entity/bowgun_rig.animation.json）");
+			TkGun.LOGGER.info("[mechaniciancombat] rig 渲染器就绪（GeckoLib: geo=mechaniciancombat:bowgun_rig 动画=animations/entity/bowgun_rig.animation.json）");
 		}
 		// 2026-10-17 用户："撤销关于水平角度的修正" —— 渲染矩阵补角 / 渲染前 setYaw 那两套都删掉。
 		// 现在身体方向只由两处决定：① `GunCamera#tickEnd` 那个"追枪口→准星点"的 tick 环（原样保留）；

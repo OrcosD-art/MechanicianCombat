@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(Entity.class)
 public abstract class GunCrouchPoseGuardMixin {
 	@Inject(method = "method_18276()Z", at = @At("HEAD"), cancellable = true)
-	private void tkgun$suppressVanillaCrouch(CallbackInfoReturnable<Boolean> cir) {
+	private void mechaniciancombat$suppressVanillaCrouch(CallbackInfoReturnable<Boolean> cir) {
 		Entity self = (Entity) (Object) this;
 		if (self instanceof PlayerEntity player && TkGun.holdingGun(player)) {
 			cir.setReturnValue(false);
@@ -21,7 +21,7 @@ public abstract class GunCrouchPoseGuardMixin {
 	}
 
 	@Inject(method = "method_5660(Z)V", at = @At("HEAD"), cancellable = true)
-	private void tkgun$suppressCrouchFlag(boolean sneaking, CallbackInfo ci) {
+	private void mechaniciancombat$suppressCrouchFlag(boolean sneaking, CallbackInfo ci) {
 		Entity self = (Entity) (Object) this;
 		if (sneaking && self instanceof PlayerEntity player && TkGun.holdingGun(player)) {
 			ci.cancel();

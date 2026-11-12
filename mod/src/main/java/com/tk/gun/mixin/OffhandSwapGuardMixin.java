@@ -18,12 +18,13 @@ public abstract class OffhandSwapGuardMixin {
 	public ServerPlayerEntity field_14140;
 
 	@Inject(method = "method_12066", at = @At("HEAD"), cancellable = true)
-	private void tkgun$rejectGunOffhandSwap(PlayerActionC2SPacket packet, CallbackInfo ci) {
+	private void mechaniciancombat$rejectGunOffhandSwap(PlayerActionC2SPacket packet, CallbackInfo ci) {
 		if (packet.getAction() != PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
 			return;
 		}
 		var mainHand = field_14140.getMainHandStack();
-		if (BackpackLauncherRules.isVirtualBattleBanner(
+		if (BackpackLauncherRules.isBattleBannerInstalled(field_14140)
+				|| BackpackLauncherRules.isVirtualBattleBanner(
 				field_14140.getOffHandStack())
 				|| TkGun.isGun(mainHand)
 				|| (BackpackLauncherRules.hasActiveLauncher(field_14140)

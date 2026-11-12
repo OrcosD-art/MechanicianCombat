@@ -51,11 +51,11 @@ import java.util.List;
 	 * {@code RenderLayer.getArmorCutoutNoCull(texture)}。
  * 染色、多材质层、盔甲镶饰和附魔光效都按原版 ArmorFeatureRenderer 的数据路径处理。
  *
- * <p>可关闭：启动参数 {@code -Dtkgun.armorlayer=false}。
+ * <p>可关闭：启动参数 {@code -Dmechaniciancombat.armorlayer=false}。
  */
 public final class BowgunArmorLayer extends GeoRenderLayer<BowgunRig> {
 	private static final boolean ENABLED =
-			!"false".equalsIgnoreCase(System.getProperty("tkgun.armorlayer", "true"));
+			!"false".equalsIgnoreCase(System.getProperty("mechaniciancombat.armorlayer", "true"));
 	/** 原版玩家盔甲贴图的默认染色值（皮革）。 */
 	private static final int DEFAULT_LEATHER_COLOR = -6265536;
 

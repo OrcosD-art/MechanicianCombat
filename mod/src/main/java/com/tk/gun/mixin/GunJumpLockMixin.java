@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(KeyboardInput.class)
 public abstract class GunJumpLockMixin {
 	@Inject(method = "method_3129(ZF)V", at = @At("TAIL"))
-	private void tkgun$lockJump(boolean slowDown, float slowDownFactor, CallbackInfo ci) {
+	private void mechaniciancombat$lockJump(boolean slowDown, float slowDownFactor, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		boolean jumpPressed = client.player != null && client.currentScreen == null
 				&& client.options.jumpKey.isPressed();

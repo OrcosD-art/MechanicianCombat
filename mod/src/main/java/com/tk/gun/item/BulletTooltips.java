@@ -9,7 +9,7 @@ import java.util.List;
 /** 弹药 tooltip 的统一排版：标点只用于拆分，不进入实际显示文本。 */
 final class BulletTooltips {
 	static void addDamage(List<Text> tooltip, String damageKey) {
-		tooltip.add(Text.translatable("tooltip.tkgun.damage", Text.translatable(damageKey))
+		tooltip.add(Text.translatable("tooltip.mechaniciancombat.damage", Text.translatable(damageKey))
 				.formatted(Formatting.GRAY));
 	}
 
@@ -22,7 +22,7 @@ final class BulletTooltips {
 				continue;
 			}
 			MutableText text = first
-					? Text.translatable("tooltip.tkgun.effect", Text.literal(line))
+					? Text.translatable("tooltip.mechaniciancombat.effect", Text.literal(line))
 					: Text.literal(line);
 			tooltip.add(text.formatted(Formatting.GRAY));
 			first = false;

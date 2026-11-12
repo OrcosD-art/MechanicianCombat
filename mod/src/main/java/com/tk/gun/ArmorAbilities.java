@@ -92,7 +92,7 @@ public final class ArmorAbilities {
 				player.getZ() + Math.cos(Math.toRadians(player.getYaw())),
 				10, 0.25D, 0.25D, 0.25D, 0.05D);
 		player.sendMessage(
-				Text.translatable("message.tkgun.shield_blocked"), true);
+				Text.translatable("message.mechaniciancombat.shield_blocked"), true);
 		sendSnapshot(player);
 		return false;
 	}
@@ -131,7 +131,7 @@ public final class ArmorAbilities {
 				SoundEvents.ITEM_TOTEM_USE, SoundCategory.PLAYERS,
 				1.0F, 1.0F);
 		player.sendMessage(
-				Text.translatable("message.tkgun.totem_saved"), true);
+				Text.translatable("message.mechaniciancombat.totem_saved"), true);
 		sendSnapshot(player);
 		return false;
 	}
@@ -236,5 +236,23 @@ public final class ArmorAbilities {
 						ArmorUpgradeData.shieldRechargeWindowUntil(chest) - now),
 				(int) Math.max(0, ArmorUpgradeData.shieldCooldownUntil(chest) - now),
 				(int) Math.max(0, ArmorUpgradeData.totemCooldownUntil(chest) - now)));
+	}
+
+	/** Clears every persistent cooldown/recharge gate on the equipped chestplate. */
+	public static void clearCooldowns(ServerPlayerEntity player) {
+		ItemStack chest = ArmorUpgradeData.equippedChestplate(player);
+		if (chest.isEmpty()) {
+			return;
+		}
+		ArmorUpgradeData.setShieldCooldownUntil(chest, 0L);
+		ArmorUpgradeData.setTotemCooldownUntil(chest, 0L);
+		ArmorUpgradeData.setShieldRechargeAt(chest, 0L);
+		ArmorUpgradeData.setShieldRechargeKills(chest, 0);
+		ArmorUpgradeData.setShieldRechargeWindowUntil(chest, 0L);
+		if (ArmorUpgradeData.hasPart(chest, ArmorPartItem.Kind.C2)) {
+			ArmorUpgradeData.setShieldCharges(
+					chest, ArmorUpgradeData.MAX_SHIELD_CHARGES);
+		}
+		sendSnapshot(player);
 	}
 }

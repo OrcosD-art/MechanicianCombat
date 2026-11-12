@@ -11,18 +11,18 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 @Mixin(TridentEntity.class)
 public interface TridentEntityAccessor {
 	@Invoker("method_59960")
-	byte tkgun$getLoyalty(ItemStack stack);
+	byte mechaniciancombat$getLoyalty(ItemStack stack);
 
 	@Accessor("field_7647")
-	static TrackedData<Byte> tkgun$getLoyaltyData() {
+	static TrackedData<Byte> mechaniciancombat$getLoyaltyData() {
 		throw new AssertionError();
 	}
 
 	@Accessor("field_21514")
-	static TrackedData<Boolean> tkgun$getEnchantedData() {
+	static TrackedData<Boolean> mechaniciancombat$getEnchantedData() {
 		throw new AssertionError();
 	}
 
 	@Accessor("field_7648")
-	void tkgun$setDealtDamage(boolean value);
+	void mechaniciancombat$setDealtDamage(boolean value);
 }

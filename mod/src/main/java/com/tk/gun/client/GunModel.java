@@ -133,7 +133,7 @@ public final class GunModel {
 			try {
 				instance = new GunModel();
 			} catch (Throwable t) {
-				TkGun.LOGGER.error("[tkgun] 枪械几何加载失败", t);
+				TkGun.LOGGER.error("[mechaniciancombat] 枪械几何加载失败", t);
 				instance = null;
 			}
 		}

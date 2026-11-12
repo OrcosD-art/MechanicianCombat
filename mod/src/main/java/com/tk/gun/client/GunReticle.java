@@ -167,7 +167,7 @@ public final class GunReticle {
 		Vector4f v = new Vector4f((float) rel.x, (float) rel.y, (float) rel.z, 1.0F);
 		viewProj.transform(v);
 		if (VERBOSE && (debugTicks++ % 40) == 0) {
-			TkGun.LOGGER.info("[tkgun] 枪口圈投影：枪口=({}, {}, {}) 相机=({}, {}, {}) W={} NDC=({}, {})",
+			TkGun.LOGGER.info("[mechaniciancombat] 枪口圈投影：枪口=({}, {}, {}) 相机=({}, {}, {}) W={} NDC=({}, {})",
 					r(muzzle.x), r(muzzle.y), r(muzzle.z), r(camera.getPos().x), r(camera.getPos().y),
 					r(camera.getPos().z), r(v.w()), r(v.x() / Math.max(1.0E-6F, v.w())),
 					r(v.y() / Math.max(1.0E-6F, v.w())));
@@ -189,7 +189,7 @@ public final class GunReticle {
 	}
 
 	private static int debugTicks;
-	private static final boolean VERBOSE = System.getProperty("tkgun.demo") != null;
+	private static final boolean VERBOSE = System.getProperty("mechaniciancombat.demo") != null;
 
 	private static double r(double v) {
 		return Math.round(v * 100.0) / 100.0;

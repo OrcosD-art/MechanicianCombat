@@ -19,17 +19,17 @@ public abstract class ItemCooldownManagerEntryMixin implements FortressCooldownE
 	private int field_8027;
 
 	@Override
-	public int tkgun$startTick() {
+	public int mechaniciancombat$startTick() {
 		return field_8028;
 	}
 
 	@Override
-	public int tkgun$endTick() {
+	public int mechaniciancombat$endTick() {
 		return field_8027;
 	}
 
 	@Override
-	public void tkgun$setWindow(int startTick, int endTick) {
+	public void mechaniciancombat$setWindow(int startTick, int endTick) {
 		this.field_8028 = startTick;
 		this.field_8027 = endTick;
 	}

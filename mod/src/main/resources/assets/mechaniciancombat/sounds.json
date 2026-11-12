@@ -1,0 +1,459 @@
+{
+    "hit":  {
+                "sounds":  [
+                               {
+                                   "name":  "mechaniciancombat:hit",
+                                   "stream":  false
+                               }
+                           ]
+            },
+    "gunshot3":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "mechaniciancombat:gunshot3",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "gunshot2":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "mechaniciancombat:gunshot2",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "grapeshot_fire":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "mechaniciancombat:grapeshot_fire",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "grapeshot_hit":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:grapeshot_hit",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "crossbow_fire":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:crossbow_fire",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "bolt":  {
+                 "sounds":  [
+                                {
+                                    "name":  "mechaniciancombat:bolt",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "dryfire":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "mechaniciancombat:dryfire",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "vent":  {
+                 "sounds":  [
+                                {
+                                    "name":  "mechaniciancombat:vent",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "roll":  {
+                 "sounds":  [
+                                {
+                                    "name":  "mechaniciancombat:roll",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "mag":  {
+                "sounds":  [
+                               {
+                                   "name":  "mechaniciancombat:mag",
+                                   "stream":  false
+                               }
+                           ]
+            },
+    "reload1":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "mechaniciancombat:reload1",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "reload2":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "mechaniciancombat:reload2",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "imp1":  {
+                 "sounds":  [
+                                {
+                                    "name":  "mechaniciancombat:imp1",
+                                    "stream":  false
+                                }
+                            ]
+             },
+    "smash_air1":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:smash_air1",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_air2":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:smash_air2",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_air3":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:smash_air3",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "smash_ground_heavy":  {
+                               "sounds":  [
+                                              {
+                                                  "name":  "mechaniciancombat:smash_ground_heavy",
+                                                  "stream":  false
+                                              }
+                                          ]
+                           },
+    "smash_ground1":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:smash_ground1",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "smash_ground3":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:smash_ground3",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "smash_ground2":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:smash_ground2",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "skill_spark":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "mechaniciancombat:skill_spark",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "tendril_clicks_4":  {
+                             "sounds":  [
+                                            {
+                                                "name":  "mechaniciancombat:tendril_clicks_4",
+                                                "stream":  false
+                                            }
+                                        ]
+                         },
+    "nearby_closest_2":  {
+                             "sounds":  [
+                                            {
+                                                "name":  "mechaniciancombat:nearby_closest_2",
+                                                "stream":  false
+                                            }
+                                        ]
+                         },
+    "heartbeat_2":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "mechaniciancombat:heartbeat_2",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "smash_ground4":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:smash_ground4",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "claymore_swing":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "mechaniciancombat:claymore_swing",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "glaive_slash2":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:glaive_slash2",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "double_axe_swing1":  {
+                              "sounds":  [
+                                             {
+                                                 "name":  "mechaniciancombat:double_axe_swing1",
+                                                 "stream":  false
+                                             }
+                                         ]
+                          },
+    "slash":  {
+                  "sounds":  [
+                                 {
+                                     "name":  "mechaniciancombat:slash",
+                                     "stream":  false
+                                 }
+                             ]
+              },
+    "current":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "mechaniciancombat:current",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "anchor_slam1":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:anchor_slam1",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "cutting1":  {
+                     "sounds":  [
+                                    {
+                                        "name":  "mechaniciancombat:cutting1",
+                                        "stream":  false
+                                    }
+                                ]
+                 },
+    "explosion1":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:explosion1",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "rose_quartz_hit":  {
+                            "sounds":  [
+                                           {
+                                               "name":  "mechaniciancombat:rose_quartz_hit",
+                                               "stream":  false
+                                           }
+                                       ]
+                        },
+    "sonic_shot":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:sonic_shot",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "sonic_boom":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:sonic_boom",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "sword_heat":  {
+                       "sounds":  [
+                                      {
+                                          "name":  "mechaniciancombat:sword_heat",
+                                          "stream":  false
+                                      }
+                                  ]
+                   },
+    "gunshot":  {
+                    "sounds":  [
+                                   {
+                                       "name":  "mechaniciancombat:gunshot",
+                                       "stream":  false
+                                   }
+                               ]
+                },
+    "backpack_open":  {
+                          "sounds":  [
+                                         {
+                                             "name":  "mechaniciancombat:backpack_open",
+                                             "stream":  false
+                                         }
+                                     ]
+                      },
+    "backpack_close":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "mechaniciancombat:backpack_close",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "golem_swing":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "mechaniciancombat:golem_swing",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "golem_hammer":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:golem_hammer",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "golem_explosion":  {
+                            "sounds":  [
+                                           {
+                                               "name":  "mechaniciancombat:golem_explosion",
+                                               "stream":  false
+                                           }
+                                       ]
+                        },
+    "golem_electric":  {
+                           "sounds":  [
+                                          {
+                                              "name":  "mechaniciancombat:golem_electric",
+                                              "stream":  false
+                                          }
+                                      ]
+                       },
+    "veritas_melee_charge":  {
+                                 "sounds":  [
+                                                {
+                                                    "name":  "mechaniciancombat:veritas_melee_charge",
+                                                    "stream":  false
+                                                }
+                                            ]
+                             },
+    "veritas_focus_empty":  {
+                                "sounds":  [
+                                               {
+                                                   "name":  "mechaniciancombat:veritas_focus_empty",
+                                                   "stream":  false
+                                               }
+                                           ]
+                            },
+    "missile_cold_launch":  {
+                                "sounds":  [
+                                               {
+                                                   "name":  "mechaniciancombat:missile_cold_launch",
+                                                   "stream":  false
+                                               }
+                                           ]
+                       }
+    ,
+    "hunter_mech3":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:hunter_mech3",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "hunter_turret_fire":  {
+                               "sounds":  [
+                                              {
+                                                  "name":  "mechaniciancombat:hunter_turret_fire",
+                                                  "stream":  false
+                                              }
+                                          ]
+                     },
+    "hunter_mech4":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:hunter_mech4",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "hunter_bolt":  {
+                        "sounds":  [
+                                       {
+                                           "name":  "mechaniciancombat:hunter_bolt",
+                                           "stream":  false
+                                       }
+                                   ]
+                    },
+    "hunter_bolt3":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:hunter_bolt3",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "helmet_steam_hiss":  {
+                              "sounds":  [
+                                             {
+                                                 "name":  "mechaniciancombat:helmet_steam_hiss",
+                                                 "stream":  false
+                                             }
+                                         ]
+                          },
+    "helmet_mech5":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:helmet_mech5",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "helmet_mech3":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:helmet_mech3",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
+    "helmet_mech2":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:helmet_mech2",
+                                            "stream":  false
+                                        }
+                                    ]
+                     }
+}

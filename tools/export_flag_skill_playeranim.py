@@ -45,7 +45,7 @@ def main():
     animation = result["animations"]["backpack_air_jump"]
     animation["bones"] = {
         name: animation["bones"][name]
-        for name in ("torso", "rightArm")
+        for name in ("torso", "rightArm", "leftArm")
         if name in animation["bones"]
     }
     # Blockbench's authored front is opposite PlayerAnimator's model front.

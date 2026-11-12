@@ -20,7 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class BackpackLoyaltyPickupMixin {
 	@Inject(method = "method_34713(Lnet/minecraft/class_1657;)Z",
 			at = @At("HEAD"), cancellable = true)
-	private void tkgun$returnLoyaltyToLauncherStorage(
+	private void mechaniciancombat$returnLoyaltyToLauncherStorage(
 			net.minecraft.entity.player.PlayerEntity player,
 			CallbackInfoReturnable<Boolean> cir) {
 		TridentEntity trident = (TridentEntity) (Object) this;

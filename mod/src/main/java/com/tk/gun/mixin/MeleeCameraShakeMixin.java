@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(GameRenderer.class)
 public abstract class MeleeCameraShakeMixin {
 	@Inject(method = "method_3198(Lnet/minecraft/class_4587;F)V", at = @At("HEAD"))
-	private void tkgun$applyMeleeCameraShake(MatrixStack matrices, float tickDelta,
+	private void mechaniciancombat$applyMeleeCameraShake(MatrixStack matrices, float tickDelta,
 			CallbackInfo ci) {
 		MeleeImpactClientState.applyCameraShake(matrices, tickDelta);
 	}

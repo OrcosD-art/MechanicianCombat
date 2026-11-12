@@ -113,6 +113,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	public BowgunRigRenderer(EntityRendererFactory.Context context) {
 		super(context, new BowgunRigModel(), BowgunRig.INSTANCE);
 		addRenderLayer(new BowgunGunLayer(this));
+		addRenderLayer(new BowgunCloseCombatEffectLayer(this));
 		addRenderLayer(new BowgunEffectSkillLayer(this));
 		addRenderLayer(new CombatBackpackRigLayer(this));
 		// 原版 PlayerRenderer 继续负责皮肤第二层、盔甲、披风和 Curios。
@@ -158,6 +159,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		Entity renderedEntity = getCurrentEntity();
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
+		BowgunCloseCombatEffectLayer.applyScheduledVisibility(
+				bone, renderedEntity, partialTick);
 		if ("body".equals(name)
 				&& "ATK_3_hold".equals(BowgunRig.currentUpperAnimation())) {
 			// ATK_3_hold has no body channel. Keep its inherited horizontal yaw,
@@ -224,7 +227,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		}
 
 		// —— 视角跟随（作者 v4 素材的 Molang）**只读验收**：值现在是 GeckoLib 求出来的 ——
-		// 见 `client/TkGunMolang`（它把那 4 个 query 对 tkgun rig 的实现补上了）。
+		// 见 `client/TkGunMolang`（它把那 4 个 query 对 mechaniciancombat rig 的实现补上了）。
 		// 这里只把"实际落到骨头上的角度"和"按公式该是多少"并排打出来，方便一眼看出 Molang 有没有生效。
 		if (local && VERBOSE && VIEW_FOLLOW_BONES.contains(name) && poseEntity != null) {
 			long now = poseEntity.getWorld().getTime();
@@ -236,7 +239,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				float delta = poseEntity instanceof net.minecraft.entity.LivingEntity living
 						? net.minecraft.util.math.MathHelper.wrapDegrees(living.getHeadYaw() - living.getBodyYaw())
 						: 0.0F;
-				TkGun.LOGGER.info("[tkgun] 跟随视角 {}：骨 rotX={}° / rotY={}° ｜ 实体 pitch={}° 头身差={}°"
+				TkGun.LOGGER.info("[mechaniciancombat] 跟随视角 {}：骨 rotX={}° / rotY={}° ｜ 实体 pitch={}° 头身差={}°"
 								+ "（Molang 生效的话 rotX≈pitch/3{}：chest 才有；rotY≈头身差/{}）",
 						name, r(bone.getRotX()), r(bone.getRotY()), r(pitch), r(delta),
 						CHEST_BONE.equals(name) ? "" : "（body 没有纵向）",
@@ -290,7 +293,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			Vector3f d = m.transformDirection(new Vector3f(0.0F, 0.0F, -1.0F), new Vector3f());
 			lastMuzzlePos = new Vec3d(wp.x, wp.y, wp.z);
 		}
-		// 诊断（-Dtkgun.demo 才打）：候选点对照，定下来之后可以删
+		// 诊断（-Dmechaniciancombat.demo 才打）：候选点对照，定下来之后可以删
 		if (local && MUZZLE_BONE.equals(name) && VERBOSE && (probe++ % 60) == 0) {
 			Matrix4f m = poseStack.peek().getPositionMatrix();
 			Vec3d cam0 = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
@@ -308,7 +311,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				MUZZLE_CANDIDATES[i][1] = cam0.y + q.y;
 				MUZZLE_CANDIDATES[i][2] = cam0.z + q.z;
 			}
-			TkGun.LOGGER.info("[tkgun] 枪口候选：GeckoLib=({}, {}, {}) 绝对pivot=({}, {}, {}) 相对差=({}, {}, {}) 不补=({}, {}, {})",
+			TkGun.LOGGER.info("[mechaniciancombat] 枪口候选：GeckoLib=({}, {}, {}) 绝对pivot=({}, {}, {}) 相对差=({}, {}, {}) 不补=({}, {}, {})",
 					r(wp.x), r(wp.y), r(wp.z),
 					r(MUZZLE_CANDIDATES[0][0]), r(MUZZLE_CANDIDATES[0][1]), r(MUZZLE_CANDIDATES[0][2]),
 					r(MUZZLE_CANDIDATES[1][0]), r(MUZZLE_CANDIDATES[1][1]), r(MUZZLE_CANDIDATES[1][2]),
@@ -394,7 +397,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 					if (local && (lastLoggedState != state || lastLoggedFired != fired)) {
 						lastLoggedState = state;
 						lastLoggedFired = fired;
-						TkGun.LOGGER.info("[tkgun] 弹链/弹夹按实际弹量摆：{} 已打 {} 发 → 骨 {} = x{}px scale{}",
+						TkGun.LOGGER.info("[mechaniciancombat] 弹链/弹夹按实际弹量摆：{} 已打 {} 发 → 骨 {} = x{}px scale{}",
 								state, fired, name, bone.getPosX(), bone.getScaleX());
 					}
 				}
@@ -582,9 +585,9 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	private static int lastLoggedFired = -1;
 	private static TkGun.State lastLoggedState = null;
 	private static int probe;
-	/** 诊断日志开关：`-Dtkgun.demo=1`（自动演示）或 `-Dtkgun.verbose=1`（只看日志不自动按键）。 */
-	private static final boolean VERBOSE = System.getProperty("tkgun.demo") != null
-			|| System.getProperty("tkgun.verbose") != null;
+	/** 诊断日志开关：`-Dmechaniciancombat.demo=1`（自动演示）或 `-Dmechaniciancombat.verbose=1`（只看日志不自动按键）。 */
+	private static final boolean VERBOSE = System.getProperty("mechaniciancombat.demo") != null
+			|| System.getProperty("mechaniciancombat.verbose") != null;
 
 	// ---------------------------------------------------------------- 视角跟随（作者 v4 的 Molang）只读验收
 	/** 打印用的两根骨头（值由 `client/TkGunMolang` 补的那 4 个 query 算出来）。 */

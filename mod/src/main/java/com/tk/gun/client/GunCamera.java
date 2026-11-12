@@ -61,9 +61,13 @@ public final class GunCamera {
 
 	/** 长按右键瞄准时的 FOV 系数（小于 1 = 视角放大；0.62 约等于 1.6 倍望远镜感）。 */
 	public static final float AIM_FOV = 0.62F;
+	/** War Banner deployment pulls the camera away from the player. */
+	public static final float BANNER_FOV = 1.18F;
 	/** FOV 平滑的时间常数（秒）：越小越快。0.09 秒左右跟手但不闪。 */
 	private static final double ZOOM_TAU = 0.09D;
+	private static final double BANNER_FOV_TAU = 0.14D;
 	private static float zoomBlend;
+	private static float bannerFovBlend;
 	/** Last FOV returned by GameRenderer, including aim zoom and vanilla effects. */
 	private static double renderedFovDegrees = 70.0D;
 
@@ -121,12 +125,12 @@ public final class GunCamera {
 	 * <p>⚠️ 2026-10-17 默认值从 5°/tick（100°/秒）提到 **25°/tick（500°/秒）**：100°/秒 完全追不上
 	 * 甩视角（1000+°/秒），于是子弹方向 `aimDir` 严重滞后 —— 用户报的"子弹从枪口横向飞出"就是这个。
 	 * 500°/秒 还留着"炮口扫过去"的观感，但不会和视角脱节。想调手感不用改代码：
-	 * `-Dtkgun.aimslew=<度/秒>`（默认 500）。
+	 * `-Dmechaniciancombat.aimslew=<度/秒>`（默认 500）。
 	 */
 	private static final double AIM_SLEW_DEG_PER_TICK = slewFromProperty();
 
 	private static double slewFromProperty() {
-		String s = System.getProperty("tkgun.aimslew");
+		String s = System.getProperty("mechaniciancombat.aimslew");
 		if (s != null) {
 			try {
 				return Math.max(0.2D, Double.parseDouble(s) / 20.0D);
@@ -148,13 +152,14 @@ public final class GunCamera {
 	/** Decoupled state in which the current right-click aim began. */
 	private static int aimDecoupledReason;
 	// ---- 枪骨左右修正（把实测枪管方向驱到相机视线方向）：带自标定的阻尼闭环 ----
-	/** 演示模式（-Dtkgun.demo）才打诊断日志，别污染玩家平时的客户端日志。 */
-	private static final boolean VERBOSE = System.getProperty("tkgun.demo") != null;
-	/** 只打"瞄准朝向"那几行（验收用：`-Dtkgun.aimlog=1`，比整包 demo 轻） */
-	private static final boolean AIM_LOG = System.getProperty("tkgun.aimlog") != null;
+	/** 演示模式（-Dmechaniciancombat.demo）才打诊断日志，别污染玩家平时的客户端日志。 */
+	private static final boolean VERBOSE = System.getProperty("mechaniciancombat.demo") != null;
+	/** 只打"瞄准朝向"那几行（验收用：`-Dmechaniciancombat.aimlog=1`，比整包 demo 轻） */
+	private static final boolean AIM_LOG = System.getProperty("mechaniciancombat.aimlog") != null;
 
 	public static void resetVanillaState() {
 		zoomBlend = 0.0F;
+		bannerFovBlend = 0.0F;
 		crosshairPoint = null;
 		aimDir = null;
 		aimTarget = null;
@@ -261,7 +266,7 @@ public final class GunCamera {
 		if (aiming && p.isSprinting()) {
 			p.setSprinting(false);
 			if (ticks % 40 == 0) {
-				TkGun.LOGGER.info("[tkgun] 瞄准 -> 终止疾跑（进入站立射击）");
+				TkGun.LOGGER.info("[mechaniciancombat] 瞄准 -> 终止疾跑（进入站立射击）");
 			}
 		}
 		// 落点：没瞄准 = 枪口沿枪管直线打出去的那个点；瞄准 = 按炮塔速度转过去的那个点
@@ -379,7 +384,7 @@ public final class GunCamera {
 			aimYawValid = true;
 			// 诊断（瞄准时每 2 秒一行，验收"水平真的对上了"）：枪管 yaw 应该追到 `目标 yaw`。
 			if (aiming && ticks % 40 == 0) {
-				TkGun.LOGGER.info("[tkgun] 瞄准水平：中心线yaw={} 准星yaw={} 身体yaw={} 枪管-身体={}°"
+				TkGun.LOGGER.info("[mechaniciancombat] 瞄准水平：中心线yaw={} 准星yaw={} 身体yaw={} 枪管-身体={}°"
 								+ " 线差={}° 身体残余={}° 视觉偏角补偿={}°",
 						Double.isNaN(lineYaw) ? "-" : Math.round(lineYaw * 10.0) / 10.0,
 						Math.round(wantYaw * 10.0) / 10.0,
@@ -398,7 +403,8 @@ public final class GunCamera {
 			GunClientState.Entry actState = GunClientState.get(p.getId());
 			boolean action = actState != null && (actState.state == TkGun.State.ROLL
 					|| actState.state == TkGun.State.ROLL_TO_IDLE
-					|| actState.state == TkGun.State.SLIDE || actState.state == TkGun.State.SLIDE_READY);
+					|| actState.state == TkGun.State.SLIDE
+					|| actState.state == TkGun.State.SLIDE_READY);
 			// 翻滚 / 滑铲期间把渲染插值的上一帧 yaw 钉住当前值：不然战斗翻滚那边把 yaw 改一下，
 			// 这一帧就会从旧朝向**插值甩过去**（用户报的"翻滚后进入 idle 仍然倒转"就是这种甩）。
 			if (action) {
@@ -426,7 +432,7 @@ public final class GunCamera {
 				Vec3d l = new Vec3d(look.x, 0.0D, look.z).normalize();
 				hori = Math.toDegrees(Math.acos(MathHelper.clamp(b.dotProduct(l), -1.0D, 1.0D)));
 			}
-			TkGun.LOGGER.info("[tkgun] 越肩：视角 yaw={}（相机）身体 yaw={}（实体）差 {}° 瞄准={}"
+			TkGun.LOGGER.info("[mechaniciancombat] 越肩：视角 yaw={}（相机）身体 yaw={}（实体）差 {}° 瞄准={}"
 							+ " 弹着点={} 枪管水平夹角={}° 枪骨修正={}rad FOV系数={} 视角模式={} ShoulderSurfing={}",
 					MathHelper.wrapDegrees(lookYaw), MathHelper.wrapDegrees(p.getYaw()),
 					MathHelper.wrapDegrees(lookYaw - p.getYaw()), aiming,
@@ -435,7 +441,7 @@ public final class GunCamera {
 					Math.round(fovScale() * 1000) / 1000.0, client.options.getPerspective(),
 					ShoulderSurfBridge.describe());
 		}
-		// 瞄准追踪（-Dtkgun.demo 才打，每 2 tick 一行）：验收"落点按固定角速度转向准星"——
+		// 瞄准追踪（-Dmechaniciancombat.demo 才打，每 2 tick 一行）：验收"落点按固定角速度转向准星"——
 		// 残差 = 当前落点方向 与 "枪口→准星点" 的夹角，每 tick 应该掉 AIM_SLEW_DEG_PER_TICK 度左右。
 		if (VERBOSE && aiming && aimDir != null && (ticks & 1) == 0) {
 			Vec3d muzzle = TkGunClient.muzzleWorldPos();
@@ -447,7 +453,7 @@ public final class GunCamera {
 							aimDir.dotProduct(want.normalize()), -1.0D, 1.0D)));
 				}
 			}
-			TkGun.LOGGER.info("[tkgun] 瞄准追踪：准星点={} 落点={} 残差={}° 落点距离={} 走的方向=({}, {}, {})"
+			TkGun.LOGGER.info("[mechaniciancombat] 瞄准追踪：准星点={} 落点={} 残差={}° 落点距离={} 走的方向=({}, {}, {})"
 							+ " 转头速度={}°/tick 身体yaw={}",
 					vec(crosshairPoint), vec(aimTarget), Math.round(residual * 10) / 10.0,
 					muzzle == null || aimTarget == null ? -1.0D
@@ -456,7 +462,7 @@ public final class GunCamera {
 					Math.round(AIM_SLEW_DEG_PER_TICK * 10) / 10.0,
 					MathHelper.wrapDegrees(p.getYaw()));
 		}
-		// 瞄准朝向验收（-Dtkgun.aimlog=1）：把"身体 yaw / 枪口 → 落点的 yaw / 残差"打出来 ——
+		// 瞄准朝向验收（-Dmechaniciancombat.aimlog=1）：把"身体 yaw / 枪口 → 落点的 yaw / 残差"打出来 ——
 		// 残差收敛到 0 就说明"模型正面（枪口）真的对着着弹点"。
 		if (AIM_LOG && aiming && (ticks % 10) == 0) {
 			Vec3d muzzle = TkGunClient.muzzleWorldPos();
@@ -465,7 +471,7 @@ public final class GunCamera {
 			if (muzzle != null && target != null) {
 				want = Math.toDegrees(Math.atan2(-(target.x - muzzle.x), target.z - muzzle.z));
 			}
-			TkGun.LOGGER.info("[tkgun] 瞄准朝向：身体yaw={} 目标yaw={} 残差={}° 落点={} 枪口={} 专注={}",
+			TkGun.LOGGER.info("[mechaniciancombat] 瞄准朝向：身体yaw={} 目标yaw={} 残差={}° 落点={} 枪口={} 专注={}",
 					Math.round(p.getYaw() * 10) / 10.0,
 					Double.isNaN(want) ? "-" : Math.round(want * 10) / 10.0,
 					Double.isNaN(aimYawResidual) ? "-" : Math.round(aimYawResidual * 10) / 10.0,
@@ -675,12 +681,20 @@ public final class GunCamera {
 	 * 用真实帧时长做指数平滑，所以 60/144 Hz 都顺；按 tick（20 Hz）推进就是一卡一卡。
 	 */
 	public static void advanceZoom(MinecraftClient client, float frameTicks) {
+		boolean bannerCast = client.player != null
+				&& WarBannerSkillClientState.isActive(client.player.getId());
+		double dt = Math.max(1.0E-4D, frameTicks / 20.0D);
+		float bannerTarget = bannerCast ? 1.0F : 0.0F;
+		float bannerK = (float) (1.0D - Math.exp(-dt / BANNER_FOV_TAU));
+		bannerFovBlend += (bannerTarget - bannerFovBlend) * bannerK;
+		if (!bannerCast && bannerFovBlend < 1.0E-3F) {
+			bannerFovBlend = 0.0F;
+		}
 		if (!aimAllowed(client)) {
 			zoomBlend = 0.0F;
 			return;
 		}
 		float want = aiming(client) ? 1.0F : 0.0F;
-		double dt = Math.max(1.0E-4D, frameTicks / 20.0D);       // tick -> 秒
 		float k = (float) (1.0D - Math.exp(-dt / ZOOM_TAU));
 		zoomBlend += (want - zoomBlend) * k;
 		if (want == 0.0F && zoomBlend < 1.0E-3F) {
@@ -690,7 +704,9 @@ public final class GunCamera {
 
 	/** 当前 FOV 系数（1 = 不放大）。HUD 投影枪口时也读它，才和实际画面一致。 */
 	public static float fovScale() {
-		return 1.0F + (AIM_FOV - 1.0F) * zoomBlend;
+		float aimScale = 1.0F + (AIM_FOV - 1.0F) * zoomBlend;
+		float bannerScale = 1.0F + (BANNER_FOV - 1.0F) * bannerFovBlend;
+		return aimScale * bannerScale;
 	}
 
 	public static void recordRenderedFov(double degrees) {

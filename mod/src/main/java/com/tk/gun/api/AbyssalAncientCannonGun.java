@@ -17,8 +17,8 @@ public final class AbyssalAncientCannonGun {
 					TkGun.id("textures/entity/abyssal_ancient_cannon_gun.png"))
 			.textureSize(64, 64)
 			.translations(
-					"item.tkgun.abyssal_ancient_cannon",
-					"tooltip.tkgun.abyssal_ancient_cannon.description")
+					"item.mechaniciancombat.abyssal_ancient_cannon",
+					"tooltip.mechaniciancombat.abyssal_ancient_cannon.description")
 			.build();
 
 	private AbyssalAncientCannonGun() {

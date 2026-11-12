@@ -42,7 +42,7 @@ public final class MechanicianArmorItem extends ArmorItem implements GeoItem {
 		if (!MechanicianUndersuitItem.isEquipped(user)) {
 			if (!world.isClient()) {
 				user.sendMessage(Text.translatable(
-						"message.tkgun.requires_undersuit"), true);
+						"message.mechaniciancombat.requires_undersuit"), true);
 			}
 			return TypedActionResult.fail(user.getStackInHand(hand));
 		}
@@ -53,7 +53,7 @@ public final class MechanicianArmorItem extends ArmorItem implements GeoItem {
 	public void appendTooltip(ItemStack stack, TooltipContext context,
 							  List<Text> tooltip, TooltipType type) {
 		super.appendTooltip(stack, context, tooltip, type);
-		tooltip.add(Text.translatable("tooltip.tkgun.mechanician_"
+		tooltip.add(Text.translatable("tooltip.mechaniciancombat.mechanician_"
 				+ piece.modelName()));
 	}
 

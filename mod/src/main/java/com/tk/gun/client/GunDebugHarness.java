@@ -19,18 +19,18 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * 客户端自动演示 + 截图（只有 -Dtkgun.demo=1 时才跑）。
+ * 客户端自动演示 + 截图（只有 -Dmechaniciancombat.demo=1 时才跑）。
  *
  * 用途：验证第三人称持枪动作是否真的播出来（原版键位是真的按，所以服务端链路也一起验了）。
  * 每进入一个新动画就截一张 assistant 目录下的 PNG，日志里也会打 STEP。
  */
 public final class GunDebugHarness {
 	/**
-	 * ⚠️ 别用 {@code Boolean.getBoolean("tkgun.demo")} —— 它只认字面量 "true"，
-	 * 而启动脚本传的是 {@code -Dtkgun.demo=1}，那样开关永远关着（2026-10-12 踩过：
+	 * ⚠️ 别用 {@code Boolean.getBoolean("mechaniciancombat.demo")} —— 它只认字面量 "true"，
+	 * 而启动脚本传的是 {@code -Dmechaniciancombat.demo=1}，那样开关永远关着（2026-10-12 踩过：
 	 * 演示一直没跑，之前能出截图是因为用 RCON 打开了远程演示）。
 	 */
-	private static final boolean ENABLED = truthy(System.getProperty("tkgun.demo"));
+	private static final boolean ENABLED = truthy(System.getProperty("mechaniciancombat.demo"));
 
 	private static boolean truthy(String value) {
 		return value != null && (value.equals("1") || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes"));
@@ -45,7 +45,7 @@ public final class GunDebugHarness {
 			waitTicks = 0;
 			tick = 0;
 		}
-		TkGun.LOGGER.info("[tkgun-demo] 远程演示 {}", on ? "开启" : "关闭");
+		TkGun.LOGGER.info("[mechaniciancombat-demo] 远程演示 {}", on ? "开启" : "关闭");
 	}
 	private static final Set<String> SHOT = new HashSet<>();
 	private static int tick;
@@ -73,7 +73,7 @@ public final class GunDebugHarness {
 			if (holdingCleanupWand(client)) {
 				wandTick++;
 				if (wandTick % 40 == 1) {
-					TkGun.LOGGER.info("[tkgun-demo] 清理棒：点一下左键（tick {}）", wandTick);
+					TkGun.LOGGER.info("[mechaniciancombat-demo] 清理棒：点一下左键（tick {}）", wandTick);
 					client.options.attackKey.setPressed(true);
 				} else if (wandTick % 40 == 3) {
 					client.options.attackKey.setPressed(false);
@@ -86,10 +86,10 @@ public final class GunDebugHarness {
 				tick = 0;
 				releasedKeys = false;
 				client.player.getInventory().selectedSlot = 0;
-				TkGun.LOGGER.info("[tkgun-demo] 拿到武器，开始自动演示（第三人称）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] 拿到武器，开始自动演示（第三人称）");
 			} else {
 				waitTicks++;
-				// ⚠️ 2026-10-13：`/tkgun kit` 把炮塞在快捷栏 0，但玩家**当前选中的格子**可能是别的
+				// ⚠️ 2026-10-13：`/mechaniciancombat kit` 把炮塞在快捷栏 0，但玩家**当前选中的格子**可能是别的
 				// （实测是熟牛排）——那样服务端看到的"主手"不是枪：右键会去啃牛排、左键的开火包被忽略，
 				// 演示白跑（早先靠"副手也塞一把"绕过去，但那只验到 holdingGun，验不到主手那条链路）。
 				// 这里按一下原版快捷栏 1 键（走 UpdateSelectedSlotC2SPacket，服务端才认）。
@@ -99,7 +99,7 @@ public final class GunDebugHarness {
 					client.options.hotbarKeys[0].setPressed(false);
 				}
 				if (waitTicks % 100 == 0) {
-					TkGun.LOGGER.info("[tkgun-demo] 等待手持破垒重炮（服务端用 /item replace 发到快捷栏 0）…");
+					TkGun.LOGGER.info("[mechaniciancombat-demo] 等待手持破垒重炮（服务端用 /item replace 发到快捷栏 0）…");
 				}
 				return;
 			}
@@ -125,10 +125,10 @@ public final class GunDebugHarness {
 			hoverSlot(client, 36);
 		}
 		if (tick == 32) {
-			shot(client, "tkgun_gui_inventory.png");
+			shot(client, "mechaniciancombat_gui_inventory.png");
 		}
 		if (tick == 34) {
-			shot(client, "tkgun_gui_tooltip.png");
+			shot(client, "mechaniciancombat_gui_tooltip.png");
 			client.setScreen(null);
 		}
 		// 截图工具/人手会抢焦点 → MC 弹暂停菜单，演示里直接关掉它，别让画面停在菜单上
@@ -136,10 +136,10 @@ public final class GunDebugHarness {
 			client.setScreen(null);
 		}
 		if (tick % 25 == 0 && (tick <= 350 || tick >= 400)) {
-			shot(client, "tkgun_t" + tick + "_" + sanitize(TkGunClient.currentAnimation(client.player.getUuid())) + ".png");
+			shot(client, "mechaniciancombat_t" + tick + "_" + sanitize(TkGunClient.currentAnimation(client.player.getUuid())) + ".png");
 		}
 		// 可视化验收脚本：右键举枪，Z 切换专注；专注期间移动输入被屏蔽，Alt 进入翻滚/滑铲循环。
-		// 实际状态转移以服务端状态机和 /tkgun status 为准。
+		// 实际状态转移以服务端状态机和 /mechaniciancombat status 为准。
 		boolean use = (tick > 40 && tick <= 75) || (tick >= 293 && tick <= 320);
 		boolean attack = (tick >= 125 && tick <= 127) || (tick >= 140 && tick <= 142) || (tick >= 150 && tick <= 152);
 		boolean move = (tick > 200 && tick <= 230) || (tick > 260 && tick <= 300);
@@ -178,7 +178,7 @@ public final class GunDebugHarness {
 			}
 			if (tick == 412) {
 				logCamera(client, "① 没瞄准：自由环视 30°（身体应该纹丝不动）");
-				shot(client, "tkgun_cam1_free.png");
+				shot(client, "mechaniciancombat_cam1_free.png");
 			}
 			// ⑥ 瞄准落点的"转头过程"（用户 2026-10-14："那个实际落点是可以缓慢过去的"）：
 			//    按住右键的同时猛甩一下鼠标 —— 落点（圈圈）**不会**瞬间贴到准星上，
@@ -187,14 +187,14 @@ public final class GunDebugHarness {
 				client.player.changeLookDirection(8.0D, 0.0D);      // 8°/tick × 7 tick ≈ 56° 的急甩
 			}
 			if (tick == 416 || tick == 419 || tick == 422 || tick == 426 || tick == 431 || tick == 445) {
-				shot(client, "tkgun_aim_slew" + tick + ".png");
+				shot(client, "mechaniciancombat_aim_slew" + tick + ".png");
 			}
 			if (tick == 430) {
 				logCamera(client, "② 长按右键中（身体应该正在追视角、FOV 应该收到 " + GunCamera.AIM_FOV + "）");
 			}
 			if (tick == 445) {
 				logCamera(client, "③ 瞄准保持（落点应该已经转到位：圈圈和准星重合）");
-				shot(client, "tkgun_cam2_aim.png");
+				shot(client, "mechaniciancombat_cam2_aim.png");
 			}
 			if (tick >= 455 && tick <= 468) {
 				client.player.changeLookDirection(-3.0D, 0.0D);     // 松开之后再转回来 42°
@@ -208,7 +208,7 @@ public final class GunDebugHarness {
 			}
 			if (tick == 501) {
 				logCamera(client, "④ 走动中（W 应该按**相机**方向走，身体朝移动方向）");
-				shot(client, "tkgun_cam3_walk.png");
+				shot(client, "mechaniciancombat_cam3_walk.png");
 			}
 		} else if (tick >= 560 && tick <= 1500) {
 			// —— 四方向走动 + 移动开火 + 强化阶段（2026-10-14 第二版素材）——
@@ -239,31 +239,31 @@ public final class GunDebugHarness {
 			client.options.rightKey.setPressed(tick >= 720 && tick <= 760);
 			client.options.backKey.setPressed(tick >= 840 && tick <= 880);
 			if (tick == 630) {
-				TkGun.LOGGER.info("[tkgun-demo] ① 左移中开火（期望 walk_left 的腿 + stand_shooting 的上半身）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ① 左移中开火（期望 walk_left 的腿 + stand_shooting 的上半身）");
 			}
 			if (tick == 730) {
-				TkGun.LOGGER.info("[tkgun-demo] ② 右移中开火（期望 walk_right + stand_shooting）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ② 右移中开火（期望 walk_right + stand_shooting）");
 			}
 			if (tick == 850) {
-				TkGun.LOGGER.info("[tkgun-demo] ③ 后退中开火（期望 walk_back + stand_shooting）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ③ 后退中开火（期望 walk_back + stand_shooting）");
 			}
 			if (tick == 1010) {
-				TkGun.LOGGER.info("[tkgun-demo] ④ 站定开火（期望腰射/行走射击：rig=idle|walk_* + 上半身 stand_shooting）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ④ 站定开火（期望腰射/行走射击：rig=idle|walk_* + 上半身 stand_shooting）");
 			}
 			if (tick == 1050) {
 				// ⑤ 通过 HUD 技能桥进入专注；正常游戏也可直接按 Z 切换。
 				boolean found = pressHudSkillKey(client, 1);
-				TkGun.LOGGER.info("[tkgun-demo] ⑤ 按 hud 技能键进专注（找到 key.hud.skill1={}）；"
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑤ 按 hud 技能键进专注（找到 key.hud.skill1={}）；"
 						+ "期望 rig=Focus_over + HUD『专注』 + 服务端『进入专注状态』", found);
 			}
 			if (tick == 1052) {
 				releaseHudSkillKeys(client);
 			}
 			if (tick == 1085) {
-				TkGun.LOGGER.info("[tkgun-demo] ⑥ 专注里开火（期望 Focus_shooting[N] + 仰角档，不再叠 stand_shooting）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑥ 专注里开火（期望 Focus_shooting[N] + 仰角档，不再叠 stand_shooting）");
 			}
 			if (tick == 1130) {
-				TkGun.LOGGER.info("[tkgun-demo] ⑦ 专注中侧移开火（期望移动输入被清零，专注射击继续）");
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑦ 专注中侧移开火（期望移动输入被清零，专注射击继续）");
 			}
 			// —— 仰角变体（作者给每段射击都做了 基础/_22.5/_45）：抬头打的时候该切到 _45 ——
 			// `changeLookDirection` 走的是原版鼠标那条路（解耦相机下 setPitch 会被 ShoulderSurfing 顶掉）。
@@ -283,21 +283,21 @@ public final class GunDebugHarness {
 				client.player.changeLookDirection(0.0D, -150.0D);        // 大幅抬头（≈ -22°/tick）
 			}
 			if (tick == 1410) {
-				TkGun.LOGGER.info("[tkgun-demo] ⑧ 抬头 {}° 开火（期望 Focus_shooting[N]_45）",
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑧ 抬头 {}° 开火（期望 Focus_shooting[N]_45）",
 						Math.round(-client.player.getPitch()));
 			}
 			if (tick >= 1430 && tick <= 1433) {
 				client.player.changeLookDirection(0.0D, 140.0D);         // 收回到 ~25°
 			}
 			if (tick == 1440) {
-				TkGun.LOGGER.info("[tkgun-demo] ⑨ 抬头 {}° 开火（期望 _22.5）",
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑨ 抬头 {}° 开火（期望 _22.5）",
 						Math.round(-client.player.getPitch()));
 			}
 			if (tick >= 1460 && tick <= 1463) {
 				client.player.changeLookDirection(0.0D, 60.0D);          // 接近平视
 			}
 			if (tick == 1470) {
-				TkGun.LOGGER.info("[tkgun-demo] ⑩ 抬头 {}° 开火（期望不带后缀）",
+				TkGun.LOGGER.info("[mechaniciancombat-demo] ⑩ 抬头 {}° 开火（期望不带后缀）",
 						Math.round(-client.player.getPitch()));
 			}
 		} else if (tick > 1500 && !releasedKeys) {
@@ -310,7 +310,7 @@ public final class GunDebugHarness {
 			if (remoteEnabled) {
 				remoteEnabled = false;
 			}
-			TkGun.LOGGER.info("[tkgun-demo] 脚本结束，已把自动按键全部松开（控制权还给玩家）");
+			TkGun.LOGGER.info("[mechaniciancombat-demo] 脚本结束，已把自动按键全部松开（控制权还给玩家）");
 		}
 		// 连点（同一段里左键连按三下）= 验证"排队不覆盖"，已经并进上面的 attack 脚本
 		if (tick == 340) {
@@ -331,10 +331,10 @@ public final class GunDebugHarness {
 			anim = TkGun.holdingGun(client.player) ? "(vanilla)" : "(none)";
 		}
 		if (!anim.equals(lastAnim)) {
-			TkGun.LOGGER.info("[tkgun-demo] STEP t={} 动画 -> {}", tick, anim);
+			TkGun.LOGGER.info("[mechaniciancombat-demo] STEP t={} 动画 -> {}", tick, anim);
 			lastAnim = anim;
 			shotDelay = 6;
-			shotName = "tkgun_" + tick + "_" + anim.replace(":", "_") + ".png";
+			shotName = "mechaniciancombat_" + tick + "_" + anim.replace(":", "_") + ".png";
 		}
 		if (shotDelay > 0 && --shotDelay == 0) {
 			shot(client, shotName);
@@ -350,7 +350,7 @@ public final class GunDebugHarness {
 	/**
 	 * 按一下 **hud mod 的技能键**（`key.hud.skill<N>`）。
 	 *
-	 * <p>为什么要这样：技能键是 hud mod 注册的 KeyBinding，tkgun 这边拿不到那个对象，
+	 * <p>为什么要这样：技能键是 hud mod 注册的 KeyBinding，mechaniciancombat 这边拿不到那个对象，
 	 * 但 `client.options.allKeys` 里**所有**注册过的键位都在 —— 按翻译键找出来设成按下就行，
 	 * hud 的客户端 tick 会照常走它那条"按键 → 查蓝/冷却 → 发包"的路。
 	 */
@@ -428,10 +428,10 @@ public final class GunDebugHarness {
 			double fy = (double) client.getWindow().getHeight() / client.getWindow().getScaledHeight();
 			setDouble(client.mouse, "x", lx * fx);
 			setDouble(client.mouse, "y", ly * fy);
-			TkGun.LOGGER.info("[tkgun-demo] 光标悬停槽 {} 逻辑=({}, {}) 设备=({}, {}) 物品={}",
+			TkGun.LOGGER.info("[mechaniciancombat-demo] 光标悬停槽 {} 逻辑=({}, {}) 设备=({}, {}) 物品={}",
 					handlerIndex, lx, ly, lx * fx, ly * fy, slot.getStack().getItem());
 		} catch (Throwable t) {
-			TkGun.LOGGER.warn("[tkgun-demo] 悬停槽 {} 失败: {}", handlerIndex, t.toString());
+			TkGun.LOGGER.warn("[mechaniciancombat-demo] 悬停槽 {} 失败: {}", handlerIndex, t.toString());
 		}
 	}
 
@@ -473,7 +473,7 @@ public final class GunDebugHarness {
 
 	private static void shot(MinecraftClient client, String name) {
 		ScreenshotRecorder.saveScreenshot(client.runDirectory, name, client.getFramebuffer(),
-				msg -> TkGun.LOGGER.info("[tkgun-demo] 截图 {} ({})", name, msg.getString()));
+				msg -> TkGun.LOGGER.info("[mechaniciancombat-demo] 截图 {} ({})", name, msg.getString()));
 	}
 
 	// ---------------------------------------------------------------- 相机阶段的小工具
@@ -483,7 +483,7 @@ public final class GunDebugHarness {
 
 	/** 打一行"越肩/解耦"的实测数据（视角、身体、差、FOV 系数），日志里一眼能看出对不对。 */
 	private static void logCamera(MinecraftClient client, String what) {
-		TkGun.LOGGER.info("[tkgun-demo] {}：相机 yaw={} 身体 yaw={} 差={}° 瞄准={} FOV系数={} 视角={} 朝向={}",
+		TkGun.LOGGER.info("[mechaniciancombat-demo] {}：相机 yaw={} 身体 yaw={} 差={}° 瞄准={} FOV系数={} 视角={} 朝向={}",
 				what, round(GunCamera.lookYaw()), round(client.player.getYaw()),
 				round(net.minecraft.util.math.MathHelper.wrapDegrees(
 						GunCamera.lookYaw() - client.player.getYaw())),
@@ -500,7 +500,7 @@ public final class GunDebugHarness {
 		double dz = client.player.getZ() - lastCamMoveZ;
 		double moved = Math.sqrt(dx * dx + dz * dz);
 		double moveYaw = Math.toDegrees(Math.atan2(-dx, dz));
-		TkGun.LOGGER.info("[tkgun-demo] 走动验算：实际位移={} 格 位移方向 yaw={}° / 相机 yaw={}° / 身体 yaw={}°"
+		TkGun.LOGGER.info("[mechaniciancombat-demo] 走动验算：实际位移={} 格 位移方向 yaw={}° / 相机 yaw={}° / 身体 yaw={}°"
 						+ "（位移方向该贴相机；贴身体就说明输入没扭对）",
 				round(moved), round(moveYaw), round(GunCamera.lookYaw()),
 				round(client.player.getYaw()));
@@ -516,7 +516,7 @@ public final class GunDebugHarness {
 	}
 
 	/**
-	 * 自动点「登 录」（只在 -Dtkgun.demo=1 的开发演示里跑）。
+	 * 自动点「登 录」（只在 -Dmechaniciancombat.demo=1 的开发演示里跑）。
 	 *
 	 * TkAuth 的登录页按用户要求是"填好账号密码、但让人自己点登录"，所以自动化演示必须
 	 * 补这一下，否则客户端会一直停在登录页。这里不引 TkAuth 的类（不是依赖），只按按钮
@@ -558,7 +558,7 @@ public final class GunDebugHarness {
 					lastLoginScreen = screen;
 					loginAttempts++;
 					lastLoginClickAt = System.currentTimeMillis();
-					TkGun.LOGGER.info("[tkgun-demo] 自动点「{}」进服", b.getMessage().getString());
+					TkGun.LOGGER.info("[mechaniciancombat-demo] 自动点「{}」进服", b.getMessage().getString());
 					b.onPress();
 					return true;
 				}
@@ -576,7 +576,7 @@ public final class GunDebugHarness {
 			lastLoginScreen = screen;
 			loginAttempts++;
 			lastLoginClickAt = System.currentTimeMillis();
-			TkGun.LOGGER.info("[tkgun-demo] 自动点登录按钮 @({},{}) [{}]", x, y, cls);
+			TkGun.LOGGER.info("[mechaniciancombat-demo] 自动点登录按钮 @({},{}) [{}]", x, y, cls);
 			screen.mouseClicked(x, y, 0);
 			return true;
 		}
@@ -591,7 +591,7 @@ public final class GunDebugHarness {
 				key.setPressed(true);
 				heldRollKey = key;
 				releaseRollAt = tick + 6;
-				TkGun.LOGGER.info("[tkgun-demo] 按下翻滚键 {}", t);
+				TkGun.LOGGER.info("[mechaniciancombat-demo] 按下翻滚键 {}", t);
 				return;
 			}
 		}
@@ -600,11 +600,11 @@ public final class GunDebugHarness {
 				key.setPressed(true);
 				heldRollKey = key;
 				releaseRollAt = tick + 6;
-				TkGun.LOGGER.info("[tkgun-demo] 按下翻滚键 {}", key.getTranslationKey());
+				TkGun.LOGGER.info("[mechaniciancombat-demo] 按下翻滚键 {}", key.getTranslationKey());
 				return;
 			}
 		}
-		TkGun.LOGGER.warn("[tkgun-demo] 没找到 combat_roll 的键位");
+		TkGun.LOGGER.warn("[mechaniciancombat-demo] 没找到 combat_roll 的键位");
 	}
 
 	/** 测试世界带"实验性世界设置"确认框，自动点第一个按钮（= 继续加载）。 */
@@ -612,7 +612,7 @@ public final class GunDebugHarness {
 		if (client.currentScreen instanceof ConfirmScreen screen) {
 			for (Element e : screen.children()) {
 				if (e instanceof ButtonWidget b) {
-					TkGun.LOGGER.info("[tkgun-demo] 自动确认对话框：「{}」", b.getMessage().getString());
+					TkGun.LOGGER.info("[mechaniciancombat-demo] 自动确认对话框：「{}」", b.getMessage().getString());
 					b.onPress();
 					return true;
 				}

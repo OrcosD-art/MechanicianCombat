@@ -1,5 +1,6 @@
 package com.tk.gun.client;
 
+import com.tk.gun.TkGun;
 import com.tk.gun.TkGunServer;
 import com.tk.gun.item.BackpackPartItem;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
@@ -10,16 +11,16 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.EntityRenderer;
 import net.minecraft.client.render.entity.EntityRendererFactory;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.RotationAxis;
 import software.bernie.geckolib.cache.object.BakedGeoModel;
 import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.renderer.GeoReplacedEntityRenderer;
+import org.joml.Vector3d;
+import net.minecraft.util.math.Vec3d;
 
 /** Draws the skill flag in the same entity-space basis as the player rig. */
 public final class WarBannerHeldRenderer
 		extends GeoReplacedEntityRenderer<
 				AbstractClientPlayerEntity, BackpackPartItem> {
-	private static final float BODY_CENTER_Y = 12.0F / 16.0F;
 	private static EntityRendererFactory.Context context;
 	private static WarBannerHeldRenderer instance;
 	private static AbstractClientPlayerEntity activePlayer;
@@ -28,23 +29,6 @@ public final class WarBannerHeldRenderer
 	private WarBannerHeldRenderer(EntityRendererFactory.Context context,
 			BackpackPartItem item) {
 		super(context, new WarBannerHeldGeoModel(), item);
-	}
-
-	@Override
-	public void preRender(MatrixStack matrices, BackpackPartItem animatable,
-			BakedGeoModel model, VertexConsumerProvider bufferSource,
-			VertexConsumer buffer, boolean isReRender, float partialTick,
-			int packedLight, int packedOverlay, int colour) {
-		super.preRender(matrices, animatable, model, bufferSource, buffer,
-				isReRender, partialTick, packedLight, packedOverlay, colour);
-		if (!isReRender) {
-			// Converted player-rig geometry uses the opposite X/Y presentation
-			// from the live player model.
-			matrices.translate(0.0D, BODY_CENTER_Y, 0.0D);
-			matrices.multiply(
-					RotationAxis.POSITIVE_Z.rotationDegrees(180.0F));
-			matrices.translate(0.0D, -BODY_CENTER_Y, 0.0D);
-		}
 	}
 
 	public static void setContext(EntityRendererFactory.Context context) {
@@ -92,7 +76,18 @@ public final class WarBannerHeldRenderer
 			boolean isReRender, float tickDelta, int packedLight,
 			int packedOverlay, int colour) {
 		if (activePlayer != null) {
-			WarBannerHeldPose.apply(bone, seconds);
+			WarBannerHeldPose.apply(
+					bone, seconds,
+					WarBannerSkillClientState.usesGunAnimation(
+							activePlayer.getId()));
+			if ("flag_maker".equals(bone.getName())
+					&& activePlayer == net.minecraft.client.MinecraftClient
+							.getInstance().player) {
+				Vector3d world = bone.getWorldPosition();
+				WarBannerSkillClientState.updateLocator(
+						activePlayer.getId(),
+						new Vec3d(world.x, world.y, world.z));
+			}
 		}
 		super.renderRecursively(matrices, animatable, bone, renderType,
 				consumers, buffer, isReRender, tickDelta,

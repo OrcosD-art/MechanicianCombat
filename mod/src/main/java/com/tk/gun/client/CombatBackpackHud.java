@@ -3,6 +3,7 @@ package com.tk.gun.client;
 import com.tk.gun.item.CombatBackpackItem;
 import com.tk.gun.item.BackpackUpgradeData;
 import com.tk.gun.net.CombatBackpackStatusPayload;
+import com.tk.gun.TkGunServer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Identifier;
@@ -10,7 +11,7 @@ import net.minecraft.util.Identifier;
 /** Right-side backpack charge and phase readout. */
 public final class CombatBackpackHud {
 	private static final Identifier AMMO_INFO_TEXTURE =
-			Identifier.of("tkgun", "ammo_info");
+			Identifier.of("mechaniciancombat", "ammo_info");
 
 	public static void render(DrawContext context) {
 		MinecraftClient client = MinecraftClient.getInstance();
@@ -24,11 +25,9 @@ public final class CombatBackpackHud {
 						CombatBackpackItem.equippedStack(client.player));
 		boolean backpackVisible = BackpackUpgradeData.canUseLauncher(
 				CombatBackpackItem.equippedStack(client.player));
-		int bottomY = 30 + client.player.getStatusEffects().size() * 24;
 		if (backpackVisible) {
-			bottomY = renderBackpack(context, client, id, launcherType);
+			renderBackpack(context, client, id, launcherType);
 		}
-		ArmorAbilityHud.render(context, client, bottomY + 4);
 	}
 
 	private static int renderBackpack(DrawContext context, MinecraftClient client,
@@ -43,6 +42,9 @@ public final class CombatBackpackHud {
 		}
 		if (launcherType == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
 			return renderSummonAntenna(context, client, phase, remaining);
+		}
+		if (launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			return renderBattleBanner(context, client);
 		}
 		int maxCharges = launcherType == BackpackUpgradeData.LauncherType.AUTO ? 10 : 3;
 		String stateText = switch (phase) {
@@ -77,30 +79,47 @@ public final class CombatBackpackHud {
 		return y + height;
 	}
 
+	private static int renderBattleBanner(DrawContext context,
+			MinecraftClient client) {
+		boolean cooling = client.player.getItemCooldownManager()
+				.isCoolingDown(TkGunServer.WAR_BANNER);
+		String stateText = cooling
+				? "背包状态：战旗冷却" : "背包状态：战旗就绪";
+		int width = client.textRenderer.getWidth(stateText) + 10;
+		int effectRows = client.player.getStatusEffects().size();
+		int x = context.getScaledWindowWidth() - width - 6;
+		int y = 30 + effectRows * 24;
+		drawAmmoInfoBackground(context, x, y, width, 16);
+		context.drawText(client.textRenderer, stateText,
+				x + 6, y + 5, cooling ? 0xFFFFB060 : 0xFF9BE0FF,
+				true);
+		return y + 16;
+	}
+
 	private static int renderSummonAntenna(DrawContext context,
 			MinecraftClient client, int phase, int remaining) {
 		String stateText = switch (phase) {
 			case CombatBackpackStatusPayload.PHASE_COOLDOWN ->
 					net.minecraft.text.Text.translatable(
-							"hud.tkgun.summon_antenna.cooldown",
+							"hud.mechaniciancombat.summon_antenna.cooldown",
 							Math.max(1, (remaining + 19) / 20)).getString();
 			case CombatBackpackStatusPayload.PHASE_SUMMON_READY ->
 					net.minecraft.text.Text.translatable(
-							"hud.tkgun.summon_antenna.ready").getString();
+							"hud.mechaniciancombat.summon_antenna.ready").getString();
 			case CombatBackpackStatusPayload.PHASE_SUMMON_ARMED ->
 					net.minecraft.text.Text.translatable(
-							"hud.tkgun.summon_antenna.armed").getString();
+							"hud.mechaniciancombat.summon_antenna.armed").getString();
 			case CombatBackpackStatusPayload.PHASE_SUMMON_MARKED ->
 					net.minecraft.text.Text.translatable(
-							"hud.tkgun.summon_antenna.marked").getString();
+							"hud.mechaniciancombat.summon_antenna.marked").getString();
 			case CombatBackpackStatusPayload.PHASE_SUMMON_CAST ->
 					net.minecraft.text.Text.translatable(
-							"hud.tkgun.summon_antenna.cast").getString();
+							"hud.mechaniciancombat.summon_antenna.cast").getString();
 			default -> net.minecraft.text.Text.translatable(
-					"hud.tkgun.summon_antenna.dormant").getString();
+					"hud.mechaniciancombat.summon_antenna.dormant").getString();
 		};
 		String chargeText = net.minecraft.text.Text.translatable(
-				"hud.tkgun.summon_antenna.charge").getString();
+				"hud.mechaniciancombat.summon_antenna.charge").getString();
 		int width = Math.max(client.textRenderer.getWidth(stateText),
 				client.textRenderer.getWidth(chargeText)) + 10;
 		int effectRows = client.player.getStatusEffects().size();

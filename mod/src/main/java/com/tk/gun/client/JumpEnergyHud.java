@@ -10,7 +10,7 @@ import net.minecraft.util.Util;
 /** Bottom-left pixel energy gauge for the jump thruster. */
 public final class JumpEnergyHud {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/gui/hud/jet_energy.png");
+			Identifier.of("mechaniciancombat", "textures/gui/hud/jet_energy.png");
 	private static final int MAX_HEIGHT = 28;
 	private static final int METER_X = 2;
 	private static final int METER_Y = 2;

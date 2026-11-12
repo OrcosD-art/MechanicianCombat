@@ -45,6 +45,7 @@ public final class CombatBackpackClientState {
 		int missileAnimationStartedAt;
 		int openSoundAt = -1;
 		int closeSoundAt = -1;
+		long bannerCastUntil;
 	}
 
 	private static final Map<Integer, Entry> ENTRIES = new HashMap<>();
@@ -63,6 +64,8 @@ public final class CombatBackpackClientState {
 			return;
 		}
 		if (launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			ENTRIES.computeIfAbsent(player.getId(),
+					ignored -> new Entry()).bannerCastUntil = ticks + 23;
 			sendAction(player);
 			return;
 		}
@@ -149,9 +152,10 @@ public final class CombatBackpackClientState {
 			return;
 		}
 		if (ticks >= nextViewSyncAt
-				&& BackpackUpgradeData.launcherType(
+				&& (BackpackUpgradeData.launcherType(
 						CombatBackpackItem.equippedStack(player))
-						== BackpackUpgradeData.LauncherType.AUTO) {
+						== BackpackUpgradeData.LauncherType.AUTO
+						|| ticks < entry.bannerCastUntil)) {
 			sendView(player);
 			nextViewSyncAt = ticks + 2;
 		}
@@ -310,7 +314,7 @@ public final class CombatBackpackClientState {
 		entry.animationStartedAt = ticks;
 		CombatBackpackAnimation.setPhase(playerId, next);
 		if (entry.launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
-			TkGun.LOGGER.info("[tkgun] jump backpack animation {} -> {} player={}",
+			TkGun.LOGGER.info("[mechaniciancombat] jump backpack animation {} -> {} player={}",
 					previous, next, playerId);
 		}
 		entry.openSoundAt = -1;

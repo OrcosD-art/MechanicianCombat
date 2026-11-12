@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(LivingEntity.class)
 public abstract class PlayerFallDamageMixin {
 	@Inject(method = "method_23329(FF)I", at = @At("RETURN"), cancellable = true)
-	private void tkgun$halveLongAirborneFallDamage(float fallDistance, float damageMultiplier,
+	private void mechaniciancombat$halveLongAirborneFallDamage(float fallDistance, float damageMultiplier,
 												 CallbackInfoReturnable<Integer> cir) {
 		if ((Object) this instanceof ServerPlayerEntity player
 				&& cir.getReturnValueI() > 0) {

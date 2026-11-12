@@ -16,13 +16,13 @@ public final class BackpackUpgradeData {
 		BATTLE_BANNER
 	}
 
-	private static final String CORE = "tkgun_backpack_core";
-	private static final String LAUNCHER = "tkgun_backpack_launcher";
-	private static final String LAUNCHER_TYPE = "tkgun_backpack_launcher_type";
-	private static final String CORE_SLOT = "tkgun_backpack_core_slot";
-	private static final String LAUNCHER_SLOT = "tkgun_backpack_launcher_slot";
-	private static final String MISSILE_BOX = "tkgun_backpack_missile_box";
-	private static final String MISSILE_BOX_SLOT = "tkgun_backpack_missile_box_slot";
+	private static final String CORE = "mechaniciancombat_backpack_core";
+	private static final String LAUNCHER = "mechaniciancombat_backpack_launcher";
+	private static final String LAUNCHER_TYPE = "mechaniciancombat_backpack_launcher_type";
+	private static final String CORE_SLOT = "mechaniciancombat_backpack_core_slot";
+	private static final String LAUNCHER_SLOT = "mechaniciancombat_backpack_launcher_slot";
+	private static final String MISSILE_BOX = "mechaniciancombat_backpack_missile_box";
+	private static final String MISSILE_BOX_SLOT = "mechaniciancombat_backpack_missile_box_slot";
 
 	public static boolean hasCore(ItemStack backpack) {
 		return isBackpack(backpack) && customData(backpack).getBoolean(CORE);

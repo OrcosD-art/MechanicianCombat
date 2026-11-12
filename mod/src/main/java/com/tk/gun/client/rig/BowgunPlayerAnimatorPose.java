@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class BowgunPlayerAnimatorPose implements IAnimation {
 	private static final int LAYER_PRIORITY = 20;
 	private static final boolean TRACE =
-			System.getProperty("tkgun.posebridge") != null;
+			System.getProperty("mechaniciancombat.posebridge") != null;
 	private static final Set<String> TRACED_PARTS = ConcurrentHashMap.newKeySet();
 	private static final Map<Integer, PoseSnapshot> POSES = new ConcurrentHashMap<>();
 	private static final Set<String> REQUIRED_UPPER_CHANNELS = Set.of(
@@ -51,13 +51,13 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 
 	public static void register() {
 		if (!FabricLoader.getInstance().isModLoaded("playeranimator")) {
-			TkGun.LOGGER.error("[tkgun] PlayerAnimator 未加载，无法启用原版玩家枪械动画");
+			TkGun.LOGGER.error("[mechaniciancombat] PlayerAnimator 未加载，无法启用原版玩家枪械动画");
 			return;
 		}
 		PlayerAnimationAccess.REGISTER_ANIMATION_EVENT.register(
 				(player, stack) -> stack.addAnimLayer(
 						LAYER_PRIORITY, new BowgunPlayerAnimatorPose(player)));
-		TkGun.LOGGER.info("[tkgun] 已注册 PlayerAnimator 原版玩家姿势桥接");
+		TkGun.LOGGER.info("[mechaniciancombat] 已注册 PlayerAnimator 原版玩家姿势桥接");
 	}
 
 	public static void capture(int playerId, Identifier animationResource,
@@ -243,7 +243,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 				}
 			}
 		}
-		TkGun.LOGGER.info("[tkgun] PlayerAnimator 姿势回调：player={} part={} type={} channels={}",
+		TkGun.LOGGER.info("[mechaniciancombat] PlayerAnimator 姿势回调：player={} part={} type={} channels={}",
 				player.getId(), part, type, active);
 	}
 
@@ -275,7 +275,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 				parsed.put(animation.getKey(), Set.copyOf(keys));
 			}
 		} catch (Exception exception) {
-			TkGun.LOGGER.error("[tkgun] 读取 PlayerAnimator 姿势通道失败：{}",
+			TkGun.LOGGER.error("[mechaniciancombat] 读取 PlayerAnimator 姿势通道失败：{}",
 					id, exception);
 		}
 		return Map.copyOf(parsed);

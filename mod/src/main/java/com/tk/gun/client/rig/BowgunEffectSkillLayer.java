@@ -28,7 +28,7 @@ import software.bernie.geckolib.renderer.layer.GeoRenderLayer;
  */
 public final class BowgunEffectSkillLayer extends GeoRenderLayer<BowgunRig> {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/entity/bowgun_effects.png");
+			Identifier.of("mechaniciancombat", "textures/entity/bowgun_effects.png");
 	private static final float SOURCE_ATLAS_SCALE = 64.0F / 160.0F;
 
 	public BowgunEffectSkillLayer(GeoRenderer<BowgunRig> renderer) {

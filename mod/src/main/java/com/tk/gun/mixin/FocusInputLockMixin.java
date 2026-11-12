@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MinecraftClient.class)
 public abstract class FocusInputLockMixin {
 	@Inject(method = "method_1508()V", at = @At("HEAD"), cancellable = true)
-	private void tkgun$lockFocusInput(CallbackInfo ci) {
+	private void mechaniciancombat$lockFocusInput(CallbackInfo ci) {
 		MinecraftClient client = (MinecraftClient) (Object) this;
 		if (client.player != null && client.currentScreen == null
 				&& TkGun.holdingGun(client.player)

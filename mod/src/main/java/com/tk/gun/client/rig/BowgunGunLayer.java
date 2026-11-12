@@ -54,7 +54,7 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 			if (state >= 0 && state != lastFireScaleState) {
 				lastFireScaleState = state;
 				lastFireScaleY = sy;
-				TkGun.LOGGER.info("[tkgun] fire 平面 scaleY={} （0=收起正常，1=整模型被重置的最初状态）", sy);
+				TkGun.LOGGER.info("[mechaniciancombat] fire 平面 scaleY={} （0=收起正常，1=整模型被重置的最初状态）", sy);
 			}
 		}
 		// ⚠️ 枪口的量测**不在这里**：GeoRenderLayer#renderForBone 对"没有方块的骨骼"（locator）
@@ -64,7 +64,8 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 		// 拿枪贴图硬画它的话 UV 越界，会糊出一块乱七八糟的东西。
 		if (BowgunRigRenderer.BODY_BONES.contains(bone.getName()) || bone.getCubes().isEmpty()
 				|| BowgunAirflowLayer.isAirflowBone(bone.getName())
-				|| BowgunEffectSkillLayer.isSkillEffectBone(bone.getName())) {
+				|| BowgunEffectSkillLayer.isSkillEffectBone(bone.getName())
+				|| BowgunCloseCombatEffectLayer.isEffectBone(bone.getName())) {
 			return;
 		}
 		// **枪口焰那一组（`fire` / `fire1..4`）不要光照阴影**（用户 2026-10-16："如果可行请去掉此组中

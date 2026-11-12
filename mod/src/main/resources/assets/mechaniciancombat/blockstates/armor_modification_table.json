@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "mechaniciancombat:block/armor_modification_table"
+    },
+    "facing=east": {
+      "model": "mechaniciancombat:block/armor_modification_table",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "mechaniciancombat:block/armor_modification_table",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "mechaniciancombat:block/armor_modification_table",
+      "y": 270
+    }
+  }
+}

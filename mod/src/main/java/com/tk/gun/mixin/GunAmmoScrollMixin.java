@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Mouse.class)
 public abstract class GunAmmoScrollMixin {
 	@Inject(method = "method_1598", at = @At("HEAD"), cancellable = true)
-	private void tkgun$switchAmmoOnScroll(long window, double xOffset, double yOffset, CallbackInfo ci) {
+	private void mechaniciancombat$switchAmmoOnScroll(long window, double xOffset, double yOffset, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (yOffset == 0.0D || client.player == null || client.currentScreen != null
 				|| !TkGun.holdingGun(client.player)) {

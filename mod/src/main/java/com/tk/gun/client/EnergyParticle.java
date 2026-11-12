@@ -13,7 +13,7 @@ import net.minecraft.particle.SimpleParticleType;
  *
  * <p>{@code particle-muzzle}=枪口能量汇聚（converge，6 帧，短促 0.3s）、
  * {@code particle-hit}=命中能量爆（xplo，6 帧，稍长带淡出）。
- * 两个粒子各有一个 SpriteProvider（帧序列由 `assets/tkgun/particles/*.json` 定），
+ * 两个粒子各有一个 SpriteProvider（帧序列由 `assets/mechaniciancombat/particles/*.json` 定），
  * 所以这里用同一个类、两组参数，各给一个 Factory。
  */
 public class EnergyParticle extends SpriteBillboardParticle {
@@ -138,6 +138,17 @@ public class EnergyParticle extends SpriteBillboardParticle {
 											 double x, double y, double z,
 											 double vx, double vy, double vz) {
 			return new EnergyParticle(world, x, y, z, this.provider, 10, 2.0F, true);
+		}
+	}
+
+	/** Authored five-frame melee slash hit, played at 10 ticks total. */
+	public record SlashHitFactory(SpriteProvider provider)
+			implements ParticleFactory<SimpleParticleType> {
+		@Override
+		public EnergyParticle createParticle(SimpleParticleType type, ClientWorld world,
+											 double x, double y, double z,
+											 double vx, double vy, double vz) {
+			return new EnergyParticle(world, x, y, z, this.provider, 10, 2.0F, false);
 		}
 	}
 

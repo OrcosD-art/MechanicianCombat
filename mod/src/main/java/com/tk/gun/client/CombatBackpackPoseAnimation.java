@@ -148,7 +148,7 @@ public final class CombatBackpackPoseAnimation {
 			loadClips(client, loaded, RESOURCE);
 			loadClips(client, loaded, JUMP_COOLDOWN_RESOURCE);
 		} catch (Exception exception) {
-			TkGun.LOGGER.error("[tkgun] Failed to load backpack state animation {}",
+			TkGun.LOGGER.error("[mechaniciancombat] Failed to load backpack state animation {}",
 					RESOURCE, exception);
 		}
 		clips = Map.copyOf(loaded);

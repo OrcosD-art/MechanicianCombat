@@ -17,8 +17,8 @@ public final class VeritasEtJustitiaGun {
 					TkGun.id("textures/entity/veritas_et_justitia_gun.png"))
 			.textureSize(64, 64)
 			.translations(
-					"item.tkgun.veritas_et_justitia",
-					"tooltip.tkgun.veritas_et_justitia.description")
+					"item.mechaniciancombat.veritas_et_justitia",
+					"tooltip.mechaniciancombat.veritas_et_justitia.description")
 			.build();
 
 	private VeritasEtJustitiaGun() {

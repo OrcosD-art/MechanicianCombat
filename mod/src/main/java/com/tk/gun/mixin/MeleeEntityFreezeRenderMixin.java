@@ -16,20 +16,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(WorldRenderer.class)
 public abstract class MeleeEntityFreezeRenderMixin {
 	@Unique
-	private MeleeRenderStateSnapshot tkgun$savedRenderState;
+	private MeleeRenderStateSnapshot mechaniciancombat$savedRenderState;
 
 	@Inject(method = "method_22977(Lnet/minecraft/class_1297;DDDFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;)V",
 			at = @At("HEAD"))
-	private void tkgun$freezeTargetForRender(Entity entity, double cameraX,
+	private void mechaniciancombat$freezeTargetForRender(Entity entity, double cameraX,
 			double cameraY, double cameraZ, float tickDelta, MatrixStack matrices,
 			VertexConsumerProvider vertexConsumers, CallbackInfo ci) {
 		MeleeImpactClientState.FreezeState state =
 				MeleeImpactClientState.frozenTarget(entity.getId());
 		if (state == null) {
-			tkgun$savedRenderState = null;
+			mechaniciancombat$savedRenderState = null;
 			return;
 		}
-		tkgun$savedRenderState = MeleeRenderStateSnapshot.capture(entity);
+		mechaniciancombat$savedRenderState = MeleeRenderStateSnapshot.capture(entity);
 		double shake = state.getShake(tickDelta);
 		double frozenX = state.x() + state.shakeX() * shake;
 		double frozenZ = state.z() + state.shakeZ() * shake;
@@ -51,11 +51,11 @@ public abstract class MeleeEntityFreezeRenderMixin {
 
 	@Inject(method = "method_22977(Lnet/minecraft/class_1297;DDDFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;)V",
 			at = @At("TAIL"))
-	private void tkgun$restoreTargetAfterRender(Entity entity, double cameraX,
+	private void mechaniciancombat$restoreTargetAfterRender(Entity entity, double cameraX,
 			double cameraY, double cameraZ, float tickDelta, MatrixStack matrices,
 			VertexConsumerProvider vertexConsumers, CallbackInfo ci) {
-		MeleeRenderStateSnapshot saved = tkgun$savedRenderState;
-		tkgun$savedRenderState = null;
+		MeleeRenderStateSnapshot saved = mechaniciancombat$savedRenderState;
+		mechaniciancombat$savedRenderState = null;
 		if (saved == null) {
 			return;
 		}

@@ -16,11 +16,11 @@ import net.minecraft.util.collection.DefaultedList;
 /** 绑定在枪械 ItemStack 上的 8 格弹仓与当前选中槽。 */
 public final class GunAmmoData {
 	public static final int SIZE = 8;
-	private static final String ROOT = "tkgun_ammo";
+	private static final String ROOT = "mechaniciancombat_ammo";
 	private static final String SELECTED = "Selected";
-	private static final String MAG = "tkgun_mag";
-	private static final String MAG_AMMO = "tkgun_mag_ammo";
-	private static final String MAG_VERSION = "tkgun_mag_version";
+	private static final String MAG = "mechaniciancombat_mag";
+	private static final String MAG_AMMO = "mechaniciancombat_mag_ammo";
+	private static final String MAG_VERSION = "mechaniciancombat_mag_version";
 
 	public static ItemStack heldGun(PlayerEntity player) {
 		ItemStack stack = player.getMainHandStack();
@@ -139,8 +139,8 @@ public final class GunAmmoData {
 			handler.setSelectedSlot(selected);
 		}
 		ItemStack ammo = items.get(selected);
-		player.sendMessage(Text.translatable("text.tkgun.current_ammo",
-				ammo.isEmpty() ? Text.translatable("text.tkgun.empty") : ammo.getName()), true);
+		player.sendMessage(Text.translatable("text.mechaniciancombat.current_ammo",
+				ammo.isEmpty() ? Text.translatable("text.mechaniciancombat.empty") : ammo.getName()), true);
 		return selected;
 	}
 
@@ -183,8 +183,8 @@ public final class GunAmmoData {
 		int selected = selected(gun);
 		ItemStack ammo = items.get(selected);
 		if (ammo.isEmpty() || ammo.getCount() < amount || !AmmoItems.isAmmo(ammo)) {
-			player.sendMessage(Text.translatable("text.tkgun.current_ammo",
-					Text.translatable("text.tkgun.empty")), true);
+			player.sendMessage(Text.translatable("text.mechaniciancombat.current_ammo",
+					Text.translatable("text.mechaniciancombat.empty")), true);
 			return false;
 		}
 		ammo.decrement(amount);

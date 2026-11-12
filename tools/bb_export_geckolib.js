@@ -105,12 +105,19 @@ log.push(await fire("export_geckolib_animations"));
 // 条件不满足时兜底直接调 Blockbench 自带的导出动作（导出的是同一个 Bedrock 动画文件）。
 log.push(await fire("export_animation_file"));
 
-const out = globalThis.__BB_EXPORTS.map(e => ({
-    name: e.name,
-    type: e.type,
-    bytes: (typeof e.content === "string") ? e.content.length : -1,
-    content: (typeof e.content === "string") ? e.content : null,
-}));
+const out = globalThis.__BB_EXPORTS.map(e => {
+    const content = typeof e.content === "string"
+        ? e.content
+        : (e.content && typeof e.content === "object"
+            ? JSON.stringify(e.content)
+            : null);
+    return {
+        name: e.name,
+        type: e.type,
+        bytes: content === null ? -1 : content.length,
+        content,
+    };
+});
 return JSON.stringify({
     uv_fixed: uvFixed,
     body_bones: bodyBones,

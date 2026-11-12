@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(ItemCooldownManager.class)
 public abstract class ItemCooldownProgressMixin {
 	@Inject(method = "method_7905", at = @At("RETURN"), cancellable = true)
-	private void tkgun$fortressCooldownProgress(Item item, float tickDelta,
+	private void mechaniciancombat$fortressCooldownProgress(Item item, float tickDelta,
 			CallbackInfoReturnable<Float> cir) {
 		float progress = FortressSkillCooldownClient.progress(item, tickDelta);
 		if (!Float.isNaN(progress)) {

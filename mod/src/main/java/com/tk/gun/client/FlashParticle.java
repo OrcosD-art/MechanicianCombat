@@ -8,9 +8,9 @@ import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.particle.SimpleParticleType;
 
-/** Six-frame authored Veritas flash, played at six frames per second. */
+/** Five-frame authored Veritas flash, played across the one-second lifetime. */
 public final class FlashParticle extends SpriteBillboardParticle {
-	private static final int FRAME_COUNT = 6;
+	private static final int FRAME_COUNT = 5;
 	private static final int LIFETIME = 20;
 
 	private final SpriteProvider provider;
@@ -32,7 +32,7 @@ public final class FlashParticle extends SpriteBillboardParticle {
 	private void updateSprite() {
 		int frame = Math.min(FRAME_COUNT - 1,
 				(int) ((long) this.age * FRAME_COUNT / LIFETIME));
-		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT));
+		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT - 1));
 	}
 
 	@Override

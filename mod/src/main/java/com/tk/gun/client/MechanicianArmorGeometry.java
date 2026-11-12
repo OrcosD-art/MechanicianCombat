@@ -526,7 +526,7 @@ public final class MechanicianArmorGeometry {
 					sourceTextures.get(index).getAsJsonObject();
 			String name = sourceTexture.get("name").getAsString();
 			Identifier texture = switch (name) {
-				case "eng_chain.png" -> Identifier.of("tkgun",
+				case "eng_chain.png" -> Identifier.of("mechaniciancombat",
 						"textures/entity/mechanician_soul_chain.png");
 				default -> piece.textureLocation();
 			};
@@ -717,7 +717,7 @@ public final class MechanicianArmorGeometry {
 	}
 
 	private static JsonObject read(MechanicianArmorPiece piece) {
-		String path = "/assets/tkgun/" + piece.modelLocation().getPath();
+		String path = "/assets/mechaniciancombat/" + piece.modelLocation().getPath();
 		try (InputStream stream = MechanicianArmorGeometry.class
 				.getResourceAsStream(path)) {
 			if (stream == null) {
@@ -756,7 +756,7 @@ public final class MechanicianArmorGeometry {
 		private TextureInfo info(int index) {
 			return textures.getOrDefault(index,
 					textures.getOrDefault(0, new TextureInfo(
-							Identifier.of("tkgun",
+							Identifier.of("mechaniciancombat",
 									"textures/entity/mechanician_chestplate.png"),
 							TEXTURE_WIDTH, TEXTURE_HEIGHT)));
 		}

@@ -6,15 +6,18 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$AnimationName,
     [switch]$IncludeLegs,
+    [switch]$LowerOnly,
     [string]$TargetAnimationName = ""
 )
 
 $ErrorActionPreference = "Stop"
 $invariant = [Globalization.CultureInfo]::InvariantCulture
-$outputAnimationName = if ([string]::IsNullOrWhiteSpace($TargetAnimationName)) {
-    $AnimationName
-} else {
+$outputAnimationName = if (-not [string]::IsNullOrWhiteSpace($TargetAnimationName)) {
     $TargetAnimationName
+} elseif ($LowerOnly) {
+    "${AnimationName}_lower"
+} else {
+    $AnimationName
 }
 
 function Number([object]$value) {
@@ -125,13 +128,23 @@ foreach ($animator in $source.animators.PSObject.Properties.Value) {
     }
 }
 
-if ($sounds.Count -gt 0) {
+if ($LowerOnly) {
+    $lowerBones = [ordered]@{}
+    foreach ($boneName in @("body", "leg_left", "leg_right")) {
+        if ($converted.bones.Contains($boneName)) {
+            $lowerBones[$boneName] = $converted.bones[$boneName]
+        }
+    }
+    $converted.bones = $lowerBones
+}
+
+if ((-not $LowerOnly) -and $sounds.Count -gt 0) {
     $converted.sound_effects = [pscustomobject]$sounds
 }
-if ($particles.Count -gt 0) {
+if ((-not $LowerOnly) -and $particles.Count -gt 0) {
     $converted.particle_effects = [pscustomobject]$particles
 }
-if ($timeline.Count -gt 0) {
+if ((-not $LowerOnly) -and $timeline.Count -gt 0) {
     $converted.timeline = [pscustomobject]$timeline
 }
 

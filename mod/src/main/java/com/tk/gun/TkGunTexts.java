@@ -19,7 +19,7 @@ import net.minecraft.text.Text;
  * <p>约定：调用点统一走 {@link #say}（空串直接跳过）；每个常量上面那行注释是**被清掉的原文**，
  * 方便以后对照；`%d` 是运行期要填的数（闪避冷却秒数）。
  *
- * <p>⚠️ 原来客户端那条"§e[tkgun] 专注没生效 …"（服务端旧 jar 诊断）已经**整段删掉**，
+ * <p>⚠️ 原来客户端那条"§e[mechaniciancombat] 专注没生效 …"（服务端旧 jar 诊断）已经**整段删掉**，
  * 不在这里留占位 —— 用户 2026-10-17 点名要清掉它。
  */
 public final class TkGunTexts {
@@ -71,7 +71,7 @@ public final class TkGunTexts {
 				.append(Text.keybind("key.sneak"))
 				.append(Text.literal("/技能键起身    "))
 				.append(Text.keybind(CombatRollHook.isInstalled()
-						? "keybinds.combat_roll.roll" : "key.tkgun.roll"))
+						? "keybinds.combat_roll.roll" : "key.mechaniciancombat.roll"))
 				.append(Text.literal("/闪避键翻滚"));
 	}
 

@@ -10,8 +10,8 @@ import java.util.Map;
 @Mixin(ItemCooldownManager.class)
 public interface ItemCooldownManagerAccessor {
 	@Accessor("field_8024")
-	Map<Item, ?> tkgun$entries();
+	Map<Item, ?> mechaniciancombat$entries();
 
 	@Accessor("field_8025")
-	int tkgun$tick();
+	int mechaniciancombat$tick();
 }

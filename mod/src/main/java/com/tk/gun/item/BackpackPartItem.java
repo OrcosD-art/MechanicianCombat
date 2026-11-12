@@ -57,29 +57,29 @@ public final class BackpackPartItem extends Item implements GeoItem {
 							  TooltipType type) {
 		super.appendTooltip(stack, context, tooltip, type);
 		if (kind == Kind.LAUNCHER) {
-			tooltip.add(Text.translatable("tooltip.tkgun.portable_launcher.storage"));
-			tooltip.add(Text.translatable("tooltip.tkgun.portable_launcher.ammo"));
-			tooltip.add(Text.translatable("tooltip.tkgun.portable_launcher.trajectory"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.portable_launcher.storage"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.portable_launcher.ammo"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.portable_launcher.trajectory"));
 		} else if (kind == Kind.AUTO_LAUNCHER) {
-			tooltip.add(Text.translatable("tooltip.tkgun.auto_portable_launcher.storage"));
-			tooltip.add(Text.translatable("tooltip.tkgun.auto_portable_launcher.attack"));
-			tooltip.add(Text.translatable("tooltip.tkgun.auto_portable_launcher.charge"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.auto_portable_launcher.storage"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.auto_portable_launcher.attack"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.auto_portable_launcher.charge"));
 		} else if (kind == Kind.SUMMON_ANTENNA) {
-			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.deploy"));
-			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.mark"));
-			tooltip.add(Text.translatable("tooltip.tkgun.summon_antenna.cast"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.summon_antenna.deploy"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.summon_antenna.mark"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.summon_antenna.cast"));
 		} else if (kind == Kind.JUMP_THRUSTER) {
-			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.activate"));
-			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.steer"));
-			tooltip.add(Text.translatable("tooltip.tkgun.jump_backpack_thruster.restriction"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.jump_backpack_thruster.activate"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.jump_backpack_thruster.steer"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.jump_backpack_thruster.restriction"));
 		} else if (kind == Kind.MISSILE_BOX) {
-			tooltip.add(Text.translatable("tooltip.tkgun.missile_box.install"));
-			tooltip.add(Text.translatable("tooltip.tkgun.missile_box.mark"));
-			tooltip.add(Text.translatable("tooltip.tkgun.missile_box.fire"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.missile_box.install"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.missile_box.mark"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.missile_box.fire"));
 		} else if (kind == Kind.BATTLE_BANNER) {
-			tooltip.add(Text.translatable("tooltip.tkgun.war_banner.install"));
-			tooltip.add(Text.translatable("tooltip.tkgun.war_banner.skill"));
-			tooltip.add(Text.translatable("tooltip.tkgun.war_banner.aura"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.install"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.skill"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.aura"));
 		}
 	}
 }

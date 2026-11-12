@@ -32,7 +32,7 @@ public final class ThunderParticle extends SpriteBillboardParticle {
 
 	private void updateSprite() {
 		int frame = Math.min(FRAME_COUNT - 1, this.age / FRAME_STEP_TICKS);
-		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT));
+		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT - 1));
 	}
 
 	@Override

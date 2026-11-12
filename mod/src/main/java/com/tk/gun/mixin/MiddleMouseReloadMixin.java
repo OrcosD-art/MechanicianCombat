@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(MinecraftClient.class)
 public abstract class MiddleMouseReloadMixin {
 	@Inject(method = "method_1511", at = @At("HEAD"), cancellable = true)
-	private void tkgun$pickItemOpensAmmoRing(CallbackInfo ci) {
+	private void mechaniciancombat$pickItemOpensAmmoRing(CallbackInfo ci) {
 		MinecraftClient client = (MinecraftClient) (Object) this;
 		if (client.player != null && client.currentScreen == null
 				&& TkGun.holdingGun(client.player)) {

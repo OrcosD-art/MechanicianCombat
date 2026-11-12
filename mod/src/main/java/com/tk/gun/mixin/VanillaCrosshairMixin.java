@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class VanillaCrosshairMixin {
 	@Inject(method = "method_1736(Lnet/minecraft/class_332;Lnet/minecraft/class_9779;)V",
 			at = @At("HEAD"), cancellable = true)
-	private void tkgun$hideVanillaCrosshair(DrawContext context,
+	private void mechaniciancombat$hideVanillaCrosshair(DrawContext context,
 											RenderTickCounter tickCounter,
 											CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();

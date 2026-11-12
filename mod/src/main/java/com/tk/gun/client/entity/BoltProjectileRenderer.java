@@ -15,7 +15,7 @@ import net.minecraft.util.Identifier;
  * 这样也彻底断了"看起来像原版箭"的可能——用户 2026-10-12 反复强调过。
  */
 public class BoltProjectileRenderer extends EntityRenderer<BoltProjectileEntity> {
-	private static final Identifier DUMMY = Identifier.of("tkgun", "textures/entity/bowgun_gun.png");
+	private static final Identifier DUMMY = Identifier.of("mechaniciancombat", "textures/entity/bowgun_gun.png");
 
 	public BoltProjectileRenderer(EntityRendererFactory.Context context) {
 		super(context);

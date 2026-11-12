@@ -11,7 +11,7 @@ import net.minecraft.util.Identifier;
 /** 右下角弹药与热量 HUD：腰射显示弹匣计数，专注显示热量与当前弹仓余量。 */
 public final class GunHud {
 	private static final Identifier AMMO_INFO_TEXTURE =
-			Identifier.of("tkgun", "ammo_info");
+			Identifier.of("mechaniciancombat", "ammo_info");
 
 	public static void render(DrawContext context) {
 		MinecraftClient client = MinecraftClient.getInstance();
@@ -56,7 +56,6 @@ public final class GunHud {
 			context.fill(bx - pad, y - 12, bx + tw + pad, y - 1, 0x90102828);
 			context.drawText(client.textRenderer, focusTag, bx, y - 10, 0xFF9BE0FF, true);
 		}
-		AmmoSwitchHud.render(context);
 	}
 
 	private static String loadedMagazineText(int entityId, int left) {

@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class GunTooltipBackgroundMixin {
 	@Inject(method = "method_47946(Lnet/minecraft/class_332;IIIII)V",
 			at = @At("HEAD"), cancellable = true)
-	private static void tkgun$renderGunTooltipBackground(DrawContext context, int x, int y,
+	private static void mechaniciancombat$renderGunTooltipBackground(DrawContext context, int x, int y,
 													  int width, int height, int z, CallbackInfo ci) {
 		if (!GunTooltipState.isGunTooltip()) {
 			return;

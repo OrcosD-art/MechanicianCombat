@@ -7,8 +7,8 @@ import net.minecraft.registry.Registry;
 
 /**
  * 711 素材里那个「散热粒子.json」是 Bedrock 草稿（identifier/texture 都是空的），
- * 这里把它补完并落到本服能用的形式上：一个真正的 MC 粒子 tkgun:heat_vent，
- * 12 帧贴图在 resources/assets/tkgun/textures/particle/heat_vent_0..11.png。
+ * 这里把它补完并落到本服能用的形式上：一个真正的 MC 粒子 mechaniciancombat:heat_vent，
+ * 12 帧贴图在 resources/assets/mechaniciancombat/textures/particle/heat_vent_0..11.png。
  *
  * 2026-10-13 机械师素材又给了 `粒子.zip`：`converge.png`(32x192) / `xplo.png`(48x288)
  * 两张竖条翻页贴图 —— 切成单帧后登记成
@@ -37,6 +37,13 @@ public final class TkGunParticles {
 	public static final SimpleParticleType SONIC_BOOM = FabricParticleTypes.simple(true);
 	/** Grapeshot pellet impact effect, six frames from grapeshot_explo.png. */
 	public static final SimpleParticleType GRAPESHOT_IMPACT = FabricParticleTypes.simple(true);
+	/** Three authored five-frame melee hit effects. */
+	public static final SimpleParticleType SLASH_HIT_1 = FabricParticleTypes.simple(true);
+	public static final SimpleParticleType SLASH_HIT_2 = FabricParticleTypes.simple(true);
+	public static final SimpleParticleType SLASH_HIT_3 = FabricParticleTypes.simple(true);
+	public static final SimpleParticleType[] MELEE_HIT_EFFECTS = {
+			SLASH_HIT_1, SLASH_HIT_2, SLASH_HIT_3
+	};
 	/** Rose quartz impact effect, four frames from rose_quartz_explo.png. */
 	public static final SimpleParticleType ROSE_QUARTZ_IMPACT = FabricParticleTypes.simple(true);
 	/** Full-bright rose quartz guidance trail. */
@@ -49,6 +56,10 @@ public final class TkGunParticles {
 	public static final SimpleParticleType GOLEM_ENERGY_CONVERGE = FabricParticleTypes.simple(true);
 	/** Second-stage convergence authored as a distinct six-frame texture strip. */
 	public static final SimpleParticleType GOLEM_ENERGY_CONVERGE_2 = FabricParticleTypes.simple(true);
+	/** Rising light motes inside the deployed war banner's aura. */
+	public static final SimpleParticleType WAR_BANNER_SPARK = FabricParticleTypes.simple(true);
+	/** Veritas close-combat authored skill spark flipbook. */
+	public static final SimpleParticleType SKILL_SPARK = FabricParticleTypes.simple(true);
 
 	public static void register() {
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("heat_vent"), HEAT_VENT);
@@ -61,6 +72,9 @@ public final class TkGunParticles {
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("cutting_explo"), CUTTING_EXPLO);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("sonic_boom"), SONIC_BOOM);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("grapeshot_impact"), GRAPESHOT_IMPACT);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("slash_hit_1"), SLASH_HIT_1);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("slash_hit_2"), SLASH_HIT_2);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("slash_hit_3"), SLASH_HIT_3);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_explo"), ROSE_QUARTZ_IMPACT);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_trail"), ROSE_QUARTZ_TRAIL);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("thunder"), THUNDER);
@@ -69,7 +83,11 @@ public final class TkGunParticles {
 				GOLEM_ENERGY_CONVERGE);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("golem_energy_converge_2"),
 				GOLEM_ENERGY_CONVERGE_2);
-		TkGun.LOGGER.info("[tkgun] 粒子已注册: {} / {} / {} / {} / {} / {} / {} / {} / {} / {} / {}", TkGun.id("heat_vent"),
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("war_banner_spark"),
+				WAR_BANNER_SPARK);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("skill_spark"),
+				SKILL_SPARK);
+		TkGun.LOGGER.info("[mechaniciancombat] 粒子已注册: {} / {} / {} / {} / {} / {} / {} / {} / {} / {} / {}", TkGun.id("heat_vent"),
 				TkGun.id("energy_converge"), TkGun.id("energy_xplo"), TkGun.id("shell_boost"),
 				TkGun.id("muzzle_glow"), TkGun.id("sonic_boom"), TkGun.id("grapeshot_impact"),
 				TkGun.id("rose_quartz_explo"), TkGun.id("rose_quartz_trail"),

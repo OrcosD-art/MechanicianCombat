@@ -1,0 +1,93 @@
+{
+	"credit": "Made with Blockbench",
+	"texture_size": [160, 160],
+	"textures": {
+		"0": "mechaniciancombat:item/mechanician_hunter_spear"
+	},
+	"elements": [
+		{
+			"from": [6, 0, 6],
+			"to": [10, 2, 10],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 10, 8]},
+			"faces": {
+				"north": {"uv": [11.3, 2, 11.7, 2.2], "texture": "#0"},
+				"east": {"uv": [11.3, 2, 11.7, 2.2], "texture": "#0"},
+				"south": {"uv": [11.3, 2, 11.7, 2.2], "texture": "#0"},
+				"west": {"uv": [11.3, 2, 11.7, 2.2], "texture": "#0"},
+				"up": {"uv": [11.3, 2.1, 11.7, 1.7], "rotation": 90, "texture": "#0"},
+				"down": {"uv": [11.3, 2.1, 11.7, 1.7], "rotation": 90, "texture": "#0"}
+			}
+		},
+		{
+			"from": [8, -9, 6.5],
+			"to": [8, 0, 9.5],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 0, 8]},
+			"faces": {
+				"east": {"uv": [13, 4.8, 13.3, 5.7], "texture": "#0"}
+			}
+		},
+		{
+			"from": [7, 0, 7],
+			"to": [9, 16, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 0, 8]},
+			"faces": {
+				"north": {"uv": [10.1, 4.8, 9.9, 6.4], "texture": "#0"},
+				"east": {"uv": [9.9, 4.8, 10.1, 6.4], "texture": "#0"},
+				"south": {"uv": [10.1, 4.8, 9.9, 6.4], "texture": "#0"},
+				"west": {"uv": [9.9, 4.8, 10.1, 6.4], "texture": "#0"},
+				"up": {"uv": [9.9, 5, 10.1, 4.8], "rotation": 270, "texture": "#0"}
+			}
+		},
+		{
+			"from": [7, 16, 7],
+			"to": [9, 18, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 16, 8]},
+			"faces": {
+				"north": {"uv": [5.9, 4.3, 5.7, 4.5], "texture": "#0"},
+				"east": {"uv": [5.7, 4.3, 5.9, 4.5], "texture": "#0"},
+				"south": {"uv": [5.9, 4.3, 5.7, 4.5], "texture": "#0"},
+				"west": {"uv": [5.7, 4.3, 5.9, 4.5], "texture": "#0"},
+				"up": {"uv": [5.7, 4.2, 5.9, 4.4], "rotation": 90, "texture": "#0"},
+				"down": {"uv": [0, 0, 0.2, 0.2], "texture": "#0"}
+			}
+		},
+		{
+			"from": [7.5, -7, 7.5],
+			"to": [8.5, 0, 8.5],
+			"rotation": {"angle": 0, "axis": "y", "origin": [7.5, -2, 7.5]},
+			"faces": {
+				"north": {"uv": [13.1, 4.8, 13.2, 5.5], "texture": "#0"},
+				"east": {"uv": [13.1, 4.8, 13.2, 5.5], "texture": "#0"},
+				"south": {"uv": [13.1, 4.8, 13.2, 5.5], "texture": "#0"},
+				"west": {"uv": [13.1, 4.8, 13.2, 5.5], "texture": "#0"},
+				"up": {"uv": [0, 0, 0.1, 0.1], "texture": "#0"},
+				"down": {"uv": [13.1, 5.4, 13.2, 5.5], "texture": "#0"}
+			}
+		}
+	],
+	"display": {
+		"firstperson_righthand": {
+			"translation": [3, -2, 0]
+		},
+		"firstperson_lefthand": {
+			"translation": [3, -2, 0]
+		},
+		"ground": {
+			"translation": [0, 14.75, 0]
+		},
+		"gui": {
+			"rotation": [0, 45, -45],
+			"translation": [1, 1.5, 0],
+			"scale": [0.75, 0.75, 0.75]
+		}
+	},
+	"groups": [
+		{
+			"name": "spear",
+			"origin": [8, 10, 8],
+			"scope": 0,
+			"color": 0,
+			"children": [0, 1, 2, 3, 4]
+		}
+	]
+}

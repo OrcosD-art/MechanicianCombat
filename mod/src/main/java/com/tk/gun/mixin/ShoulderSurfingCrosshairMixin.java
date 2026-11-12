@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(targets = "com.github.exopandora.shouldersurfing.client.CrosshairRenderer")
 public abstract class ShoulderSurfingCrosshairMixin {
 	@Inject(method = "doRenderCrosshair", at = @At("HEAD"), cancellable = true)
-	private void tkgun$hideShoulderCrosshair(CallbackInfoReturnable<Boolean> cir) {
+	private void mechaniciancombat$hideShoulderCrosshair(CallbackInfoReturnable<Boolean> cir) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.player != null && TkGun.holdingGun(client.player)) {
 			cir.setReturnValue(false);

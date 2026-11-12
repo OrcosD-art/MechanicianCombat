@@ -105,7 +105,7 @@ public final class MechanicianUndersuitItem extends AccessoryItem implements Geo
 							  List<Text> tooltip, TooltipType type) {
 		super.appendTooltip(stack, context, tooltip, type);
 		tooltip.add(Text.translatable(
-				"tooltip.tkgun.mechanician_undersuit"));
+				"tooltip.mechaniciancombat.mechanician_undersuit"));
 	}
 
 	@Override

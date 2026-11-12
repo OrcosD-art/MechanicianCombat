@@ -14,18 +14,18 @@ public final class ArmorUpgradeData {
 	public static final int MAX_SHIELD_CHARGES = 3;
 	public static final int HELMET_EXPAND_TICKS = 10;
 	public static final int HELMET_FOLD_TICKS = 13;
-	private static final String SHIELD_COOLDOWN_UNTIL = "tkgun_shield_cooldown_until";
-	private static final String TOTEM_COOLDOWN_UNTIL = "tkgun_totem_cooldown_until";
-	private static final String SHIELD_CHARGES = "tkgun_shield_charges";
-	private static final String SHIELD_RECHARGE_KILLS = "tkgun_shield_recharge_kills";
-	private static final String SHIELD_RECHARGE_AT = "tkgun_shield_recharge_at";
+	private static final String SHIELD_COOLDOWN_UNTIL = "mechaniciancombat_shield_cooldown_until";
+	private static final String TOTEM_COOLDOWN_UNTIL = "mechaniciancombat_totem_cooldown_until";
+	private static final String SHIELD_CHARGES = "mechaniciancombat_shield_charges";
+	private static final String SHIELD_RECHARGE_KILLS = "mechaniciancombat_shield_recharge_kills";
+	private static final String SHIELD_RECHARGE_AT = "mechaniciancombat_shield_recharge_at";
 	private static final String SHIELD_RECHARGE_WINDOW_UNTIL =
-			"tkgun_shield_recharge_window_until";
-	private static final String HELMET_EXPANDED = "tkgun_helmet_expanded";
+			"mechaniciancombat_shield_recharge_window_until";
+	private static final String HELMET_EXPANDED = "mechaniciancombat_helmet_expanded";
 	private static final String HELMET_TRANSITION_STARTED =
-			"tkgun_helmet_transition_started";
+			"mechaniciancombat_helmet_transition_started";
 	private static final String HELMET_TRANSITION_DURATION =
-			"tkgun_helmet_transition_duration";
+			"mechaniciancombat_helmet_transition_duration";
 
 	private ArmorUpgradeData() {
 	}
@@ -175,7 +175,7 @@ public final class ArmorUpgradeData {
 	}
 
 	private static String partKey(ArmorPartItem.Kind kind) {
-		return "tkgun_armor_part_" + kind.name().toLowerCase(Locale.ROOT);
+		return "mechaniciancombat_armor_part_" + kind.name().toLowerCase(Locale.ROOT);
 	}
 
 	private static long longValue(ItemStack stack, String key) {

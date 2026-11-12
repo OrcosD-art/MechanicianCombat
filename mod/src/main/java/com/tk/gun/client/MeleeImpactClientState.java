@@ -1,6 +1,7 @@
 package com.tk.gun.client;
 
 import com.tk.gun.net.MeleeImpactPayload;
+import com.tk.gun.net.CameraShakePayload;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
@@ -63,6 +64,13 @@ public final class MeleeImpactClientState {
 		}
 	}
 
+	public static void apply(CameraShakePayload payload) {
+		if (payload.ticks() > 0) {
+			startCameraShake(payload.ticks(), payload.critical(),
+					payload.intensityScale());
+		}
+	}
+
 	private static FreezeState createFreezeState(Entity target, Entity attacker,
 			int ticks, int totalTicks) {
 		float bodyYaw = target.getYaw();
@@ -82,10 +90,16 @@ public final class MeleeImpactClientState {
 	}
 
 	private static void startCameraShake(int ticks, boolean critical) {
+		startCameraShake(ticks, critical, 1.0F);
+	}
+
+	private static void startCameraShake(int ticks, boolean critical,
+			float intensityScale) {
 		float intensity = ticks <= 1 ? 0.3F : ticks <= 3 ? 0.6F : 1.0F;
 		if (critical) {
 			intensity *= 1.2F;
 		}
+		intensity *= Math.max(0.0F, intensityScale);
 		cameraShake = new ShakeState(ticks + 1, ticks + 1, intensity);
 	}
 

@@ -11,7 +11,7 @@ import net.minecraft.item.TridentItem;
 /** Shared server/client rules for the portable launcher's occupied offhand. */
 public final class BackpackLauncherRules {
 	private static final String VIRTUAL_BATTLE_BANNER =
-			"tkgun_virtual_war_banner";
+			"mechaniciancombat_virtual_war_banner";
 
 	public static boolean hasActiveLauncher(LivingEntity entity) {
 		if (entity == null) {
@@ -35,11 +35,8 @@ public final class BackpackLauncherRules {
 						== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
 	}
 
-	public static ItemStack createVirtualBattleBanner() {
-		ItemStack stack = new ItemStack(TkGunServer.WAR_BANNER);
-		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, stack,
-				nbt -> nbt.putBoolean(VIRTUAL_BATTLE_BANNER, true));
-		return stack;
+	public static ItemStack createBattleBannerIcon() {
+		return new ItemStack(TkGunServer.WAR_BANNER);
 	}
 
 	public static boolean isVirtualBattleBanner(ItemStack stack) {

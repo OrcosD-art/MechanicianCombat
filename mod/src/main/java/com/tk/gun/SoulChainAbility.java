@@ -19,8 +19,9 @@ import java.util.List;
 
 /** C3 soul-chain damage propagation and visual event dispatch. */
 public final class SoulChainAbility {
-	private static final double LINK_RADIUS = 5.0D;
-	private static final double LINK_CHANCE = 0.35D;
+	private static final double LINK_DIAMETER = 10.0D;
+	private static final double LINK_RADIUS = LINK_DIAMETER * 0.5D;
+	private static final double LINK_CHANCE = 0.40D;
 	private static final float SECONDARY_DAMAGE = 0.70F;
 	private static final float TERTIARY_DAMAGE = 0.50F;
 	private static final int EFFECT_TICKS = 30;

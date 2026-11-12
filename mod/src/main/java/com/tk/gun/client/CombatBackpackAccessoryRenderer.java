@@ -37,7 +37,7 @@ public final class CombatBackpackAccessoryRenderer implements AccessoryRenderer 
 		if (JumpBackpackClientState.isActive(reference.entity().getId())
 				&& ATTACH_DIAGNOSTICS.add(diagnosticKey)) {
 			TkGun.LOGGER.info(
-					"[tkgun] backpack chest attach part=body pivot=({},{},{}) "
+					"[mechaniciancombat] backpack chest attach part=body pivot=({},{},{}) "
 							+ "rotation=({},{},{})",
 					bodyTransform.pivotX, bodyTransform.pivotY, bodyTransform.pivotZ,
 					bodyTransform.pitch, bodyTransform.yaw, bodyTransform.roll);

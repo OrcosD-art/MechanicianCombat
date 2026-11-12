@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(PersistentProjectileEntity.class)
 public abstract class TridentGravityMixin {
 	@Inject(method = "method_7490()D", at = @At("RETURN"), cancellable = true)
-	private void tkgun$reduceMoltenTridentGravity(CallbackInfoReturnable<Double> cir) {
+	private void mechaniciancombat$reduceMoltenTridentGravity(CallbackInfoReturnable<Double> cir) {
 		if (TkGunServer.isBackpackProjectile(
 				(net.minecraft.entity.Entity) (Object) this)) {
 			if ((Object) this instanceof TridentEntity trident

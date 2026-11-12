@@ -20,7 +20,7 @@ import java.util.Arrays;
 public final class ArmorModificationTableScreen
 		extends HandledScreen<ArmorModificationTableScreenHandler> {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/gui/container/armor_modification_table.png");
+			Identifier.of("mechaniciancombat", "textures/gui/container/armor_modification_table.png");
 	private static final int TEXTURE_WIDTH = 256;
 	private static final int TEXTURE_HEIGHT = 256;
 	private static final int PREVIEW_X = 81;
@@ -151,7 +151,7 @@ public final class ArmorModificationTableScreen
 			register.invoke(null, ArmorModificationTableScreenHandler.TYPE, provider);
 		} catch (Throwable error) {
 			com.tk.gun.TkGun.LOGGER.error(
-					"[tkgun] Unable to register armor modification table screen",
+					"[mechaniciancombat] Unable to register armor modification table screen",
 					error);
 		}
 	}

@@ -5,13 +5,13 @@ import net.combat_roll.api.event.ServerSideRollEvents;
 /** Isolates hard references to the optional Combat Roll API. */
 final class CombatRollBridge {
 	static void register() {
-		TkGun.LOGGER.info("[tkgun] Combat Roll 已接入：ROLL 窗口按资源 `roll` 动画长度 = {} tick",
+		TkGun.LOGGER.info("[mechaniciancombat] Combat Roll 已接入：ROLL 窗口按资源 `roll` 动画长度 = {} tick",
 				CombatRollHook.ROLL_DURATION);
 		ServerSideRollEvents.PLAYER_START_ROLLING.register((player, direction) -> {
 			boolean holdingGun = TkGun.holdingGun(player);
 			boolean armorDodge = com.tk.gun.item.MechanicianUndersuitItem
 					.canUseArmorDodge(player);
-			TkGun.LOGGER.info("[tkgun] 翻滚事件：手持弩炮={} 当前状态={} 玩家={}",
+			TkGun.LOGGER.info("[mechaniciancombat] 翻滚事件：手持弩炮={} 当前状态={} 玩家={}",
 					holdingGun, TkGunServer.state(player).state,
 					player.getName().getString());
 			player.removeStatusEffect(net.minecraft.entity.effect.StatusEffects.SLOWNESS);

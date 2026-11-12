@@ -19,7 +19,7 @@ public abstract class OffhandUseGuardMixin {
 
 	@Inject(method = "method_12065(Lnet/minecraft/class_2886;)V",
 			at = @At("HEAD"), cancellable = true)
-	private void tkgun$rejectStoredOffhandUse(PlayerInteractItemC2SPacket packet,
+	private void mechaniciancombat$rejectStoredOffhandUse(PlayerInteractItemC2SPacket packet,
 											 CallbackInfo ci) {
 		if (packet.getHand() == Hand.OFF_HAND
 				&& BackpackLauncherRules.hasActiveLauncher(field_14140)) {

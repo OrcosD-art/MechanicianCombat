@@ -13,27 +13,27 @@ import java.lang.reflect.Field;
 /** 瞄准状态下把每帧鼠标位移减半，不改玩家保存的鼠标灵敏度。 */
 @Mixin(Mouse.class)
 public abstract class AimMouseSensitivityMixin {
-	private static Field tkgun$deltaX;
-	private static Field tkgun$deltaY;
+	private static Field mechaniciancombat$deltaX;
+	private static Field mechaniciancombat$deltaY;
 
 	@Inject(method = "method_1606", at = @At("HEAD"))
-	private void tkgun$halveAimMouseDelta(double timeDelta, CallbackInfo ci) {
+	private void mechaniciancombat$halveAimMouseDelta(double timeDelta, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.player == null || !GunCamera.aiming(client)) {
 			return;
 		}
 		try {
 			// Mouse 是 intermediary 类；字段名不使用 named 名称，避免无 refmap 时错位。
-			if (tkgun$deltaX == null || tkgun$deltaY == null) {
+			if (mechaniciancombat$deltaX == null || mechaniciancombat$deltaY == null) {
 				Field x = Mouse.class.getDeclaredField("field_1789");
 				Field y = Mouse.class.getDeclaredField("field_1787");
 				x.setAccessible(true);
 				y.setAccessible(true);
-				tkgun$deltaX = x;
-				tkgun$deltaY = y;
+				mechaniciancombat$deltaX = x;
+				mechaniciancombat$deltaY = y;
 			}
-			tkgun$deltaX.setDouble(this, tkgun$deltaX.getDouble(this) * 0.5D);
-			tkgun$deltaY.setDouble(this, tkgun$deltaY.getDouble(this) * 0.5D);
+			mechaniciancombat$deltaX.setDouble(this, mechaniciancombat$deltaX.getDouble(this) * 0.5D);
+			mechaniciancombat$deltaY.setDouble(this, mechaniciancombat$deltaY.getDouble(this) * 0.5D);
 		} catch (ReflectiveOperationException ignored) {
 			// 输入表现失败不影响游戏运行。
 		}

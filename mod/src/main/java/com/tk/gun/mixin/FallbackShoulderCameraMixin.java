@@ -20,7 +20,7 @@ public abstract class FallbackShoulderCameraMixin {
 
 	@Inject(method = "method_19321(Lnet/minecraft/class_1922;Lnet/minecraft/class_1297;ZZF)V",
 			at = @At("TAIL"))
-	private void tkgun$applyFallbackShoulder(BlockView view, Entity focusedEntity,
+	private void mechaniciancombat$applyFallbackShoulder(BlockView view, Entity focusedEntity,
 											  boolean thirdPerson, boolean inverseView,
 											  float tickDelta, CallbackInfo ci) {
 		if (!thirdPerson || inverseView) {

@@ -17,7 +17,7 @@ import software.bernie.geckolib.renderer.GeoRenderer;
  */
 public class BowgunRigModel extends DefaultedEntityGeoModel<BowgunRig> {
 	public BowgunRigModel() {
-		super(Identifier.of("tkgun", "bowgun_rig"));
+		super(Identifier.of("mechaniciancombat", "bowgun_rig"));
 	}
 
 	private static GunDefinition currentDefinition() {

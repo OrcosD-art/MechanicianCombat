@@ -34,7 +34,7 @@ public final class ShoulderSurfBridge {
 	/**
 	 * 在腰射期间强制 ShoulderSurfing 使用耦合相机。
 	 *
-	 * <p>ShoulderSurfing 在插件加载结束后会冻结自己的 registrar；tkgun 是后加载的普通模组，
+	 * <p>ShoulderSurfing 在插件加载结束后会冻结自己的 registrar；mechaniciancombat 是后加载的普通模组，
 	 * 因此这里直接拿到它已经建好的 cameraCouplingCallbacks 列表并追加回调。
 	 * 这是该版本专门提供的扩展点，不需要替换 ShoulderSurfing 的 jar。
 	 */
@@ -66,9 +66,9 @@ public final class ShoulderSurfBridge {
 				}
 			});
 			ShoulderCouplingState.markRegistered();
-			TkGun.LOGGER.info("[tkgun] ShoulderSurfing：腰射/瞄准相机耦合回调已注册");
+			TkGun.LOGGER.info("[mechaniciancombat] ShoulderSurfing：腰射/瞄准相机耦合回调已注册");
 		} catch (Throwable t) {
-			TkGun.LOGGER.warn("[tkgun] ShoulderSurfing 腰射耦合回调注册失败，改用 GunCamera 直接跟随：{}",
+			TkGun.LOGGER.warn("[mechaniciancombat] ShoulderSurfing 腰射耦合回调注册失败，改用 GunCamera 直接跟随：{}",
 					t.toString());
 		}
 	}

@@ -15,7 +15,7 @@ import net.minecraft.util.math.MathHelper;
 import org.joml.Matrix4f;
 
 /**
- * **子弹**（`tkgun:bullet`）的渲染器：一张永远面向摄像机的贴图，逐帧翻页。
+ * **子弹**（`mechaniciancombat:bullet`）的渲染器：一张永远面向摄像机的贴图，逐帧翻页。
  *
  * <p>贴图 = 素材 `粒子/bullet.png`（48x144 = **3 帧 48x48**，作者那套 Bedrock 粒子就是按这个切的，
  * 见 `粒子/bullet.particle.json` 里的 flipbook：size_UV 48x48 / step_UV (0,48)）。
@@ -25,15 +25,15 @@ import org.joml.Matrix4f;
  * 所以从任何角度看都是一颗完整的子弹，不需要模型。
  */
 public class BulletRenderer extends EntityRenderer<BulletEntity> {
-	private static final Identifier TEXTURE = Identifier.of("tkgun", "textures/entity/bullet.png");
+	private static final Identifier TEXTURE = Identifier.of("mechaniciancombat", "textures/entity/bullet.png");
 	private static final Identifier CUTTING_TEXTURE =
-			Identifier.of("tkgun", "textures/entity/cutting_bullet.png");
+			Identifier.of("mechaniciancombat", "textures/entity/cutting_bullet.png");
 	private static final Identifier SCULK_TEXTURE =
-			Identifier.of("tkgun", "textures/entity/sculk_bullet.png");
+			Identifier.of("mechaniciancombat", "textures/entity/sculk_bullet.png");
 	private static final Identifier GRAPESHOT_TEXTURE =
-			Identifier.of("tkgun", "textures/entity/grapeshot.png");
+			Identifier.of("mechaniciancombat", "textures/entity/grapeshot.png");
 	private static final Identifier ROSE_QUARTZ_TEXTURE =
-			Identifier.of("tkgun", "textures/entity/rose_quartz_bullet.png");
+			Identifier.of("mechaniciancombat", "textures/entity/rose_quartz_bullet.png");
 	/** 贴图是一列 3 帧 */
 	private static final int FRAMES = 4;
 	private static final float FRAMES_PER_SECOND = 12.0F;

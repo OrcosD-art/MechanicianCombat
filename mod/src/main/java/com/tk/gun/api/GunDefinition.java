@@ -57,12 +57,12 @@ public record GunDefinition(
 		return new Builder(id);
 	}
 
-	/** Example: {@code tkgun:new_gun_rig -> tkgun:geo/entity/new_gun_rig.geo.json}. */
+	/** Example: {@code mechaniciancombat:new_gun_rig -> mechaniciancombat:geo/entity/new_gun_rig.geo.json}. */
 	public Identifier modelResource() {
 		return withPathPrefixSuffix(model, "geo/entity/", ".geo.json");
 	}
 
-	/** Example: {@code tkgun:new_gun_rig -> tkgun:animations/entity/new_gun_rig.animation.json}. */
+	/** Example: {@code mechaniciancombat:new_gun_rig -> mechaniciancombat:animations/entity/new_gun_rig.animation.json}. */
 	public Identifier animationResource() {
 		return withPathPrefixSuffix(animation, "animations/entity/", ".animation.json");
 	}

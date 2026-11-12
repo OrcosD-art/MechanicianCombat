@@ -20,13 +20,13 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.World;
 
 /**
- * 熔铁弩矢的**弹丸实体**（tkgun:bolt_projectile）。
+ * 熔铁弩矢的**弹丸实体**（mechaniciancombat:bolt_projectile）。
  *
  * <p>⚠️ 2026-10-12 用户反复强调："**不要用弓箭当弹药**"。之前偷懒直接复用 {@code minecraft:arrow}，
  * 结果实体类型、死亡信息、掉落物全是"箭"。现在换成我们自己的类型：
  * <ul>
- *   <li>实体 = {@code tkgun:bolt_projectile}（用 {@code /data get entity @e[type=minecraft:arrow]} 查不到）；</li>
- *   <li>命中伤害走**自己的 damage_type**（{@code tkgun:bolt}）→ 死亡信息是"被熔铁弩矢打穿"，不再出现"箭"；</li>
+ *   <li>实体 = {@code mechaniciancombat:bolt_projectile}（用 {@code /data get entity @e[type=minecraft:arrow]} 查不到）；</li>
+ *   <li>命中伤害走**自己的 damage_type**（{@code mechaniciancombat:bolt}）→ 死亡信息是"被熔铁弩矢打穿"，不再出现"箭"；</li>
  *   <li>客户端渲染器什么都不画（见 {@code client/entity/BoltProjectileRenderer}），飞行表现全靠曳光粒子。</li>
  * </ul>
  * 伤害口径与原版箭一致：**速度 × damage 字段**（{@link PersistentProjectileEntity#getDamage()}）。
@@ -46,7 +46,7 @@ public class BoltProjectileEntity extends PersistentProjectileEntity {
 		return new ItemStack(TkGunServer.BOLT);
 	}
 
-	/** 弩矢自己的伤害类型（数据在 data/tkgun/damage_type/bolt.json，文案在 lang 里）。 */
+	/** 弩矢自己的伤害类型（数据在 data/mechaniciancombat/damage_type/bolt.json，文案在 lang 里）。 */
 	public static RegistryKey<DamageType> damageTypeKey() {
 		return RegistryKey.of(RegistryKeys.DAMAGE_TYPE, Identifier.of(TkGun.MOD_ID, "bolt"));
 	}

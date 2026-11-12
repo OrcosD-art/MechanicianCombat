@@ -291,7 +291,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 					+ (flamePass ? "flame" : "body");
 			if (POSE_ISOLATION_DIAGNOSTICS.add(key)) {
 				TkGun.LOGGER.info(
-						"[tkgun] backpack pose isolated player={} phase={} clip={} "
+						"[mechaniciancombat] backpack pose isolated player={} phase={} clip={} "
 								+ "pass={} geckoController=skipped manualSampler=on ageTicks={}",
 						currentEntity.getId(), phase,
 						CombatBackpackPoseAnimation.clipName(phase),

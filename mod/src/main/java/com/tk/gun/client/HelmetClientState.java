@@ -11,6 +11,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Client mirror used by both the vanilla head layer and the gun rig skin layer. */
 public final class HelmetClientState {
+	private static final float EXPAND_HAIR_HIDE_SECONDS = 0.25F;
+	private static final float FOLD_HAIR_REVEAL_SECONDS = 0.38F;
+
 	public record Pose(String animation, float seconds) {
 	}
 
@@ -49,8 +52,9 @@ public final class HelmetClientState {
 	}
 
 	/**
-	 * The head's second skin layer stays visible while folded, disappears as
-	 * soon as expansion starts, and returns only after the fold tail frame.
+	 * The head's second skin layer remains visible through the first 0.25
+	 * seconds of expansion. Folding keeps it hidden until the original 0.38
+	 * second reveal point.
 	 */
 	public static boolean shouldHideHair(LivingEntity entity) {
 		if (!MechanicianUndersuitItem.isWearingOuterSet(entity)) {
@@ -61,9 +65,12 @@ public final class HelmetClientState {
 			return false;
 		}
 		if (state.expanded()) {
-			return true;
+			return state.durationTicks() <= 0
+					|| !transitionActive(state)
+					|| elapsedSeconds(state) >= EXPAND_HAIR_HIDE_SECONDS;
 		}
-		return state.durationTicks() > 0 && transitionActive(state);
+		return state.durationTicks() > 0 && transitionActive(state)
+				&& elapsedSeconds(state) < FOLD_HAIR_REVEAL_SECONDS;
 	}
 
 	private static float elapsedSeconds(State state) {

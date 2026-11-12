@@ -60,17 +60,17 @@ public final class JumpBackpackPlayerAnimation {
 		}
 		ModifierLayer<IAnimation> layer = layerFor(player);
 		if (layer == null) {
-			TkGun.LOGGER.warn("[tkgun] PlayerAnimator layer unavailable for {}", uuid);
+			TkGun.LOGGER.warn("[mechaniciancombat] PlayerAnimator layer unavailable for {}", uuid);
 			return;
 		}
 		IPlayable playable = PlayerAnimationRegistry.getAnimation(clip);
 		if (playable == null) {
-			TkGun.LOGGER.warn("[tkgun] Missing PlayerAnimator animation {}", clip);
+			TkGun.LOGGER.warn("[mechaniciancombat] Missing PlayerAnimator animation {}", clip);
 			return;
 		}
 		layer.setAnimation(new HoldAnimation(clip, playable.playAnimation()));
 		ACTIVE.put(uuid, clip);
-		TkGun.LOGGER.info("[tkgun] PlayerAnimator play {} for {}", clip, uuid);
+		TkGun.LOGGER.info("[mechaniciancombat] PlayerAnimator play {} for {}", clip, uuid);
 	}
 
 	private static ModifierLayer<IAnimation> layerFor(
@@ -147,7 +147,7 @@ public final class JumpBackpackPlayerAnimation {
 					&& (ageTicks == 0 || ageTicks == 3 || ageTicks == 5)
 					&& loggedParts.add(diagnosticPart)) {
 				TkGun.LOGGER.info(
-						"[tkgun] jump pose transform clip={} tick={} part={} type={} "
+						"[mechaniciancombat] jump pose transform clip={} tick={} part={} type={} "
 								+ "fallback=({},{},{}) result=({},{},{})",
 						clip, ageTicks, part, type,
 						fallback.getX(), fallback.getY(), fallback.getZ(),

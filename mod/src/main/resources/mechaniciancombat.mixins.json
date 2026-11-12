@@ -1,0 +1,28 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.tk.gun.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ItemCooldownManagerAccessor",
+    "TridentGravityMixin",
+    "BackpackLoyaltyPickupMixin",
+    "TridentEntityAccessor",
+    "FireworkRocketEntityAccessor",
+    "OffhandSwapGuardMixin",
+    "OffhandPlacementGuardMixin",
+    "BackpackFireworkSelfDamageMixin",
+    "PlayerFallDamageMixin",
+    "GunCrouchPoseGuardMixin",
+    "OffhandUseGuardMixin"
+  ],
+  "client": [
+    "PlayerEntityRendererRigMixin",
+    "GunMeleeAttackGuardMixin",
+    "GunVanillaAttackGuardMixin",
+    "ClientPlayerCrouchGuardMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

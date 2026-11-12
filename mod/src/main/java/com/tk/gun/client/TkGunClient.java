@@ -38,10 +38,10 @@ public class TkGunClient implements ClientModInitializer {
 	/** 专注由潜行键切换，测试端绑定为 Z。 */
 	/** 持枪时沿用原版“交换副手”键主动装填；原版交换包由双端防护拦截。 */
 	public static final KeyBinding BACKPACK_ACTION_KEY = KeyBindingHelper.registerKeyBinding(
-			new KeyBinding("key.tkgun.backpack_action", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.tkgun"));
+			new KeyBinding("key.mechaniciancombat.backpack_action", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.mechaniciancombat"));
 	public static final KeyBinding HELMET_TOGGLE_KEY = KeyBindingHelper.registerKeyBinding(
-			new KeyBinding("key.tkgun.helmet_toggle", InputUtil.Type.KEYSYM,
-					GLFW.GLFW_KEY_G, "category.tkgun"));
+			new KeyBinding("key.mechaniciancombat.helmet_toggle", InputUtil.Type.KEYSYM,
+					GLFW.GLFW_KEY_G, "category.mechaniciancombat"));
 	private static boolean attackWasDown = false;
 	private static boolean meleeAttackDown = false;
 	private static boolean backpackActionDown = false;
@@ -75,7 +75,7 @@ public class TkGunClient implements ClientModInitializer {
 			}
 			String lower = tk.toLowerCase(java.util.Locale.ROOT);
 			if (lower.contains("combat_roll")) {
-				TkGun.LOGGER.info("[tkgun] 找到 combat_roll 键位：{}（翻译键 {}）",
+				TkGun.LOGGER.info("[mechaniciancombat] 找到 combat_roll 键位：{}（翻译键 {}）",
 						kb.getBoundKeyLocalizedText().getString(), tk);
 				return kb;
 			}
@@ -562,7 +562,7 @@ public class TkGunClient implements ClientModInitializer {
 	 *
 	 * <p>⚠️ 2026-10-13：以前这里还查 playeranimator 的注册表（`pal.animation.json`），
 	 * 但那套已经被 GeckoLib rig 顶掉（见 {@link com.tk.gun.client.rig.BowgunRig}），
-	 * 留着只会在日志里报"找不到动画 tkgun:idle"这种误导性警告 —— 一起退休了。
+	 * 留着只会在日志里报"找不到动画 mechaniciancombat:idle"这种误导性警告 —— 一起退休了。
 	 */
 	private static void selfTest() {
 		selfTested = true;
@@ -579,7 +579,7 @@ public class TkGunClient implements ClientModInitializer {
 		Identifier id = Identifier.of(TkGun.MOD_ID, "animations/entity/bowgun_rig.animation.json");
 		var res = MinecraftClient.getInstance().getResourceManager().getResource(id);
 		if (res.isEmpty()) {
-			TkGun.LOGGER.warn("[tkgun] rig 动画文件不在资源里: {}", id);
+			TkGun.LOGGER.warn("[mechaniciancombat] rig 动画文件不在资源里: {}", id);
 			return;
 		}
 		try (java.io.InputStreamReader reader = new java.io.InputStreamReader(
@@ -590,9 +590,9 @@ public class TkGunClient implements ClientModInitializer {
 			for (String key : anims.keySet()) {
 				sb.append(key).append(' ');
 			}
-			TkGun.LOGGER.info("[tkgun] rig 动画 {} 段: {}", anims.size(), sb.toString().trim());
+			TkGun.LOGGER.info("[mechaniciancombat] rig 动画 {} 段: {}", anims.size(), sb.toString().trim());
 		} catch (Exception e) {
-			TkGun.LOGGER.warn("[tkgun] rig 动画文件解析失败", e);
+			TkGun.LOGGER.warn("[mechaniciancombat] rig 动画文件解析失败", e);
 		}
 	}
 
@@ -689,7 +689,7 @@ public class TkGunClient implements ClientModInitializer {
 		}
 		// why == null = 连发补包（每 3 tick 一个，不想刷屏）；只给第一个补包打一行
 		if (why != null) {
-			TkGun.LOGGER.info("[tkgun] {} -> 发开火包（主手={}，枪口=({}, {}, {})，朝向=({}, {}, {})）",
+			TkGun.LOGGER.info("[mechaniciancombat] {} -> 发开火包（主手={}，枪口=({}, {}, {})，朝向=({}, {}, {})）",
 					why, client.player.getMainHandStack().getItem(),
 					Math.round(mx * 100) / 100.0, Math.round(my * 100) / 100.0, Math.round(mz * 100) / 100.0,
 					Math.round(dx * 100) / 100.0, Math.round(dy * 100) / 100.0, Math.round(dz * 100) / 100.0);
@@ -702,11 +702,12 @@ public class TkGunClient implements ClientModInitializer {
 		com.tk.gun.client.rig.BowgunPlayerAnimatorPose.register();
 		JumpBackpackPlayerAnimation.register();
 		WarBannerPlayerAnimation.register();
+		HunterSpearPlayerAnimation.register();
 		if (!CombatRollHook.isInstalled()) {
 			fallbackRollKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-					"key.tkgun.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
-					"category.tkgun"));
-			TkGun.LOGGER.info("[tkgun] 未安装 Combat Roll：启用模组内置闪避键（默认左 Alt）");
+					"key.mechaniciancombat.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
+					"category.mechaniciancombat"));
+			TkGun.LOGGER.info("[mechaniciancombat] 未安装 Combat Roll：启用模组内置闪避键（默认左 Alt）");
 		}
 		// 让作者写在动画里的"跟随视角" Molang 真的生效（GeckoLib 对 GeoReplacedEntity 会返回 0，
 		// 这里用 public 的 setActorVariable 把 4 个 query 按"被替换的那个玩家"重新实现，见 TkGunMolang）。
@@ -714,7 +715,7 @@ public class TkGunClient implements ClientModInitializer {
 		if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("shouldersurfing")) {
 			ShoulderSurfBridge.registerHipFireCoupling();
 		}
-		TkGun.LOGGER.info("[tkgun] 蹲射/专注与下蹲共用原版 sneak 键");
+		TkGun.LOGGER.info("[mechaniciancombat] 蹲射/专注与下蹲共用原版 sneak 键");
 		// 弩矢弹丸的渲染器：什么都不画（飞行表现 = 服务端铺的曳光粒子）
 		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
 				com.tk.gun.TkGunServer.BOLT_ENTITY,
@@ -732,6 +733,15 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
 				com.tk.gun.TkGunServer.WAR_BANNER_ENTITY,
 				com.tk.gun.client.entity.WarBannerEntityRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.HUNTER_TURRET_ENTITY,
+				com.tk.gun.client.entity.HunterTurretEntityRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.HUNTER_SPEAR_RETURN_ENTITY,
+				com.tk.gun.client.entity.HunterSpearReturnEntityRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.STEEL_ARROW_IMPACT_ENTITY,
+				com.tk.gun.client.entity.SteelArrowImpactEntityRenderer::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.HEAT_VENT, HeatVentParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -752,6 +762,12 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.GRAPESHOT_IMPACT, EnergyParticle.GrapeshotImpactFactory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.SLASH_HIT_1, EnergyParticle.SlashHitFactory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.SLASH_HIT_2, EnergyParticle.SlashHitFactory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.SLASH_HIT_3, EnergyParticle.SlashHitFactory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.ROSE_QUARTZ_IMPACT, EnergyParticle.RoseQuartzImpactFactory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.ROSE_QUARTZ_TRAIL, GlowingRoseTrailParticle.Factory::new);
@@ -765,11 +781,21 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.GOLEM_ENERGY_CONVERGE_2,
 						GolemEnergyParticle.Factory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.WAR_BANNER_SPARK,
+						WarBannerSparkParticle.Factory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.SKILL_SPARK,
+						SkillSparkParticle.Factory::new);
 		// 右下角弹夹计数（自带 HUD，不动 hud mod）
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> GunHud.render(context));
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> CombatBackpackHud.render(context));
+		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+				(context, tickCounter) -> ArmorAbilityIconHud.render(context));
+		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
+				(context, tickCounter) -> AmmoSwitchHud.render(context));
 			net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 					(context, tickCounter) -> JumpEnergyHud.render(context));
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
@@ -778,10 +804,15 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> GunReticle.render(context));
 			SoulChainWorldRenderer.register();
+		WarBannerDebugRenderer.register();
 		ClientPlayNetworking.registerGlobalReceiver(GunStatePayload.ID,
 				(payload, context) -> context.client().execute(() -> GunClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.MeleeImpactPayload.ID,
+				(payload, context) -> context.client().execute(() ->
+						MeleeImpactClientState.apply(payload)));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.CameraShakePayload.ID,
 				(payload, context) -> context.client().execute(() ->
 						MeleeImpactClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunHitMarkerPayload.ID,
@@ -802,6 +833,10 @@ public class TkGunClient implements ClientModInitializer {
 					com.tk.gun.net.WarBannerSkillPayload.ID,
 					(payload, context) -> context.client().execute(
 							() -> WarBannerSkillClientState.apply(payload)));
+			ClientPlayNetworking.registerGlobalReceiver(
+					com.tk.gun.net.HunterSpearSkillPayload.ID,
+					(payload, context) -> context.client().execute(
+							() -> HunterSpearSkillClientState.apply(payload)));
 			ClientPlayNetworking.registerGlobalReceiver(
 					com.tk.gun.net.SoulChainPayload.ID,
 					(payload, context) -> context.client().execute(() -> {
@@ -865,6 +900,7 @@ public class TkGunClient implements ClientModInitializer {
 		com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
 		com.tk.gun.client.screen.BackpackModificationTableScreen.registerClientScreen();
 			com.tk.gun.client.screen.ArmorModificationTableScreen.registerClientScreen();
+		com.tk.gun.client.screen.RecipeEditorScreen.registerClientScreen();
 		for (com.tk.gun.item.CombatBackpackItem backpack :
 				com.tk.gun.TkGunServer.COMBAT_BACKPACKS) {
 			io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
@@ -879,14 +915,14 @@ public class TkGunClient implements ClientModInitializer {
 				com.tk.gun.TkGunServer.MECHANICIAN_LEGGINGS,
 				com.tk.gun.TkGunServer.MECHANICIAN_BOOTS);
 		io.wispforest.accessories.api.client.AccessoriesRendererRegistry.onReload();
-		TkGun.LOGGER.info("[tkgun] 战斗背包 Accessories 渲染器={}",
+		TkGun.LOGGER.info("[mechaniciancombat] 战斗背包 Accessories 渲染器={}",
 				io.wispforest.accessories.api.client.AccessoriesRendererRegistry
 						.getRenderer(com.tk.gun.TkGunServer.COMBAT_BACKPACK).getClass().getSimpleName());
 
 		ClientTickEvents.END_CLIENT_TICK.register(TkGunClient::tick);
 		ClientTickEvents.END_CLIENT_TICK.register(
 				client -> MeleeImpactClientState.tick());
-		TkGun.LOGGER.info("[tkgun] 客户端就绪: GeckoLib 玩家动画 rig");
+		TkGun.LOGGER.info("[mechaniciancombat] 客户端就绪: GeckoLib 玩家动画 rig");
 	}
 
 	private static void tick(MinecraftClient client) {
@@ -895,7 +931,8 @@ public class TkGunClient implements ClientModInitializer {
 		if (resourceManager != lastResourceManager) {
 			lastResourceManager = resourceManager;
 			CombatBackpackPoseAnimation.clearCache();
-		WarBannerHeldPose.clearCache();
+			WarBannerHeldPose.clearCache();
+			HunterSpearHeldPose.clearCache();
 			CombatBackpackGeoRenderer.clearPoseDiagnostics();
 			MechanicianArmorGeometry.clearCache();
 		}
@@ -906,6 +943,7 @@ public class TkGunClient implements ClientModInitializer {
 		AmmoSwitchHud.tick(client);
 		if (client.world != null) {
 			WarBannerSkillClientState.tick(client.world.getTime());
+			HunterSpearSkillClientState.tick(client.world.getTime());
 		}
 			ArmorAbilityClientState.tick();
 			if (client.world != null) {
@@ -930,6 +968,7 @@ public class TkGunClient implements ClientModInitializer {
 				ArmorAbilityClientState.reset();
 				HelmetClientState.reset();
 				WarBannerSkillClientState.reset();
+				HunterSpearSkillClientState.reset();
 				SoulChainClientState.clear();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			return;
@@ -958,7 +997,7 @@ public class TkGunClient implements ClientModInitializer {
 				&& TkGun.definition(client.player).id().equals(TkGun.id("bowgun"));
 		if (jumpDown && !jumpKeyDown && (silentStorm || fortress)) {
 			ClientPlayNetworking.send(new GunJumpPayload());
-			TkGun.LOGGER.info("[tkgun] jump key -> request held gun skill");
+			TkGun.LOGGER.info("[mechaniciancombat] jump key -> request held gun skill");
 		}
 		jumpKeyDown = jumpDown;
 		if (holdingGunNow && client.player.isSneaking()) {
@@ -999,13 +1038,13 @@ public class TkGunClient implements ClientModInitializer {
 						new GunFallAttackPayload());
 				focusKeyDown = true;
 				fallAttackInputConsumed = true;
-				TkGun.LOGGER.info("[tkgun] Z pre-input -> queue Silent Storm fall_attack");
+				TkGun.LOGGER.info("[mechaniciancombat] Z pre-input -> queue Silent Storm fall_attack");
 			} else if (jumpState != null
 					&& (jumpState.state == TkGun.State.FALL_ATTACK
 							|| jumpState.state == TkGun.State.FALL_ATTACK_RECOVERY)) {
 				focusKeyDown = true;
 				fallAttackInputConsumed = true;
-				TkGun.LOGGER.info("[tkgun] Z ignored during fall attack state={}",
+				TkGun.LOGGER.info("[mechaniciancombat] Z ignored during fall attack state={}",
 						jumpState.state);
 			}
 		}
@@ -1037,10 +1076,10 @@ public class TkGunClient implements ClientModInitializer {
 					client.player.setYaw(GunCamera.lookYaw());
 					client.player.setHeadYaw(GunCamera.lookYaw());
 				}
-				TkGun.LOGGER.info("[tkgun] 下蹲/专注键 -> 切换专注（当前{}，闪避组合={}）",
+				TkGun.LOGGER.info("[mechaniciancombat] 下蹲/专注键 -> 切换专注（当前{}，闪避组合={}）",
 						entering ? "未专注 → 进" : "已专注 → 出（Focus_over）", dodgeCombo);
 			} else if (focusDown) {
-				TkGun.LOGGER.info("[tkgun] 下蹲/专注键：手上不是破垒重炮，忽略");
+				TkGun.LOGGER.info("[mechaniciancombat] 下蹲/专注键：手上不是破垒重炮，忽略");
 			}
 		}
 		// F 键主动装填。
@@ -1053,17 +1092,17 @@ public class TkGunClient implements ClientModInitializer {
 			// 专注里 F 也属于"被屏蔽的按键"（用户 2026-10-17："屏蔽除射击和翻滚以外的所有按键输入"）
 			// —— 要装填就松开 Z 退出专注再按。
 			if (GunClientState.focusish(client.player.getId())) {
-				TkGun.LOGGER.info("[tkgun] F：专注期间屏蔽装填（松开 Z 再按）");
+				TkGun.LOGGER.info("[mechaniciancombat] F：专注期间屏蔽装填（松开 Z 再按）");
 			} else if (isRolling(client)
 					|| (GunClientState.get(client.player.getId()) != null
 					&& GunClientState.get(client.player.getId()).state == TkGun.State.MELEE)) {
 				// **翻滚期间屏蔽装填**（用户 2026-10-17）：F 会把 ROLL 顶成 RELOAD，翻滚动画只播一半。
-				TkGun.LOGGER.info("[tkgun] F：翻滚中，等翻滚动画播完再装填");
+				TkGun.LOGGER.info("[mechaniciancombat] F：翻滚中，等翻滚动画播完再装填");
 			} else {
 				// 过热期间的装填**不在客户端拦**（用户 2026-10-17）：过热里翻滚后的冲刺窗口内允许
 				// 立刻装弹，客户端看不到 `dashUntil`，所以交给服务端权威判定。
 				ClientPlayNetworking.send(new GunReloadPayload());
-				TkGun.LOGGER.info("[tkgun] 装填键 {}（码 {}）-> 请求装填",
+				TkGun.LOGGER.info("[mechaniciancombat] 装填键 {}（码 {}）-> 请求装填",
 						reloadKey.getLocalizedText().getString(), reloadKeyCode);
 			}
 		}
@@ -1079,11 +1118,11 @@ public class TkGunClient implements ClientModInitializer {
 		boolean ammoUiDown = client.currentScreen == null && ammoUiRaw;
 		if (ammoUiDown && !ammoUiKeyDown && TkGun.holdingGun(client.player)) {
 			ClientPlayNetworking.send(new com.tk.gun.net.OpenAmmoStoragePayload());
-			TkGun.LOGGER.info("[tkgun] 弹药环键 {}（码 {}）-> 打开弹药环",
+			TkGun.LOGGER.info("[mechaniciancombat] 弹药环键 {}（码 {}）-> 打开弹药环",
 					ammoUiKey.getLocalizedText().getString(), ammoUiKeyCode);
 		}
 		ammoUiKeyDown = ammoUiRaw;
-		// （原来这里有一条"§e[tkgun] 专注没生效 …"的聊天栏诊断 —— 2026-10-17 用户要求清除，已整段删掉。
+		// （原来这里有一条"§e[mechaniciancombat] 专注没生效 …"的聊天栏诊断 —— 2026-10-17 用户要求清除，已整段删掉。
 		//   现在"是不是旧 jar"的判断看进服日志里的 `构建=` 那一行就够了。）
 		// —— 左键 ——
 		// 单击：上面那条"按下边沿"已经发过一个开火包（= 一发）。
@@ -1123,7 +1162,7 @@ public class TkGunClient implements ClientModInitializer {
 					|| rollState.state == TkGun.State.AIM_SLIDE);
 			if (prep) {
 				// **蹲射准备期间（AIM/AIM_FAST/AIM_SLIDE 过门）屏蔽闪避键**（用户 2026-10-17）。
-				TkGun.LOGGER.info("[tkgun] 翻滚键：蹲射准备中，忽略");
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚键：蹲射准备中，忽略");
 			} else {
 				GunRollPayload rollPayload = rollDirectionPayload(client);
 				SprintDirectionCorrection.alignForRoll(
@@ -1131,7 +1170,7 @@ public class TkGunClient implements ClientModInitializer {
 				ClientPlayNetworking.send(rollPayload);
 				// 状态包要下一 tick 才到；先把本地 rig 锁到 ROLL，避免闪一帧 run。
 				GunClientState.beginLocalRoll(client.player.getId());
-				TkGun.LOGGER.info("[tkgun] 翻滚键按下 -> 通知服务端 方向=({}, {})（过热/退门时打断并清缓慢）",
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚键按下 -> 通知服务端 方向=({}, {})（过热/退门时打断并清缓慢）",
 						rollPayload.directionX(), rollPayload.directionZ());
 			}
 		}
@@ -1160,7 +1199,7 @@ public class TkGunClient implements ClientModInitializer {
 					ClientPlayNetworking.send(new com.tk.gun.net.GunMeleePayload(
 							true, movingForward));
 					meleeAttackDown = true;
-					TkGun.LOGGER.info("[tkgun] 左键 -> Veritas close combat");
+					TkGun.LOGGER.info("[mechaniciancombat] 左键 -> Veritas close combat");
 					attackWasDown = down;
 					return;
 				}
@@ -1175,7 +1214,7 @@ public class TkGunClient implements ClientModInitializer {
 						GunClientState.focusish(client.player.getId()) ? "左键(专注)" : "左键");
 			} else {
 				// 诊断用：按了左键但没发包，说清楚是哪一个条件挡的（2026-10-13 用户报"按左键没反应"）
-				TkGun.LOGGER.info("[tkgun] 左键按下但没发包：手持弩炮={} 界面为空={}（主手={}）",
+				TkGun.LOGGER.info("[mechaniciancombat] 左键按下但没发包：手持弩炮={} 界面为空={}（主手={}）",
 						holding, noScreen, client.player.getMainHandStack().getItem());
 			}
 		}
@@ -1257,7 +1296,7 @@ public class TkGunClient implements ClientModInitializer {
 				if (!surfAvailable) {
 					client.options.setPerspective(Perspective.THIRD_PERSON_BACK);
 				}
-				TkGun.LOGGER.info("[tkgun] 手持弩炮 -> 越肩视角（ShoulderSurfing {}）",
+				TkGun.LOGGER.info("[mechaniciancombat] 手持弩炮 -> 越肩视角（ShoulderSurfing {}）",
 						surfAvailable ? "接管" : "没装，退回原版第三人称");
 			}
 		} else if (thirdPersonForced) {

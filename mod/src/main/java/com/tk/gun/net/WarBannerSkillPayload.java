@@ -9,7 +9,8 @@ import net.minecraft.network.packet.CustomPayload;
 public record WarBannerSkillPayload(
 		int playerEntityId,
 		long startedAt,
-		int durationTicks) implements CustomPayload {
+		int durationTicks,
+		boolean gunHeld) implements CustomPayload {
 	public static final CustomPayload.Id<WarBannerSkillPayload> ID =
 			new CustomPayload.Id<>(TkGun.id("war_banner_skill"));
 
@@ -19,10 +20,11 @@ public record WarBannerSkillPayload(
 						buffer.writeVarInt(value.playerEntityId());
 						buffer.writeLong(value.startedAt());
 						buffer.writeVarInt(value.durationTicks());
+						buffer.writeBoolean(value.gunHeld());
 					},
 					buffer -> new WarBannerSkillPayload(
 							buffer.readVarInt(), buffer.readLong(),
-							buffer.readVarInt()));
+							buffer.readVarInt(), buffer.readBoolean()));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

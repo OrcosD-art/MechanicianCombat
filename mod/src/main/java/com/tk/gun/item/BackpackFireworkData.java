@@ -6,7 +6,7 @@ import net.minecraft.item.ItemStack;
 
 /** Marks only the firework rockets launched by the combat backpack. */
 public final class BackpackFireworkData {
-	private static final String NO_SELF_DAMAGE = "tkgun_backpack_no_self_damage";
+	private static final String NO_SELF_DAMAGE = "mechaniciancombat_backpack_no_self_damage";
 
 	public static void markNoSelfDamage(ItemStack rocket) {
 		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, rocket,

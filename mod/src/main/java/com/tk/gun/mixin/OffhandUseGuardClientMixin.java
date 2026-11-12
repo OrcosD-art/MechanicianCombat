@@ -15,7 +15,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class OffhandUseGuardClientMixin {
 	@Inject(method = "method_2919(Lnet/minecraft/class_1657;Lnet/minecraft/class_1268;)Lnet/minecraft/class_1269;",
 			at = @At("HEAD"), cancellable = true)
-	private void tkgun$rejectStoredOffhandUse(PlayerEntity player, Hand hand,
+	private void mechaniciancombat$rejectStoredOffhandUse(PlayerEntity player, Hand hand,
 											  CallbackInfoReturnable<ActionResult> cir) {
 		if (hand == Hand.OFF_HAND && BackpackLauncherRules.hasActiveLauncher(player)) {
 			cir.setReturnValue(ActionResult.FAIL);

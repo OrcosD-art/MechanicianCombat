@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(ClientPlayerEntity.class)
 public abstract class ClientPlayerCrouchGuardMixin {
 	@Inject(method = "method_5715()Z", at = @At("HEAD"), cancellable = true)
-	private void tkgun$suppressClientSneaking(CallbackInfoReturnable<Boolean> cir) {
+	private void mechaniciancombat$suppressClientSneaking(CallbackInfoReturnable<Boolean> cir) {
 		ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
 		if (TkGun.holdingGun(player)) {
 			cir.setReturnValue(false);
@@ -22,7 +22,7 @@ public abstract class ClientPlayerCrouchGuardMixin {
 	}
 
 	@Inject(method = "method_18276()Z", at = @At("HEAD"), cancellable = true)
-	private void tkgun$suppressClientSneakingPose(CallbackInfoReturnable<Boolean> cir) {
+	private void mechaniciancombat$suppressClientSneakingPose(CallbackInfoReturnable<Boolean> cir) {
 		ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
 		if (TkGun.holdingGun(player)) {
 			cir.setReturnValue(false);

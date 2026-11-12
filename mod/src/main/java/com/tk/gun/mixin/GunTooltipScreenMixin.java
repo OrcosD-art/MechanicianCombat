@@ -18,13 +18,13 @@ public abstract class GunTooltipScreenMixin {
 	protected Slot field_2787; // focusedSlot
 
 	@Inject(method = "method_2380(Lnet/minecraft/class_332;II)V", at = @At("HEAD"))
-	private void tkgun$markGunTooltip(DrawContext context, int mouseX, int mouseY, CallbackInfo ci) {
+	private void mechaniciancombat$markGunTooltip(DrawContext context, int mouseX, int mouseY, CallbackInfo ci) {
 		GunTooltipState.set(field_2787 != null && field_2787.hasStack()
 				&& TkGun.isGun(field_2787.getStack()));
 	}
 
 	@Inject(method = "method_2380(Lnet/minecraft/class_332;II)V", at = @At("RETURN"))
-	private void tkgun$clearGunTooltip(DrawContext context, int mouseX, int mouseY, CallbackInfo ci) {
+	private void mechaniciancombat$clearGunTooltip(DrawContext context, int mouseX, int mouseY, CallbackInfo ci) {
 		GunTooltipState.set(false);
 	}
 }

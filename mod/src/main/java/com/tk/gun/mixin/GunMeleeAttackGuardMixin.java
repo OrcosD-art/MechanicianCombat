@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class GunMeleeAttackGuardMixin {
 	@Inject(method = "method_2918(Lnet/minecraft/class_1657;Lnet/minecraft/class_1297;)V",
 			at = @At("HEAD"), cancellable = true)
-	private void tkgun$suppressNativeAttack(PlayerEntity player, Entity target, CallbackInfo ci) {
+	private void mechaniciancombat$suppressNativeAttack(PlayerEntity player, Entity target, CallbackInfo ci) {
 		if (TkGun.holdingGun(player)) {
 			ci.cancel();
 		}

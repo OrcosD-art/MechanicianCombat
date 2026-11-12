@@ -8,7 +8,7 @@ import net.minecraft.util.Arm;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 
-/** Keeps the native offhand storage frame visible before it contains an item. */
+/** Draws the launcher's occupied offhand frame and virtual accessory icon. */
 public final class OffhandStorageHud {
 	public static void render(DrawContext context) {
 		MinecraftClient client = MinecraftClient.getInstance();
@@ -17,7 +17,9 @@ public final class OffhandStorageHud {
 			return;
 		}
 		ItemStack offhand = client.player.getStackInHand(Hand.OFF_HAND);
-		if (!offhand.isEmpty()) {
+		boolean battleBanner =
+				BackpackLauncherRules.isBattleBannerInstalled(client.player);
+		if (!battleBanner && !offhand.isEmpty()) {
 			return; // Vanilla draws both the occupied frame and item icon.
 		}
 
@@ -29,6 +31,12 @@ public final class OffhandStorageHud {
 		Identifier texture = Identifier.ofVanilla(offhandArm == Arm.LEFT
 				? "hud/hotbar_offhand_left" : "hud/hotbar_offhand_right");
 		context.drawGuiTexture(texture, x, y, 29, 24);
+		if (battleBanner) {
+			ItemStack icon = BackpackLauncherRules.createBattleBannerIcon();
+			context.drawItem(icon, x + 3, y + 3);
+			// drawItemInSlot applies the vanilla WAR_BANNER cooldown mask.
+			context.drawItemInSlot(client.textRenderer, icon, x + 3, y + 3);
+		}
 	}
 
 	private OffhandStorageHud() {

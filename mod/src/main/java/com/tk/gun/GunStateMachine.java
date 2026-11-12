@@ -174,7 +174,7 @@ public final class GunStateMachine {
 		st.slideBoostApplied = true;
 		long currentEnd = Math.max(now, Math.max(st.dashUntil, st.speedBoostUntil));
 		st.speedBoostUntil = currentEnd + SLIDE_SPEED_BOOST_EXTENSION_TICKS;
-		TkGun.LOGGER.info("[tkgun] 滑铲完成 -> 加速效果延长 {} tick（仅移速，原截止 {}）玩家={}",
+		TkGun.LOGGER.info("[mechaniciancombat] 滑铲完成 -> 加速效果延长 {} tick（仅移速，原截止 {}）玩家={}",
 				SLIDE_SPEED_BOOST_EXTENSION_TICKS, currentEnd, player.getName().getString());
 	}
 
@@ -263,10 +263,10 @@ public final class GunStateMachine {
 		st.dashUntil = now + dashTicks;
 		if (chained) {
 			st.dodgeLockUntil = now + DODGE_LOCK_TICKS;
-			TkGun.LOGGER.info("[tkgun] 连锁闪避 -> 闪避键失效 {} tick 玩家={}", DODGE_LOCK_TICKS,
+			TkGun.LOGGER.info("[mechaniciancombat] 连锁闪避 -> 闪避键失效 {} tick 玩家={}", DODGE_LOCK_TICKS,
 					player.getName().getString());
 		}
-		TkGun.LOGGER.info("[tkgun] 闪避（{}）-> 加速冲刺 {} tick（+{}% 移速）玩家={}",
+		TkGun.LOGGER.info("[mechaniciancombat] 闪避（{}）-> 加速冲刺 {} tick（+{}% 移速）玩家={}",
 				chained ? "连锁" : "单次", dashTicks,
 				(int) (DASH_SPEED_BONUS * 100), player.getName().getString());
 		return false;

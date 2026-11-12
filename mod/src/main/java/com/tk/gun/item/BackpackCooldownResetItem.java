@@ -9,7 +9,7 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.TypedActionResult;
 import net.minecraft.world.World;
 
-/** Temporary development item that clears the current backpack cooldown. */
+/** Development item that clears every cooldown owned by the mod. */
 public final class BackpackCooldownResetItem extends Item {
 	public BackpackCooldownResetItem(Settings settings) {
 		super(settings);
@@ -18,8 +18,11 @@ public final class BackpackCooldownResetItem extends Item {
 	@Override
 	public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
 		ItemStack stack = user.getStackInHand(hand);
+		if (world.isClient()) {
+			com.tk.gun.CombatRollClientCooldown.clear(user);
+		}
 		if (!world.isClient() && user instanceof ServerPlayerEntity player) {
-			TkGunServer.clearBackpackCooldown(player);
+			TkGunServer.clearAllCooldowns(player);
 		}
 		return TypedActionResult.success(stack);
 	}

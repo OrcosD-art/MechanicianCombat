@@ -1,6 +1,7 @@
 package com.tk.gun;
 
 import com.tk.gun.net.MeleeImpactPayload;
+import com.tk.gun.net.CameraShakePayload;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -9,6 +10,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.particle.SimpleParticleType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,6 +31,8 @@ public final class MeleeImpactService {
 	public static final int ATK_4_TICKS = 5;
 	public static final int HOLD_OVER_TICKS = 4;
 	public static final int DASH_TICKS = 4;
+	public static final int RANGED_IMPACT_TICKS = ATK_3_TICKS;
+	public static final float GUN_SHOT_SHAKE_SCALE = 0.7F;
 	public static final int CRIT_BONUS_TICKS = 2;
 	public static final int MAX_HITSTOP_TICKS = 8;
 	public static final double KNOCKBACK_STRENGTH = 0.35D;
@@ -46,6 +50,25 @@ public final class MeleeImpactService {
 			case 3 -> ATK_3_TICKS;
 			default -> ATK_4_TICKS;
 		};
+	}
+
+	public static void sendCameraShake(ServerPlayerEntity player, int ticks,
+			boolean critical) {
+		sendCameraShake(player, ticks, critical, 1.0F);
+	}
+
+	public static void sendCameraShake(ServerPlayerEntity player, int ticks,
+			boolean critical, float intensityScale) {
+		if (player == null || ticks <= 0) {
+			return;
+		}
+		ServerPlayNetworking.send(player,
+				new CameraShakePayload(ticks, critical, intensityScale));
+	}
+
+	public static void sendGunShotShake(ServerPlayerEntity player) {
+		sendCameraShake(player, RANGED_IMPACT_TICKS, false,
+				GUN_SHOT_SHAKE_SCALE);
 	}
 
 	public static void apply(ServerPlayerEntity attacker, TkGunServer.PState state,
@@ -75,8 +98,11 @@ public final class MeleeImpactService {
 					center.x + outward.x * surfaceOffset,
 					target.getY() + target.getHeight() * 0.62D,
 					center.z + outward.z * surfaceOffset);
+			SimpleParticleType impactEffect = TkGunParticles.MELEE_HIT_EFFECTS[
+					attacker.getRandom().nextInt(
+							TkGunParticles.MELEE_HIT_EFFECTS.length)];
 			attacker.getServerWorld().spawnParticles(
-					TkGunParticles.GRAPESHOT_IMPACT,
+					impactEffect,
 					impactPos.x, impactPos.y, impactPos.z,
 					1, 0.0D, 0.0D, 0.0D, 0.0D);
 			if (!impactSoundPlayed) {
@@ -108,7 +134,7 @@ public final class MeleeImpactService {
 				attacker.getServer().getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(viewer, payload);
 		}
-		TkGun.LOGGER.info("[tkgun] melee impact: stepTicks={} critical={} targets={} "
+		TkGun.LOGGER.info("[mechaniciancombat] melee impact: stepTicks={} critical={} targets={} "
 						+ "lockAttacker={} player={}",
 				ticks, critical, targets.size(), lockAttacker,
 				attacker.getName().getString());

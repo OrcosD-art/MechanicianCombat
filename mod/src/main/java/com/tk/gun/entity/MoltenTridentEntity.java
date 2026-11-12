@@ -19,6 +19,7 @@ import net.minecraft.entity.data.TrackedDataHandlerRegistry;
 import net.minecraft.entity.projectile.TridentEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtHelper;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.server.world.ServerWorld;
@@ -42,11 +43,14 @@ import java.util.UUID;
  * 但使用独立的实体类型，以便客户端渲染资源模型。
  */
 public class MoltenTridentEntity extends TridentEntity {
+	private static final int TURRET_PROJECTILE_LIFETIME_TICKS = 200;
 	private static final TrackedData<Boolean> GUN_FIRED =
 			DataTracker.registerData(MoltenTridentEntity.class, TrackedDataHandlerRegistry.BOOLEAN);
 	private static final TrackedData<Boolean> STOPPED =
 			DataTracker.registerData(MoltenTridentEntity.class, TrackedDataHandlerRegistry.BOOLEAN);
-	private final Set<UUID> tkgun$hitEntities = new HashSet<>();
+	private final Set<UUID> mechaniciancombat$hitEntities = new HashSet<>();
+	private UUID turretOwnerUuid;
+	private long turretExpireAt;
 
 	public MoltenTridentEntity(EntityType<? extends MoltenTridentEntity> type, World world) {
 		super(type, world);
@@ -71,6 +75,16 @@ public class MoltenTridentEntity extends TridentEntity {
 		return this.getDataTracker().get(STOPPED);
 	}
 
+	public void setTurretProjectile(ServerPlayerEntity owner) {
+		turretOwnerUuid = owner.getUuid();
+		turretExpireAt = owner.getWorld().getTime()
+				+ TURRET_PROJECTILE_LIFETIME_TICKS;
+	}
+
+	public boolean isTurretProjectile() {
+		return turretOwnerUuid != null;
+	}
+
 	private void setStopped(boolean stopped) {
 		this.getDataTracker().set(STOPPED, stopped);
 	}
@@ -89,6 +103,12 @@ public class MoltenTridentEntity extends TridentEntity {
 		if (firstBlockHit) {
 			sendGunHitMarker();
 		}
+		if (isTurretProjectile()) {
+			// Turret ammunition is transient and must never turn into a
+			// persistent ground pickup.
+			discard();
+			return;
+		}
 		// 只在服务端判定一次；命中方块停止后 50% 消失，否则留在原地可拾取。
 		if (!getWorld().isClient && getRandom().nextFloat() < 0.5F) {
 			discard();
@@ -97,6 +117,11 @@ public class MoltenTridentEntity extends TridentEntity {
 
 	@Override
 	public void tick() {
+		if (!getWorld().isClient() && isTurretProjectile()
+				&& shouldDiscardTurretProjectile()) {
+			discard();
+			return;
+		}
 		Vec3d before = this.getPos();
 		super.tick();
 		if (this.getWorld().isClient || this.isRemoved()) {
@@ -109,23 +134,58 @@ public class MoltenTridentEntity extends TridentEntity {
 		Box search = new Box(before, after).expand(2.0D);
 		for (Entity entity : this.getWorld().getOtherEntities(this, search,
 				e -> e.isAlive() && !e.isSpectator() && e != this.getOwner()
-						&& e.canHit() && !CombatTargeting.isGolem(e))) {
-			if (this.tkgun$hitEntities.contains(entity.getUuid())) {
+						&& e.canHit() && !CombatTargeting.isGolem(e)
+						&& !(e instanceof HunterTurretEntity))) {
+			if (this.mechaniciancombat$hitEntities.contains(entity.getUuid())) {
 				continue;
 			}
-			if (tkgun$horizontalDistanceToSegment(
+			if (mechaniciancombat$horizontalDistanceToSegment(
 					entity.getBoundingBox().getCenter(), before, after) > 2.0D) {
 				continue;
 			}
-			this.tkgun$hitEntities.add(entity.getUuid());
+			this.mechaniciancombat$hitEntities.add(entity.getUuid());
 			Vec3d velocity = this.getVelocity();
 			this.onEntityHit(new EntityHitResult(entity, entity.getBoundingBox().getCenter()));
 			sendGunHitMarker();
+			if (isTurretProjectile()
+					&& getWorld() instanceof ServerWorld serverWorld) {
+				Vec3d impact = entity.getBoundingBox().getCenter();
+				SteelArrowImpactEntity effect =
+						new SteelArrowImpactEntity(
+								TkGunServer.STEEL_ARROW_IMPACT_ENTITY,
+								serverWorld);
+				effect.refreshPositionAndAngles(
+						impact.x, impact.y, impact.z, 0.0F, 0.0F);
+				serverWorld.spawnEntity(effect);
+			}
 			// onEntityHit 会设置 dealtDamage=true；穿透期间清掉，
 			// 避免带忠诚附魔时第一只实体命中后立刻折返。
-			((TridentEntityAccessor) (Object) this).tkgun$setDealtDamage(false);
+			((TridentEntityAccessor) (Object) this).mechaniciancombat$setDealtDamage(false);
 			this.setVelocity(velocity);
 		}
+	}
+
+	private boolean shouldDiscardTurretProjectile() {
+		if (!(getWorld() instanceof ServerWorld world)
+				|| turretOwnerUuid == null) {
+			return true;
+		}
+		if (world.getTime() >= turretExpireAt) {
+			return true;
+		}
+		ServerPlayerEntity owner = world.getServer().getPlayerManager()
+				.getPlayer(turretOwnerUuid);
+		if (owner == null || owner.getServerWorld() != world) {
+			return true;
+		}
+		int ownerChunkX = owner.getBlockPos().getX() >> 4;
+		int ownerChunkZ = owner.getBlockPos().getZ() >> 4;
+		int projectileChunkX = getBlockPos().getX() >> 4;
+		int projectileChunkZ = getBlockPos().getZ() >> 4;
+		int viewDistance = Math.max(1,
+				world.getServer().getPlayerManager().getViewDistance());
+		return Math.max(Math.abs(projectileChunkX - ownerChunkX),
+				Math.abs(projectileChunkZ - ownerChunkZ)) > viewDistance;
 	}
 
 	private void sendGunHitMarker() {
@@ -135,7 +195,7 @@ public class MoltenTridentEntity extends TridentEntity {
 		}
 	}
 
-	private static double tkgun$horizontalDistanceToSegment(Vec3d point, Vec3d start, Vec3d end) {
+	private static double mechaniciancombat$horizontalDistanceToSegment(Vec3d point, Vec3d start, Vec3d end) {
 		Vec3d delta = end.subtract(start);
 		double lengthSquared = delta.x * delta.x + delta.z * delta.z;
 		if (lengthSquared < 1.0E-8D) {
@@ -156,12 +216,20 @@ public class MoltenTridentEntity extends TridentEntity {
 	public void writeCustomDataToNbt(NbtCompound nbt) {
 		super.writeCustomDataToNbt(nbt);
 		nbt.putBoolean("TkGunFired", isGunFired());
+		if (turretOwnerUuid != null) {
+			nbt.put("TkGunTurretOwner",
+					NbtHelper.fromUuid(turretOwnerUuid));
+		}
+		nbt.putLong("TkGunTurretExpireAt", turretExpireAt);
 	}
 
 	@Override
 	public void readCustomDataFromNbt(NbtCompound nbt) {
 		super.readCustomDataFromNbt(nbt);
 		setGunFired(nbt.getBoolean("TkGunFired"));
+		turretOwnerUuid = nbt.contains("TkGunTurretOwner")
+				? NbtHelper.toUuid(nbt.get("TkGunTurretOwner")) : null;
+		turretExpireAt = nbt.getLong("TkGunTurretExpireAt");
 		setStopped(this.inGround);
 	}
 
@@ -175,7 +243,7 @@ public class MoltenTridentEntity extends TridentEntity {
 		this.setStack(projectileStack);
 		this.refreshPositionAndAngles(owner.getX(), owner.getEyeY() - 0.1D, owner.getZ(),
 				owner.getYaw(), owner.getPitch());
-		this.tkgun$syncStackData(projectileStack);
+		this.mechaniciancombat$syncStackData(projectileStack);
 	}
 
 	@Override
@@ -190,11 +258,11 @@ public class MoltenTridentEntity extends TridentEntity {
 		return weapon;
 	}
 
-	private void tkgun$syncStackData(ItemStack stack) {
+	private void mechaniciancombat$syncStackData(ItemStack stack) {
 		TridentEntityAccessor accessor = (TridentEntityAccessor) (Object) this;
-		byte loyalty = (byte) MathHelper.clamp(accessor.tkgun$getLoyalty(stack), 0, 127);
-		this.getDataTracker().set(TridentEntityAccessor.tkgun$getLoyaltyData(), loyalty);
-		this.getDataTracker().set(TridentEntityAccessor.tkgun$getEnchantedData(), stack.hasGlint());
+		byte loyalty = (byte) MathHelper.clamp(accessor.mechaniciancombat$getLoyalty(stack), 0, 127);
+		this.getDataTracker().set(TridentEntityAccessor.mechaniciancombat$getLoyaltyData(), loyalty);
+		this.getDataTracker().set(TridentEntityAccessor.mechaniciancombat$getEnchantedData(), stack.hasGlint());
 	}
 
 	@Override
@@ -223,7 +291,7 @@ public class MoltenTridentEntity extends TridentEntity {
 					0.0D, 0.0D, 0.0D, 0.0D);
 		}
 		// 自定义实体类型不满足原版引雷的 direct_attacker=minecraft:trident 条件，这里补上。
-		tkgun$applyChanneling(result.getEntity(), null, getWeaponStack());
+		mechaniciancombat$applyChanneling(result.getEntity(), null, getWeaponStack());
 	}
 
 	@Override
@@ -231,10 +299,10 @@ public class MoltenTridentEntity extends TridentEntity {
 												ItemStack weaponStack) {
 		// 不调用 vanilla 的 block-hit consumer；它可能触发 replace/discard，
 		// 让自定义箭矢命中方块后随机消失。引雷效果由下面手动结算。
-		tkgun$applyChanneling(null, blockHitResult, weaponStack);
+		mechaniciancombat$applyChanneling(null, blockHitResult, weaponStack);
 	}
 
-	private void tkgun$applyChanneling(Entity target, BlockHitResult blockHit, ItemStack weaponStack) {
+	private void mechaniciancombat$applyChanneling(Entity target, BlockHitResult blockHit, ItemStack weaponStack) {
 		if (!(getWorld() instanceof ServerWorld serverWorld) || !serverWorld.isThundering()) {
 			return;
 		}

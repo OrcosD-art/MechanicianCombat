@@ -13,7 +13,7 @@ import net.minecraft.registry.RegistryKeys;
 
 /** Shared exclusions for MechanicianCombat attacks, projectiles, and locks. */
 public final class CombatTargeting {
-	public static final String BACKPACK_PROJECTILE_TAG = "tkgun_backpack_projectile";
+	public static final String BACKPACK_PROJECTILE_TAG = "mechaniciancombat_backpack_projectile";
 
 	private static final RegistryKey<DamageType> GUN_DAMAGE =
 			RegistryKey.of(RegistryKeys.DAMAGE_TYPE, TkGun.id("bolt"));

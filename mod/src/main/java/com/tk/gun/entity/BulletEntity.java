@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * **看得见的那颗子弹**（`tkgun:bullet`）—— 2026-10-15 用户："里面给了那个 bullet 的那个子弹模型，
+ * **看得见的那颗子弹**（`mechaniciancombat:bullet`）—— 2026-10-15 用户："里面给了那个 bullet 的那个子弹模型，
  * 你用这个去代表那个弹丸，就射出去的那个"。
  *
  * <p>⚠️ 它**不负责伤害**：伤害/命中爆裂还是服务端那条 hitscan（瞬时、权威，见

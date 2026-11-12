@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ScreenHandler.class)
 public abstract class OffhandPlacementGuardMixin {
 	@Inject(method = "method_7593", at = @At("HEAD"), cancellable = true)
-	private void tkgun$guardOffhandInsertion(int slotIndex, int button, SlotActionType actionType,
+	private void mechaniciancombat$guardOffhandInsertion(int slotIndex, int button, SlotActionType actionType,
 												  PlayerEntity player, CallbackInfo ci) {
 		if (slotIndex < 0) {
 			return;
@@ -29,6 +29,13 @@ public abstract class OffhandPlacementGuardMixin {
 
 		Slot clicked = handler.getSlot(slotIndex);
 		boolean clickedOffhand = isOffhand(clicked, player);
+		boolean bannerInstalled =
+				BackpackLauncherRules.isBattleBannerInstalled(player);
+		if (bannerInstalled && (clickedOffhand
+				|| (actionType == SlotActionType.SWAP && button == 40))) {
+			ci.cancel();
+			return;
+		}
 		if (clickedOffhand
 				&& BackpackLauncherRules.isVirtualBattleBanner(clicked.getStack())) {
 			ci.cancel();

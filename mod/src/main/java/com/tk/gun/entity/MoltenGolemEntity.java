@@ -327,7 +327,7 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 			}
 		}
 		if (damaged == 0 && !attempted.isEmpty()) {
-			TkGun.LOGGER.warn("[tkgun] 铸造傀儡 ATK1 未造成伤害：候选={} 当前目标={} 位置={}",
+			TkGun.LOGGER.warn("[mechaniciancombat] 铸造傀儡 ATK1 未造成伤害：候选={} 当前目标={} 位置={}",
 					attempted.size(), primary == null ? "无" : primary.getName().getString(),
 					getBlockPos());
 		}
@@ -692,6 +692,12 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 	@Override
 	public AnimatableInstanceCache getAnimatableInstanceCache() {
 		return animationCache;
+	}
+
+	/** Development cooldown reset used by the Mechanician cooldown tool. */
+	public void clearAttackCooldowns() {
+		atk2Cooldown = 0;
+		atk3Cooldown = 0;
 	}
 
 	private static final class FollowSummonerGoal extends Goal {

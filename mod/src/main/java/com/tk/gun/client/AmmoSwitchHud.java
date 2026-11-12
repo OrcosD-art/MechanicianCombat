@@ -25,15 +25,15 @@ import java.util.Deque;
  */
 public final class AmmoSwitchHud {
 	private static final Identifier POPUP =
-			Identifier.of("tkgun", "textures/gui/ammo_switch_popup.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_switch_popup.png");
 	private static final Identifier CYCLE_CW =
-			Identifier.of("tkgun", "textures/gui/ammo_switch_cw.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_switch_cw.png");
 	private static final Identifier CYCLE_CCW =
-			Identifier.of("tkgun", "textures/gui/ammo_switch_ccw.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_switch_ccw.png");
 	private static final Identifier CHAMBER_COLORS =
-			Identifier.of("tkgun", "textures/gui/ammo_chamber_colors.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_chamber_colors.png");
 	private static final Identifier RETRACT =
-			Identifier.of("tkgun", "textures/gui/ammo_switch_retract.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_switch_retract.png");
 
 	private static final int FRAME_SIZE = 80;
 	private static final int POPUP_FRAMES = 5;

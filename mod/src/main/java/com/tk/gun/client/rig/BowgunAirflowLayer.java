@@ -32,7 +32,7 @@ import software.bernie.geckolib.renderer.layer.GeoRenderLayer;
  * 免得把它们拉成整帧画上去。
  */
 public class BowgunAirflowLayer extends GeoRenderLayer<BowgunRig> {
-	private static final Identifier TEX = Identifier.of("tkgun", "textures/entity/bowgun_airflow.png");
+	private static final Identifier TEX = Identifier.of("mechaniciancombat", "textures/entity/bowgun_airflow.png");
 	/** 导出脚本拆出来的骨名前缀（`airflow1/2/3`）。 */
 	public static final String BONE_PREFIX = "airflow";
 	/**
@@ -68,7 +68,7 @@ public class BowgunAirflowLayer extends GeoRenderLayer<BowgunRig> {
 		}
 		if (!logged) {
 			logged = true;
-			TkGun.LOGGER.info("[tkgun] 气流层已接管 {}（贴图 tkgun:textures/entity/bowgun_airflow.png，160x32 / 5 帧）",
+			TkGun.LOGGER.info("[mechaniciancombat] 气流层已接管 {}（贴图 mechaniciancombat:textures/entity/bowgun_airflow.png，160x32 / 5 帧）",
 					bone.getName());
 		}
 	}

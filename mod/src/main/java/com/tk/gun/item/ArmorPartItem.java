@@ -34,10 +34,10 @@ public final class ArmorPartItem extends Item {
 	public void appendTooltip(ItemStack stack, TooltipContext context,
 							  List<Text> tooltip, TooltipType type) {
 		super.appendTooltip(stack, context, tooltip, type);
-		tooltip.add(Text.translatable("tooltip.tkgun.armor_part."
+		tooltip.add(Text.translatable("tooltip.mechaniciancombat.armor_part."
 				+ kind.name().toLowerCase()));
 		if (kind == Kind.C3) {
-			tooltip.add(Text.translatable("tooltip.tkgun.soul_chain.chain"));
+			tooltip.add(Text.translatable("tooltip.mechaniciancombat.soul_chain.chain"));
 		}
 	}
 }

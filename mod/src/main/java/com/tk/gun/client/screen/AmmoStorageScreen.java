@@ -17,7 +17,7 @@ import java.lang.reflect.Proxy;
 /** 上方独立弹药环 + 下方玩家背包。 */
 public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHandler> {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/gui/ammo_storage.png");
+			Identifier.of("mechaniciancombat", "textures/gui/ammo_storage.png");
 	private final List<int[]> ringCenters = new ArrayList<>();
 
 	public AmmoStorageScreen(AmmoStorageScreenHandler handler, PlayerInventory inventory, Text title) {
@@ -81,7 +81,7 @@ public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHand
 			register.setAccessible(true);
 			register.invoke(null, AmmoStorageScreenHandler.TYPE, provider);
 		} catch (Throwable t) {
-			com.tk.gun.TkGun.LOGGER.error("[tkgun] 无法注册机械师弹药环屏幕", t);
+			com.tk.gun.TkGun.LOGGER.error("[mechaniciancombat] 无法注册机械师弹药环屏幕", t);
 		}
 	}
 

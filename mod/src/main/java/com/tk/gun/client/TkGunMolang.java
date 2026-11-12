@@ -12,7 +12,7 @@ import software.bernie.geckolib.loading.math.MolangQueries;
 import java.util.function.ToDoubleFunction;
 
 /**
- * **让作者写的那几句"跟随视角 Molang"在 tkgun 里真的生效**（2026-10-16 用户："那不能让我们这个里头能用 Molang 吗"）。
+ * **让作者写的那几句"跟随视角 Molang"在 mechaniciancombat 里真的生效**（2026-10-16 用户："那不能让我们这个里头能用 Molang 吗"）。
  *
  * <h2>为什么需要它</h2>
  * GeckoLib 4.8 的取视角 query 是**按类型强转**实现的（`javap` 逐条读过 `MolangQueries`）：
@@ -22,7 +22,7 @@ import java.util.function.ToDoubleFunction;
  *   query.body_y_rotation = lerp(tick, prevBodyYaw, bodyYaw)
  *   query.body_x_rotation = actor.animatable() instanceof LivingEntity ? 0 : ((Entity) …).getPitch(tick)
  * </pre>
- * 而 tkgun 的 rig 是 **`GeoReplacedEntity`（`BowgunRig.INSTANCE`，不是实体）** → 每条都命中
+ * 而 mechaniciancombat 的 rig 是 **`GeoReplacedEntity`（`BowgunRig.INSTANCE`，不是实体）** → 每条都命中
  * `Attempted to use Molang variable for incompatible animatable type (…)` 然后**按 0 处理**
  * （v3 素材那句 `-query.body_x_rotation / 3` 就是这么静默失效的：枪一直没跟着俯仰抬）。
  *
@@ -54,7 +54,7 @@ public final class TkGunMolang {
 		set(MolangQueries.BODY_X_ROTATION, TkGunMolang::bodyXRotation);
 		set(MolangQueries.HEAD_Y_ROTATION, TkGunMolang::headYRotation);
 		set(MolangQueries.BODY_Y_ROTATION, TkGunMolang::bodyYRotation);
-		TkGun.LOGGER.info("[tkgun] 视角 Molang 已接管：query.head_x/head_y/body_x/body_y_rotation 对 tkgun rig "
+		TkGun.LOGGER.info("[mechaniciancombat] 视角 Molang 已接管：query.head_x/head_y/body_x/body_y_rotation 对 mechaniciancombat rig "
 				+ "会按「被替换的那个玩家」求值（原先对 GeoReplacedEntity 一律返回 0 并刷错误日志）");
 	}
 
@@ -64,7 +64,7 @@ public final class TkGunMolang {
 	}
 
 	/**
-	 * 包一层诊断（`-Dtkgun.demo` / `-Dtkgun.verbose` 才打）：每 40 tick 打一行"这个 query 被谁问、答了几度"。
+	 * 包一层诊断（`-Dmechaniciancombat.demo` / `-Dmechaniciancombat.verbose` 才打）：每 40 tick 打一行"这个 query 被谁问、答了几度"。
 	 * 用来确认"值到底有没有被 Molang 取走" —— 只在真正求值时才会打印（不打印 = 动画里那句没在被读）。
 	 */
 	private static ToDoubleFunction<MolangQueries.Actor<?>> probe(String name, ToDoubleFunction<MolangQueries.Actor<?>> fn) {
@@ -75,7 +75,7 @@ public final class TkGunMolang {
 				Long last = PROBE_TICK.get(name);
 				if (last == null || now - last >= 1000L) {   // 每个 query 最多每秒一行
 					PROBE_TICK.put(name, now);
-					TkGun.LOGGER.info("[tkgun] Molang query 求值 {} = {}（animatable={}）", name,
+					TkGun.LOGGER.info("[mechaniciancombat] Molang query 求值 {} = {}（animatable={}）", name,
 							Math.round(v * 100.0) / 100.0, actor.animatable().getClass().getSimpleName());
 				}
 			}
@@ -83,11 +83,11 @@ public final class TkGunMolang {
 		};
 	}
 
-	private static final boolean VERBOSE = System.getProperty("tkgun.demo") != null
-			|| System.getProperty("tkgun.verbose") != null;
+	private static final boolean VERBOSE = System.getProperty("mechaniciancombat.demo") != null
+			|| System.getProperty("mechaniciancombat.verbose") != null;
 	private static final java.util.Map<String, Long> PROBE_TICK = new java.util.HashMap<>();
 
-	/** 这个 animatable 是不是"被 tkgun rig 替换的玩家"（是就用玩家的值，不是就走 GeckoLib 原逻辑）。 */
+	/** 这个 animatable 是不是"被 mechaniciancombat rig 替换的玩家"（是就用玩家的值，不是就走 GeckoLib 原逻辑）。 */
 	private static LivingEntity rigPlayer(MolangQueries.Actor<?> actor) {
 		if (!(actor.animatable() instanceof BowgunRig)) {
 			return null;

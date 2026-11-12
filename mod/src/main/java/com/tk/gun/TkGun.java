@@ -13,14 +13,14 @@ import java.util.Map;
 
 /** 常量、状态机状态、音效/资源 id —— 服务端与客户端共用。 */
 public final class TkGun {
-	public static final String MOD_ID = "tkgun";
+	public static final String MOD_ID = "mechaniciancombat";
 	/**
 	 * **构建标记**：每次交给你测试的 jar 都换一个。
 	 *
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r682-2026-11-07";
+	public static final String BUILD = "r747-2026-11-11";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -215,6 +215,9 @@ public final class TkGun {
 	public static final int MELEE_DASH_STUN_TICKS = 5;
 	/** 0.25 s authored clip plus one tick so its final keyframe is rendered. */
 	public static final int MELEE_RETURN_TICKS = 6;
+	/** 0.375 s authored hold-over recovery plus one final-pose tick. */
+	public static final int MELEE_HOLDOVER_RETURN_TICKS =
+			(int) Math.ceil(0.375D * 20.0D) + 1;
 	public static final int MELEE_DASH_TOTAL_TICKS =
 			MELEE_DASH_MOVE_TICKS + MELEE_DASH_STUN_TICKS;
 	public static final double MELEE_DASH_DISTANCE = 4.6D;
@@ -565,7 +568,7 @@ public final class TkGun {
 	}
 
 	/**
-	 * 过载连射那段（只在 `/tkgun state <玩家> inspect` 调试里看）。
+	 * 过载连射那段（只在 `/mechaniciancombat state <玩家> inspect` 调试里看）。
 	 *
 	 * <p>⚠️ 2026-10-15 素材 v3 把 `_22.5` / `_45` 仰角变体**全删了** —— 作者改成在动画里写
 	 * Molang：`chest.rotation.x = -query.body_x_rotation / 3`（GeckoLib 支持 `query.body_x_rotation`，
@@ -606,8 +609,8 @@ public final class TkGun {
 	 * `imp1.ogg` —— **弹头命中点**那一声（用户 2026-10-17："删除弹头击中后的 minecraft 原版爆炸特效及其
 	 * 音效，并将声音替换为…sound 中的 imp1"）。
 	 *
-	 * <p>文件在 `assets/tkgun/sounds/imp1.ogg`（与素材原文件逐字节相同）、`sounds.json` 里注册成
-	 * `tkgun:imp1`，**由服务端在命中点放** → 分发出去之后附近所有人都听得见。
+	 * <p>文件在 `assets/mechaniciancombat/sounds/imp1.ogg`（与素材原文件逐字节相同）、`sounds.json` 里注册成
+	 * `mechaniciancombat:imp1`，**由服务端在命中点放** → 分发出去之后附近所有人都听得见。
 	 */
 	public static final Identifier SND_IMPACT = id("imp1");
 	/** Veritas close-combat impact from the supplied hit.mp3. */
@@ -656,6 +659,24 @@ public final class TkGun {
 	/** Mechanical missile-bay cold-launch cue (`机械声2.mp3`). */
 	public static final Identifier SND_MISSILE_COLD_LAUNCH =
 			id("missile_cold_launch");
+	public static final Identifier SND_HUNTER_MECH3 =
+			id("hunter_mech3");
+	public static final Identifier SND_HUNTER_MECH4 =
+			id("hunter_mech4");
+	public static final Identifier SND_HUNTER_BOLT =
+			id("hunter_bolt");
+	public static final Identifier SND_HUNTER_BOLT3 =
+			id("hunter_bolt3");
+	public static final Identifier SND_HELMET_STEAM_HISS =
+			id("helmet_steam_hiss");
+	public static final Identifier SND_HELMET_MECH5 =
+			id("helmet_mech5");
+	public static final Identifier SND_HELMET_MECH3 =
+			id("helmet_mech3");
+	public static final Identifier SND_HELMET_MECH2 =
+			id("helmet_mech2");
+	public static final Identifier SND_HUNTER_TURRET_FIRE =
+			id("hunter_turret_fire");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 
@@ -695,6 +716,10 @@ public final class TkGun {
 			Map.entry("1", new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
 			Map.entry("1.mp3",
 					new KeyframeSound(SND_VERITAS_MELEE_CHARGE, 1.0F, 1.0F)),
+			Map.entry("3.mp3",
+					new KeyframeSound(SND_HUNTER_MECH3, 1.0F, 1.0F)),
+			Map.entry(".mp3",
+					new KeyframeSound(SND_VERITAS_FOCUS_EMPTY, 1.0F, 1.0F)),
 			Map.entry("anchor_slam01",
 					new KeyframeSound(SND_ANCHOR_SLAM1, 1.0F, 1.0F)),
 			Map.entry("smash_air1",

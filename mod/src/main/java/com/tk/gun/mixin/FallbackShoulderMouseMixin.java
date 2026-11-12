@@ -11,7 +11,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Entity.class)
 public abstract class FallbackShoulderMouseMixin {
 	@Inject(method = "method_5872(DD)V", at = @At("HEAD"), cancellable = true)
-	private void tkgun$turnFallbackCamera(double deltaX, double deltaY, CallbackInfo ci) {
+	private void mechaniciancombat$turnFallbackCamera(double deltaX, double deltaY, CallbackInfo ci) {
 		if ((Object) this instanceof ClientPlayerEntity player
 				&& FallbackShoulderCamera.turn(player, deltaX, deltaY)) {
 			ci.cancel();

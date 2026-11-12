@@ -35,7 +35,7 @@ import software.bernie.geckolib.renderer.layer.GeoRenderLayer;
  * </ul>
  *
  * <p>贴图和第一层共用（就是玩家皮肤本身），所以直接往当前那一层（参数里的 `type` / `buffer`）里画，
- * 不需要新建 RenderLayer。想关掉：启动参数 {@code -Dtkgun.skinlayer=false}。
+ * 不需要新建 RenderLayer。想关掉：启动参数 {@code -Dmechaniciancombat.skinlayer=false}。
  *
  * <p>已知限制：作者的几何是**宽手臂**（4x12x4），slim（Alex）皮肤的袖子层会稍微错位 —— 和第一层一样。
  */
@@ -49,7 +49,7 @@ public class BowgunSkinLayer extends GeoRenderLayer<BowgunRig> {
 			"arm_left", new float[]{16.0F, 0.0F, 0.25F},  // left sleeve
 			"leg_left", new float[]{-16.0F, 0.0F, 0.25F}); // left pant
 	private static final boolean ENABLED =
-			!"false".equalsIgnoreCase(System.getProperty("tkgun.skinlayer", "true"));
+			!"false".equalsIgnoreCase(System.getProperty("mechaniciancombat.skinlayer", "true"));
 
 	public BowgunSkinLayer(GeoRenderer<BowgunRig> renderer) {
 		super(renderer);

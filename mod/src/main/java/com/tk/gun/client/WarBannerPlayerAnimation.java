@@ -38,15 +38,22 @@ public final class WarBannerPlayerAnimation {
 		});
 	}
 
-	public static void play(AbstractClientPlayerEntity player) {
+	public static void play(AbstractClientPlayerEntity player, boolean gunHeld) {
 		UUID uuid = player.getUuid();
+		if (gunHeld) {
+			// The gun rig consumes skill_flag_gun through GeckoLib and bridges
+			// its body pose back to PlayerAnimator. A second upper-body clip
+			// would overwrite the authored arms, head and legs.
+			clear(uuid);
+			return;
+		}
 		if (ACTIVE.contains(uuid)) {
 			return;
 		}
 		ModifierLayer<IAnimation> layer = layerFor(player);
 		IPlayable playable = PlayerAnimationRegistry.getAnimation(CLIP);
 		if (layer == null || playable == null) {
-			TkGun.LOGGER.warn("[tkgun] Missing War Banner PlayerAnimator clip {}", CLIP);
+			TkGun.LOGGER.warn("[mechaniciancombat] Missing War Banner PlayerAnimator clip {}", CLIP);
 			return;
 		}
 		layer.setAnimation(new HoldAnimation(playable.playAnimation()));
@@ -113,7 +120,8 @@ public final class WarBannerPlayerAnimation {
 				float tickDelta, Vec3f fallback) {
 			// skill_flag only authors the upper body. Keep every other player
 			// channel on the lower animation layer's pose.
-			if (!"torso".equals(part) && !"rightArm".equals(part)) {
+			if (!"torso".equals(part) && !"rightArm".equals(part)
+					&& !"leftArm".equals(part)) {
 				return fallback;
 			}
 			return animation.get3DTransform(part, type, tickDelta, fallback);

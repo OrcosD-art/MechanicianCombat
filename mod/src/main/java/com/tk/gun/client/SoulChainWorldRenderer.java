@@ -16,7 +16,7 @@ import org.joml.Matrix4f;
 /** Draws animated camera-facing chain ribbons between the three linked entities. */
 public final class SoulChainWorldRenderer {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/entity/connect_chain.png");
+			Identifier.of("mechaniciancombat", "textures/entity/connect_chain.png");
 	/** 16x16 source pixels at the standard 16 pixels per block scale. */
 	private static final double SEGMENT_LENGTH = 1.0D;
 	private static final double HALF_WIDTH = 0.5D;

@@ -38,7 +38,7 @@ public class HeatVentParticle extends SpriteBillboardParticle {
 	}
 
 	private static float sizeFromProperty() {
-		String s = System.getProperty("tkgun.ventscale");
+		String s = System.getProperty("mechaniciancombat.ventscale");
 		if (s != null) {
 			try {
 				float v = Float.parseFloat(s);

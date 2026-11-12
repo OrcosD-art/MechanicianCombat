@@ -79,17 +79,17 @@ public class MoltenTridentItem extends TridentItem {
 	@Override
 	public void postProcessComponents(ItemStack stack) {
 		super.postProcessComponents(stack);
-		tkgun$stripEnchantments(stack);
+		mechaniciancombat$stripEnchantments(stack);
 	}
 
 	@Override
 	public void inventoryTick(ItemStack stack, World world, Entity entity,
 			int slot, boolean selected) {
 		super.inventoryTick(stack, world, entity, slot, selected);
-		tkgun$stripEnchantments(stack);
+		mechaniciancombat$stripEnchantments(stack);
 	}
 
-	private static void tkgun$stripEnchantments(ItemStack stack) {
+	private static void mechaniciancombat$stripEnchantments(ItemStack stack) {
 		stack.remove(DataComponentTypes.ENCHANTMENTS);
 		stack.remove(DataComponentTypes.STORED_ENCHANTMENTS);
 	}
@@ -97,7 +97,7 @@ public class MoltenTridentItem extends TridentItem {
 	@Override
 	public void appendTooltip(ItemStack stack, TooltipContext context, List<Text> tooltip, TooltipType type) {
 		super.appendTooltip(stack, context, tooltip, type);
-		BulletTooltips.addDamage(tooltip, "tooltip.tkgun.bolt.damage");
-		BulletTooltips.addEffect(tooltip, "tooltip.tkgun.bolt.effect");
+		BulletTooltips.addDamage(tooltip, "tooltip.mechaniciancombat.bolt.damage");
+		BulletTooltips.addEffect(tooltip, "tooltip.mechaniciancombat.bolt.effect");
 	}
 }

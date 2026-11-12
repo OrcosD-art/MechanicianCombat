@@ -36,6 +36,9 @@ public final class ShoulderCouplingState {
 			return client.options.getPerspective()
 					== net.minecraft.client.option.Perspective.THIRD_PERSON_BACK;
 		}
+		if (WarBannerSkillClientState.isActive(client.player.getId())) {
+			return false;
+		}
 		GunClientState.Entry state = GunClientState.get(client.player.getId());
 		if (isFortressCoupledSkillState(state)) {
 			return true;
@@ -100,6 +103,9 @@ public final class ShoulderCouplingState {
 		if (client == null || client.player == null || client.currentScreen != null
 				|| !TkGun.holdingGun(client.player)) {
 			return 0;
+		}
+		if (WarBannerSkillClientState.isActive(client.player.getId())) {
+			return 23;
 		}
 		int id = client.player.getId();
 		GunClientState.Entry state = GunClientState.get(id);

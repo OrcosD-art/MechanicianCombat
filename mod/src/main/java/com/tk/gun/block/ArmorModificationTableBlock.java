@@ -96,7 +96,7 @@ public final class ArmorModificationTableBlock extends SmithingTableBlock {
 				(proxy, method, args) -> {
 					if (method.getDeclaringClass() == Object.class) {
 						return switch (method.getName()) {
-							case "toString" -> "tkgun:armor_modification_table_factory";
+							case "toString" -> "mechaniciancombat:armor_modification_table_factory";
 							case "hashCode" -> System.identityHashCode(proxy);
 							case "equals" -> proxy == args[0];
 							default -> null;
@@ -107,7 +107,7 @@ public final class ArmorModificationTableBlock extends SmithingTableBlock {
 					}
 					if (method.getParameterCount() == 0
 							&& Text.class.isAssignableFrom(method.getReturnType())) {
-						return Text.translatable("block.tkgun.armor_modification_table");
+						return Text.translatable("block.mechaniciancombat.armor_modification_table");
 					}
 					if (method.getParameterCount() == 1
 							&& args[0] instanceof ServerPlayerEntity) {

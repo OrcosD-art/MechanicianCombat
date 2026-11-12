@@ -1,7 +1,7 @@
 {
   "replace": false,
   "values": [
-    "tkgun:backpack_modification_table",
-    "tkgun:armor_modification_table"
+    "mechaniciancombat:backpack_modification_table",
+    "mechaniciancombat:armor_modification_table"
   ]
 }

@@ -3,6 +3,7 @@ package com.tk.gun.mixin;
 import com.tk.gun.TkGun;
 import com.tk.gun.client.GunClientState;
 import com.tk.gun.client.TkGunClient;
+import com.tk.gun.client.WarBannerSkillClientState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.input.KeyboardInput;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,12 +15,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(KeyboardInput.class)
 public abstract class FocusMovementLockMixin {
 	@Inject(method = "method_3129(ZF)V", at = @At("TAIL"))
-	private void tkgun$lockFocusMovement(boolean slowDown, float slowDownFactor, CallbackInfo ci) {
+	private void mechaniciancombat$lockFocusMovement(boolean slowDown, float slowDownFactor, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player == null || !TkGun.holdingGun(client.player)) {
+		if (client.player == null) {
 			return;
 		}
 		int playerId = client.player.getId();
+		boolean holdingGun = TkGun.holdingGun(client.player);
+		boolean warBannerLock =
+				WarBannerSkillClientState.usesGunAnimation(playerId);
+		if (!holdingGun && !warBannerLock) {
+			return;
+		}
 		boolean focusLock = GunClientState.focusish(playerId);
 		GunClientState.Entry entry = GunClientState.get(playerId);
 		boolean dashMeleeHold = entry != null && entry.active()
@@ -49,7 +56,7 @@ public abstract class FocusMovementLockMixin {
 						|| entry.state == TkGun.State.FORTRESS_SKILL_GATHER);
 		boolean skillHitLock = entry != null
 				&& entry.state == TkGun.State.FORTRESS_SKILL_HIT;
-		boolean movementLock = focusLock || dashMeleeHold || atk3Lock
+		boolean movementLock = focusLock || warBannerLock || dashMeleeHold || atk3Lock
 				|| holdOverLock || skillJumpLock || fallAttackLock || skillGatherLock
 				|| skillHitLock || skillCrouchedLoadLock || slideSkillLoadLock;
 		if (!movementLock && !skillLoadOnly) {

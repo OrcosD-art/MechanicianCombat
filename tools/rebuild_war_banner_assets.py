@@ -15,10 +15,14 @@ SOURCE = Path(
 )
 FLAG = SOURCE.with_name("flag.png")
 FLOW = SOURCE.with_name("flag_flow.png")
+EFFECT = SOURCE.with_name("effect_circle.png")
 HELD_SOURCE = SOURCE.with_name("flag_skill.bbmodel")
 HELD_GEO_SOURCE = SOURCE.with_name("flag_skill - Converted.geo.json")
 HELD_ANIMATION_SOURCE = SOURCE.with_name("model.animation.json")
-RESOURCES = ROOT / "mod" / "src" / "main" / "resources" / "assets" / "tkgun"
+RESOURCES = (
+    ROOT / "mod" / "src" / "main" / "resources"
+    / "assets" / "mechaniciancombat"
+)
 GEO_OUT = RESOURCES / "geo" / "entity" / "war_banner.geo.json"
 HELD_GEO_OUT = RESOURCES / "geo" / "entity" / "war_banner_held.geo.json"
 ANIMATION_OUT = RESOURCES / "animations" / "entity" / "war_banner.animation.json"
@@ -26,15 +30,18 @@ HELD_ANIMATION_OUT = (
     RESOURCES / "animations" / "entity" / "war_banner_held.animation.json"
 )
 TEXTURE_OUT = RESOURCES / "textures" / "entity" / "war_banner.png"
+EFFECT_TEXTURE_OUT = RESOURCES / "textures" / "entity" / "war_banner_effect.png"
 HELD_TEXTURE_OUT = RESOURCES / "textures" / "entity" / "war_banner_held.png"
 METADATA_OUT = RESOURCES / "textures" / "entity" / "war_banner.png.mcmeta"
 STATIC_UV_OFFSET = 48.0
+RANGE_CUBE_UUID = "5a6a9aa0-d52a-794b-d365-bc6a15615115"
 EXPORT_JS = ROOT / "tools" / "bb_export_builtin.js"
 GECKO_EXPORT_JS = ROOT / "tools" / "bb_export_geckolib.js"
 RUN_JS = ROOT / "tools" / "run_js.ps1"
 BLOCKBENCH = ROOT / "tools" / "Blockbench5-portable" / "Blockbench.exe"
+GECKO_PLUGIN = ROOT / "tools" / "geckolib_bb5.js"
 PROFILE = ROOT / "work" / "bbprofile_war_banner_current"
-GECKO_PROFILE = ROOT / "bbprofile_bb522"
+GECKO_PROFILE = ROOT / "work" / "bbprofile_war_banner_gecko"
 
 
 def find_group(nodes, name):
@@ -49,8 +56,24 @@ def find_group(nodes, name):
     return None
 
 
+def exclude_runtime_range_cube(source):
+    """Exclude the plane that is drawn by WarBannerEntityRenderer."""
+    outliner = source.get("outliner", [])
+    source["outliner"] = [
+        node for node in outliner if node != RANGE_CUBE_UUID
+    ]
+    removed = len(source["outliner"]) != len(outliner)
+    if not removed:
+        raise RuntimeError("Updated range indicator cube was not found")
+    return source
+
+
 def export_from_blockbench(source, name, port, exporter=EXPORT_JS,
 		profile=PROFILE):
+    if exporter == GECKO_EXPORT_JS:
+        plugin_dir = profile / "plugins"
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(GECKO_PLUGIN, plugin_dir / "geckolib.js")
     job = ROOT / "work" / f"{name}_job.js"
     job.parent.mkdir(parents=True, exist_ok=True)
     job.write_text(
@@ -137,48 +160,49 @@ def restore_source_uvs(geometry, source_model, elements):
     return uv_count
 
 
-def restore_mirrored_cube_rotations(geometry, source_model, bone_name):
-    source_group = find_group(source_model["outliner"], bone_name)
+def restore_mirrored_cube_rotations(geometry, source_model):
     elements = {
         element["uuid"]: element for element in source_model["elements"]
     }
-    source_cubes = []
-    for child in source_group.get("children", []):
-        if isinstance(child, str):
-            element = elements.get(child)
-            if element and element.get("type", "cube") == "cube":
-                source_cubes.append(element)
-        elif isinstance(child, dict) and child.get("type") == "cube":
-            source_cubes.append(child)
-    bone = next(
-        bone for bone in geometry["bones"] if bone.get("name") == bone_name)
-    exported_cubes = bone.get("cubes", [])
-    if len(source_cubes) != len(exported_cubes):
-        raise RuntimeError(
-            f"Cube count mismatch for {bone_name}: "
-            f"{len(source_cubes)} != {len(exported_cubes)}")
     restored = 0
-    for source_cube, exported_cube in zip(source_cubes, exported_cubes):
-        rotation = source_cube.get("rotation")
-        if not rotation:
+    for bone in geometry["bones"]:
+        source_group = find_group(
+            source_model["outliner"], bone.get("name"))
+        if not source_group:
             continue
-        source_pivot = source_cube.get("origin")
-        if not source_pivot:
-            continue
-        # Blockbench's free-model axis is mirrored into Bedrock X. Reflections
-        # keep X rotation and reverse Y/Z rotation, while the cube pivot follows
-        # the same X mirror as its vertices.
-        exported_cube["rotation"] = [
-            float(rotation[0]),
-            -float(rotation[1]),
-            -float(rotation[2]),
-        ]
-        exported_cube["pivot"] = [
-            -float(source_pivot[0]),
-            float(source_pivot[1]),
-            float(source_pivot[2]),
-        ]
-        restored += 1
+        source_cubes = []
+        for child in source_group.get("children", []):
+            if isinstance(child, str):
+                element = elements.get(child)
+                if element and element.get("type", "cube") == "cube":
+                    source_cubes.append(element)
+            elif isinstance(child, dict) and child.get("type") == "cube":
+                source_cubes.append(child)
+        exported_cubes = bone.get("cubes", [])
+        if len(source_cubes) != len(exported_cubes):
+            if not exported_cubes:
+                continue
+            raise RuntimeError(
+                f"Cube count mismatch for {bone.get('name')}: "
+                f"{len(source_cubes)} != {len(exported_cubes)}")
+        for source_cube, exported_cube in zip(source_cubes, exported_cubes):
+            rotation = source_cube.get("rotation")
+            source_pivot = source_cube.get("origin")
+            if not rotation or not source_pivot:
+                continue
+            # GeckoLib's free-player-rig conversion mirrors X and Y rotation;
+            # Z rotation and the pivot's Y/Z components are preserved.
+            exported_cube["rotation"] = [
+                -float(rotation[0]),
+                -float(rotation[1]),
+                float(rotation[2]),
+            ]
+            exported_cube["pivot"] = [
+                -float(source_pivot[0]),
+                float(source_pivot[1]),
+                float(source_pivot[2]),
+            ]
+            restored += 1
     return restored
 
 
@@ -300,32 +324,43 @@ def build_texture(source):
 
 
 SOURCE_MODEL = json.loads(SOURCE.read_text(encoding="utf-8"))
+HAS_RANGE_CUBE = any(
+    element.get("uuid") == RANGE_CUBE_UUID
+    for element in SOURCE_MODEL.get("elements", [])
+)
+PREPARED_SOURCE_MODEL = exclude_runtime_range_cube(SOURCE_MODEL)
 HELD_MODEL = json.loads(HELD_SOURCE.read_text(encoding="utf-8"))
 
 
 def main():
     elements = {element["uuid"]: element for element in SOURCE_MODEL["elements"]}
     export = export_from_blockbench(
-        SOURCE_MODEL, "war_banner", 9347)
-    gecko_export = export_from_blockbench(
-        SOURCE_MODEL, "war_banner", 9346, GECKO_EXPORT_JS,
-        GECKO_PROFILE)
-    gecko_content = next(
+        PREPARED_SOURCE_MODEL, "war_banner", 9347)
+    geometry = next(
         entry["content"]
-        for entry in gecko_export.get("exports", [])
-        if entry.get("name") == "war_banner.geo"
-        and isinstance(entry.get("content"), str)
+        for entry in export.get("exports", [])
+        if isinstance(entry.get("content"), dict)
+        and entry["content"].get("bones")
     )
-    gecko_document = json.loads(gecko_content)
-    geometry = gecko_document["minecraft:geometry"][0]
-    geometry["description"].update({
-        "identifier": "geometry.tkgun.war_banner",
-        "texture_width": int(STATIC_UV_OFFSET * 2),
-        "texture_height": int(STATIC_UV_OFFSET * 2),
-        "visible_bounds_width": 3,
-        "visible_bounds_height": 4.0,
-        "visible_bounds_offset": [0, 2.0, 0],
-    })
+    restore_source_uvs(geometry, SOURCE_MODEL, elements)
+    restored_rotations = restore_mirrored_cube_rotations(
+        geometry, SOURCE_MODEL)
+    gecko_document = {
+        "format_version": "1.12.0",
+        "minecraft:geometry": [{
+            "description": {
+                "identifier": "geometry.tkgun.war_banner",
+                "texture_width": 96,
+                "texture_height": 96,
+                # The visible aura is a 16-block-wide authored range plane.
+                # Keep model culling from hiding the banner before its edge.
+                "visible_bounds_width": 18,
+                "visible_bounds_height": 4.0,
+                "visible_bounds_offset": [0, 2.0, 0],
+            },
+            "bones": geometry["bones"],
+        }],
+    }
     moved_static_faces = separate_static_texture_uvs(geometry)
     uv_count = sum(
         len(cube.get("uv", {}))
@@ -342,31 +377,68 @@ def main():
         export["animation_document"], encoding="utf-8")
 
     frame_count, rectangles = build_texture(SOURCE_MODEL)
+    effect = Image.open(EFFECT)
+    if effect.width != 256 or effect.height != effect.width * frame_count:
+        raise RuntimeError(
+            "effect_circle.png must contain eight 256x256 vertical frames")
+    EFFECT_TEXTURE_OUT.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(EFFECT, EFFECT_TEXTURE_OUT)
 
+    held_export = export_from_blockbench(
+        HELD_MODEL, "war_banner_held", 9348)
+    held_geometry = next(
+        entry["content"]
+        for entry in held_export.get("exports", [])
+        if isinstance(entry.get("content"), dict)
+        and entry["content"].get("bones")
+    )
+    restore_source_uvs(
+        held_geometry, HELD_MODEL,
+        {element["uuid"]: element for element in HELD_MODEL["elements"]})
+    held_restored_rotations = restore_mirrored_cube_rotations(
+        held_geometry, HELD_MODEL)
+    held_document = {
+        "format_version": "1.12.0",
+        "minecraft:geometry": [{
+            "description": {
+                "identifier": "geometry.tkgun.war_banner_held",
+                "texture_width": 48,
+                "texture_height": 48,
+                "visible_bounds_width": 2.0,
+                "visible_bounds_height": 3.0,
+                "visible_bounds_offset": [0, 1.0, 0],
+            },
+            "bones": held_geometry["bones"],
+        }],
+    }
     HELD_GEO_OUT.parent.mkdir(parents=True, exist_ok=True)
-    if HELD_GEO_SOURCE.exists():
-        shutil.copyfile(HELD_GEO_SOURCE, HELD_GEO_OUT)
+    HELD_GEO_OUT.write_text(
+        json.dumps(held_document, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8")
     HELD_ANIMATION_OUT.parent.mkdir(parents=True, exist_ok=True)
-    if HELD_ANIMATION_SOURCE.exists():
-        shutil.copyfile(HELD_ANIMATION_SOURCE, HELD_ANIMATION_OUT)
+    HELD_ANIMATION_OUT.write_text(
+        held_export["animation_document"], encoding="utf-8")
     HELD_TEXTURE_OUT.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FLAG, HELD_TEXTURE_OUT)
 
     p2 = find_group(SOURCE_MODEL["outliner"], "P2")
     locator_y = float(p2["origin"][1]) / 16.0
     print(f"UV faces: {uv_count}")
+    print(f"Restored static cube rotations: {restored_rotations}")
+    print(f"Restored held cube rotations: {held_restored_rotations}")
     print(f"Static UV faces moved to right atlas: {moved_static_faces}")
-    held_document = json.loads(
-        HELD_GEO_OUT.read_text(encoding="utf-8"))
     held_flag = next(
         bone for bone in held_document["minecraft:geometry"][0]["bones"]
         if bone.get("name") == "flag")
     print(f"Held flag cubes: {len(held_flag.get('cubes', []))}")
     print(f"Frames: {frame_count}, dynamic UV rectangles: {rectangles}")
+    print(f"Range cube present: {HAS_RANGE_CUBE}")
+    print("Range frames: 8 x 256x256")
     print(f"Entity locator Y: {locator_y:.6f} blocks")
     print(f"Geo: {GEO_OUT}")
     print(f"Animation: {ANIMATION_OUT}")
     print(f"Texture: {TEXTURE_OUT}")
+    print(f"Range texture: {EFFECT_TEXTURE_OUT}")
     print(f"Held geo: {HELD_GEO_OUT}")
     print(f"Held animation: {HELD_ANIMATION_OUT}")
 

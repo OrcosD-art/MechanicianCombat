@@ -24,6 +24,7 @@ public final class SprintDirectionCorrection {
 		if (client == null || client.player == null || client.world == null
 				|| client.currentScreen != null
 				|| !GunCamera.active(client)
+				|| WarBannerSkillClientState.isActive(client.player.getId())
 				|| !ShoulderCouplingState.usesCameraRelativeSteering(client)
 				|| GunCamera.aiming(client)
 				|| !TkGun.holdingGun(client.player)) {

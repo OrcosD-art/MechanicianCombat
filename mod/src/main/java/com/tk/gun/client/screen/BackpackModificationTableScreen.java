@@ -27,7 +27,7 @@ import java.util.Arrays;
 public final class BackpackModificationTableScreen
 		extends HandledScreen<BackpackModificationTableScreenHandler> {
 	private static final Identifier TEXTURE =
-			Identifier.of("tkgun", "textures/gui/container/backpack_modification_table.png");
+			Identifier.of("mechaniciancombat", "textures/gui/container/backpack_modification_table.png");
 	private static final int TEXTURE_WIDTH = 256;
 	private static final int TEXTURE_HEIGHT = 256;
 	private static final int PREVIEW_X = 52;
@@ -150,7 +150,7 @@ public final class BackpackModificationTableScreen
 			register.invoke(null, BackpackModificationTableScreenHandler.TYPE, provider);
 		} catch (Throwable error) {
 			com.tk.gun.TkGun.LOGGER.error(
-					"[tkgun] Unable to register backpack modification table screen", error);
+					"[mechaniciancombat] Unable to register backpack modification table screen", error);
 		}
 	}
 }

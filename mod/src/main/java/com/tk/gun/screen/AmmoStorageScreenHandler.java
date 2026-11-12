@@ -170,7 +170,7 @@ public final class AmmoStorageScreenHandler extends ScreenHandler {
 				(p, method, args) -> {
 					if (method.getDeclaringClass() == Object.class) {
 						return switch (method.getName()) {
-							case "toString" -> "tkgun:ammo_storage_factory";
+							case "toString" -> "mechaniciancombat:ammo_storage_factory";
 							case "hashCode" -> System.identityHashCode(p);
 							case "equals" -> p == args[0];
 							default -> null;
@@ -178,7 +178,7 @@ public final class AmmoStorageScreenHandler extends ScreenHandler {
 					}
 					if (method.getParameterCount() == 0
 							&& Text.class.isAssignableFrom(method.getReturnType())) {
-						return Text.translatable("ui.tkgun.ammo_storage");
+						return Text.translatable("ui.mechaniciancombat.ammo_storage");
 					}
 					if (method.getParameterCount() == 1) {
 						return (byte) 0;

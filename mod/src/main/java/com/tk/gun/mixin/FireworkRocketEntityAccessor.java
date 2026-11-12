@@ -8,8 +8,8 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(FireworkRocketEntity.class)
 public interface FireworkRocketEntityAccessor {
 	@Accessor("field_7612")
-	void tkgun$setLifeTime(int lifeTime);
+	void mechaniciancombat$setLifeTime(int lifeTime);
 
 	@Accessor("field_7612")
-	int tkgun$getLifeTime();
+	int mechaniciancombat$getLifeTime();
 }

@@ -2,6 +2,7 @@ package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
 import com.tk.gun.client.HelmetClientState;
+import com.tk.gun.client.HunterSpearHeldRenderer;
 import com.tk.gun.client.WarBannerHeldRenderer;
 import com.tk.gun.client.rig.BowgunRigClient;
 import com.tk.gun.item.MechanicianUndersuitItem;
@@ -28,21 +29,22 @@ import org.spongepowered.asm.mixin.Unique;
 @Mixin(PlayerEntityRenderer.class)
 public abstract class PlayerEntityRendererRigMixin {
 	@Unique
-	private boolean[] tkgun$modelVisibility = new boolean[10];
+	private boolean[] mechaniciancombat$modelVisibility = new boolean[10];
 
 	@Inject(method = "<init>(Lnet/minecraft/class_5617$class_5618;Z)V", at = @At("TAIL"))
-	private void tkgun$rememberContext(EntityRendererFactory.Context ctx, boolean slim, CallbackInfo ci) {
+	private void mechaniciancombat$rememberContext(EntityRendererFactory.Context ctx, boolean slim, CallbackInfo ci) {
 		BowgunRigClient.setContext(ctx);
 		WarBannerHeldRenderer.setContext(ctx);
+		HunterSpearHeldRenderer.setContext(ctx);
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
 			at = @At("HEAD"))
-	private void tkgun$renderRig(AbstractClientPlayerEntity player, float yaw, float tickDelta,
+	private void mechaniciancombat$renderRig(AbstractClientPlayerEntity player, float yaw, float tickDelta,
 								 MatrixStack matrices, VertexConsumerProvider consumers, int light, CallbackInfo ci) {
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
 		if (renderer.getModel() instanceof PlayerEntityModel<?> model) {
-			tkgun$modelVisibility = new boolean[]{
+			mechaniciancombat$modelVisibility = new boolean[]{
 					model.body.visible,
 					model.leftArm.visible,
 					model.rightArm.visible,
@@ -58,18 +60,20 @@ public abstract class PlayerEntityRendererRigMixin {
 		BowgunRigClient.renderIfHolding(player, yaw, tickDelta, matrices, consumers, light);
 		WarBannerHeldRenderer.renderIfActive(
 				player, yaw, tickDelta, matrices, consumers, light);
+		HunterSpearHeldRenderer.renderIfActive(
+				player, yaw, tickDelta, matrices, consumers, light);
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
 			at = @At("RETURN"))
-	private void tkgun$restoreUndersuitBody(AbstractClientPlayerEntity player,
+	private void mechaniciancombat$restoreUndersuitBody(AbstractClientPlayerEntity player,
 											 float yaw, float tickDelta,
 											 MatrixStack matrices,
 											 VertexConsumerProvider consumers,
 											 int light, CallbackInfo ci) {
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
 		if (renderer.getModel() instanceof PlayerEntityModel<?> model) {
-			boolean[] visible = tkgun$modelVisibility;
+			boolean[] visible = mechaniciancombat$modelVisibility;
 			model.body.visible = visible[0];
 			model.leftArm.visible = visible[1];
 			model.rightArm.visible = visible[2];
@@ -89,19 +93,19 @@ public abstract class PlayerEntityRendererRigMixin {
 	 * and body offsets to the same limbs.
 	 */
 	@Inject(method = "method_4218(Lnet/minecraft/class_742;)V", at = @At("TAIL"))
-	private void tkgun$suppressStackedVanillaCrouch(AbstractClientPlayerEntity player,
+	private void mechaniciancombat$suppressStackedVanillaCrouch(AbstractClientPlayerEntity player,
 													CallbackInfo ci) {
 		if (!TkGun.holdingGun(player)) {
-			tkgun$hideUndersuitBody(player);
-			tkgun$updateHelmetHair(player);
+			mechaniciancombat$hideUndersuitBody(player);
+			mechaniciancombat$updateHelmetHair(player);
 			return;
 		}
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
 		if (renderer.getModel() instanceof PlayerEntityModel model) {
 			model.sneaking = false;
 		}
-		tkgun$hideUndersuitBody(player);
-		tkgun$updateHelmetHair(player);
+		mechaniciancombat$hideUndersuitBody(player);
+		mechaniciancombat$updateHelmetHair(player);
 	}
 
 	/**
@@ -111,7 +115,7 @@ public abstract class PlayerEntityRendererRigMixin {
 	 */
 	@Inject(method = "method_23205(Lnet/minecraft/class_4587;Lnet/minecraft/class_4597;ILnet/minecraft/class_742;Lnet/minecraft/class_630;Lnet/minecraft/class_630;)V",
 			at = @At("HEAD"))
-	private void tkgun$replaceUndersuitFirstPersonArm(
+	private void mechaniciancombat$replaceUndersuitFirstPersonArm(
 			MatrixStack matrices, VertexConsumerProvider consumers, int light,
 			AbstractClientPlayerEntity player, ModelPart arm,
 			ModelPart sleeve, CallbackInfo ci) {
@@ -122,7 +126,7 @@ public abstract class PlayerEntityRendererRigMixin {
 	}
 
 	@Unique
-	private void tkgun$hideUndersuitBody(AbstractClientPlayerEntity player) {
+	private void mechaniciancombat$hideUndersuitBody(AbstractClientPlayerEntity player) {
 		if (!MechanicianUndersuitItem.isEquipped(player)) {
 			return;
 		}
@@ -144,7 +148,7 @@ public abstract class PlayerEntityRendererRigMixin {
 	}
 
 	@Unique
-	private void tkgun$updateHelmetHair(AbstractClientPlayerEntity player) {
+	private void mechaniciancombat$updateHelmetHair(AbstractClientPlayerEntity player) {
 		if (!MechanicianUndersuitItem.isWearingOuterSet(player)) {
 			return;
 		}
