@@ -1,0 +1,21 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "BAB",
+    "ABA"
+  ],
+  "key": {
+    "A": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "B": {
+      "item": "mechaniciancombat:rose_quartz_solution"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:arcane_alloy_block",
+    "count": 1
+  }
+}

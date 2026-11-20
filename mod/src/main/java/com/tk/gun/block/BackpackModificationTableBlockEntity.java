@@ -77,6 +77,9 @@ public final class BackpackModificationTableBlockEntity extends BlockEntity {
 			case MISSILE_BOX -> BackpackUpgradeData.hasMissileBox(backpack)
 					&& partSlot == storedSlot(
 							BackpackUpgradeData.missileBoxSlot(backpack), 3);
+			case GOLEM_CAPSULE -> BackpackUpgradeData.hasGolemCapsule(backpack)
+					&& partSlot == storedSlot(
+							BackpackUpgradeData.golemCapsuleSlot(backpack), 3);
 		};
 	}
 

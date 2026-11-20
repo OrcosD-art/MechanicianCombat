@@ -18,6 +18,8 @@ public final class GunClientState {
 	public static final class Entry {
 		public TkGun.State state = TkGun.State.IDLE;
 		public int elapsed;
+		/** Veritas effect timeline; deliberately unaffected by melee hitstop. */
+		public int effectElapsed;
 		public int total;
 		public int heat;
 		/** 弹夹里第几发（1..10）：1..3 用 extra，4..10 用 Focus_shooting[2..7]。 */
@@ -95,6 +97,7 @@ public final class GunClientState {
 		public int predictedRollTicks;
 		/** 客户端镜像的循环意图：true = 下一次 Alt 应进入滑铲。 */
 		public boolean nextDodgeSlide;
+		public long localSlidePendingUntil;
 		/** Client-side deadline of the roll movement bonus, used only for Alt prediction. */
 		public int dashUntil;
 		/** Server-authoritative native roll cooldown, mirrored onto the client tick clock. */
@@ -133,6 +136,7 @@ public final class GunClientState {
 			e.state = newState;
 			e.total = payload.ticks();
 			e.elapsed = 0;
+			e.effectElapsed = 0;
 			e.shotSeq = payload.shotSeq();
 		}
 		e.heat = payload.heat();
@@ -198,7 +202,8 @@ public final class GunClientState {
 		}
 		e.predictedRoll = false;
 		e.predictedRollTicks = 0;
-		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE) {
+		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN) {
 			e.nextDodgeSlide = true;
 		} else if (e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY) {
 			e.nextDodgeSlide = false;
@@ -209,7 +214,8 @@ public final class GunClientState {
 		if (e.state == TkGun.State.ROLL) {
 			// 翻滚/翻滚回待机的位移不是玩家输入；别让 MOVING_HOLD_TICKS 把它续成 run。
 			TkGunClient.clearMovingHold(payload.playerId());
-		} else if (e.state == TkGun.State.ROLL_TO_IDLE) {
+		} else if (e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN) {
 			// If the player has already resumed movement, seed the movement
 			// sampler from the keys now so there is no one-frame idle_lower.
 			if (movementInput) {
@@ -223,6 +229,10 @@ public final class GunClientState {
 		}
 		if (e.state != TkGun.State.FIRE) {
 			e.holdUntil = 0;
+		} else {
+			// FIRE owns the focus shooting clip; do not let the fast-deploy
+			// tail remain eligible and override it after the next state packet.
+			e.readyHoldAnimation = null;
 		}
 	}
 
@@ -244,9 +254,13 @@ public final class GunClientState {
 		if (e == null) {
 			return false;
 		}
+		if (SoulAnchorSkillClientState.chainSlideLocksDodge(entityId)) {
+			return false;
+		}
 		if (e.state == TkGun.State.AIM || e.state == TkGun.State.AIM_FAST
 				|| e.state == TkGun.State.AIM_ROLL || e.state == TkGun.State.AIM_SLIDE
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.SKILL_JUMP
 				|| e.state == TkGun.State.FALL_ATTACK
@@ -282,6 +296,7 @@ public final class GunClientState {
 			return;
 		}
 		if (e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.SKILL_JUMP
 				|| e.state == TkGun.State.FALL_ATTACK
@@ -301,6 +316,11 @@ public final class GunClientState {
 		// Alt enters slide only while the roll movement bonus is still active.
 		boolean slideWindowOpen = e.nextDodgeSlide && !e.focus && ticks < e.dashUntil;
 		boolean dashRecovery = dashMeleeRecovery(e);
+		if (slideWindowOpen) {
+			// Suppress camera-relative movement on the input frame before the
+			// authoritative SLIDE state packet arrives.
+			e.localSlidePendingUntil = ticks + 3;
+		}
 		if (slideWindowOpen || ticks < e.localDodgeLockUntil
 				|| (!dashRecovery && ticks < e.nativeRollReadyAt)) {
 			return;
@@ -325,6 +345,9 @@ public final class GunClientState {
 		ticks++;
 		ENTRIES.forEach((entityId, e) -> {
 			if (e.active()) {
+				if (e.state == TkGun.State.MELEE) {
+					e.effectElapsed++;
+				}
 				if (!(e.state == TkGun.State.MELEE
 						&& com.tk.gun.client.MeleeImpactClientState
 								.freezesAnimation(entityId))) {
@@ -416,6 +439,7 @@ public final class GunClientState {
 		e.state = TkGun.State.IDLE;
 		e.total = 0;
 		e.elapsed = 0;
+		e.effectElapsed = 0;
 		e.focus = false;
 		e.dashing = false;
 		e.dashMeleeActive = false;
@@ -468,8 +492,9 @@ public final class GunClientState {
 				return "idle";                       // 待机（作者新做的 idle）
 			case AIM:
 			case AIM_FAST:
-			case AIM_SLIDE:
 				return "Focus_ready";                // 架枪（倍速按状态分三档，见 speedFor）
+			case AIM_SLIDE:
+				return "sliding_fast_ready";
 			case AIM_ROLL:
 				return "rolling_fast_ready";         // 翻滚后的快速蹲射过门
 			case AIM_HOLD:
@@ -498,6 +523,8 @@ public final class GunClientState {
 						? null : "roll";
 			case ROLL_TO_IDLE:
 				return "roll_to_idle";
+			case ROLL_TO_RUN:
+				return "focus-roll-run";
 			case MELEE:
 				if (e.meleeReturning) {
 					return TkGun.meleeReturnAnimation(e.shotIndex);
@@ -513,8 +540,8 @@ public final class GunClientState {
 
 	/**
 	 * 动画倍速。**架枪三档**和 {@link TkGun#AIM_TICKS_NORMAL}/{@link TkGun#AIM_TICKS_FAST}/
-	 * {@link TkGun#AIM_TICKS_SLIDE} 是同一套数：普通右键慢（1.2s）、滑铲后/蹲着快（0.5s）、
-	 * 滑铲里抢架枪最快（0.35s）。
+	 * {@link TkGun#AIM_TICKS_SLIDE} 是同一套数：普通右键 0.83x、快速举枪 1x，
+	 * sliding_fast_ready 也按作者原速 1x 播放。
 	 */
 	/** The authored jump clip covers ascent; fall covers the descent. */
 	public static String skillJumpAnimation(int entityId) {
@@ -537,7 +564,7 @@ public final class GunClientState {
 		if (e.readyHoldAnimation != null
 				&& (e.state == TkGun.State.AIM_SLIDE || e.state == TkGun.State.AIM_HOLD
 				|| e.state == TkGun.State.AIM_ROLL)) {
-			return "sliding_fast_ready".equals(e.readyHoldAnimation) ? 2.0D : 1.0D;
+			return 1.0D;
 		}
 		if (!e.active()) {
 			return 1.0D;
@@ -545,9 +572,9 @@ public final class GunClientState {
 		return switch (e.state) {
 			case AIM -> 0.83D;
 			// 快档现在是作者新做的 `fast_ready`（0.667 秒），所以 1 倍速就够快；
-			// 滑铲里抢架枪再压到 2 倍速（0.33 秒）。老做法是拿 Focus_ready 播 2x/3x。
+			// sliding_fast_ready 按作者原速播放，状态长度与 0.625 秒动画一致。
 			case AIM_FAST -> 1.0D;
-			case AIM_SLIDE -> 2.0D;
+			case AIM_SLIDE -> 1.0D;
 			case AIM_ROLL -> 1.0D;
 			case SLIDE -> TkGun.SLIDE_TICKS / (double) Math.max(
 					TkGun.SLIDE_TICKS, e.total);
@@ -578,6 +605,15 @@ public final class GunClientState {
 		return e != null && e.dashing && ticks < e.dashUntil;
 	}
 
+	/** Full-suit armor dodge is unavailable during its reward or follow-up cooldown. */
+	public static boolean armorDodgeLocked(int entityId) {
+		Entry e = ENTRIES.get(entityId);
+		if (e == null) {
+			return false;
+		}
+		return dashing(entityId) || ticks < e.nativeRollReadyAt;
+	}
+
 	public static boolean meleeGraceActive(int entityId) {
 		Entry e = ENTRIES.get(entityId);
 		return e != null && e.state == TkGun.State.IDLE && ticks < e.meleeGraceUntil
@@ -594,6 +630,7 @@ public final class GunClientState {
 		}
 		return dashing(entityId) || ticks < e.heatLockUntil || e.heat >= TkGun.HEAT_MAX
 				|| e.state == TkGun.State.ROLL || e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN
 				|| e.state == TkGun.State.SLIDE || e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT || e.state == TkGun.State.OVER
 				|| e.state == TkGun.State.INSPECT || e.state == TkGun.State.MELEE
@@ -661,9 +698,22 @@ public final class GunClientState {
 		return e.elapsed;
 	}
 
+	/** Effect-only melee clock that never pauses for hitstop. */
+	public static int effectElapsed(int entityId) {
+		Entry e = ENTRIES.get(entityId);
+		return e == null ? 0 : e.effectElapsed;
+	}
+
 	public static boolean rolling(int entityId) {
 		Entry e = ENTRIES.get(entityId);
 		return e != null && e.active() && e.state == TkGun.State.ROLL;
+	}
+
+	public static boolean slideMovementLocked(int entityId) {
+		Entry entry = ENTRIES.get(entityId);
+		return entry != null && (entry.state == TkGun.State.SLIDE
+				|| entry.state == TkGun.State.SLIDE_READY
+				|| ticks < entry.localSlidePendingUntil);
 	}
 
 	/** Combat Roll may not start a second physical dash while the gun sequence owns dodge input. */
@@ -684,7 +734,7 @@ public final class GunClientState {
 			return e.elapsed < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK;
 		}
 		return switch (e.state) {
-			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY,
+			case ROLL, ROLL_TO_IDLE, ROLL_TO_RUN, SLIDE, SLIDE_READY,
 					AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE, SKILL_JUMP,
 					FALL_ATTACK, FALL_ATTACK_RECOVERY -> true;
 			case MELEE -> !dashMeleeRecovery(e);

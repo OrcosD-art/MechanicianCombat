@@ -27,6 +27,9 @@ public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 	public static final int PHASE_FLYING = 11;
 	public static final int PHASE_FALLING = 12;
 	public static final int PHASE_CLOSE = 13;
+	public static final int PHASE_BANNER_READY = 14;
+	public static final int PHASE_BANNER_ACTIVE = 15;
+	public static final int PHASE_BANNER_CD = 16;
 	public static final int MISSILE_NONE = 0;
 	public static final int MISSILE_AIM = 1;
 	public static final int MISSILE_CD = 2;

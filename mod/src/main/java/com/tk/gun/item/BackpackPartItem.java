@@ -1,9 +1,15 @@
 package com.tk.gun.item;
 
+import com.tk.gun.TkGunServer;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.text.Text;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
 import software.bernie.geckolib.animatable.GeoItem;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -20,7 +26,8 @@ public final class BackpackPartItem extends Item implements GeoItem {
 		SUMMON_ANTENNA,
 		JUMP_THRUSTER,
 		MISSILE_BOX,
-		BATTLE_BANNER
+		BATTLE_BANNER,
+		GOLEM_CAPSULE
 	}
 
 	private final Kind kind;
@@ -80,6 +87,43 @@ public final class BackpackPartItem extends Item implements GeoItem {
 			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.install"));
 			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.skill"));
 			tooltip.add(Text.translatable("tooltip.mechaniciancombat.war_banner.aura"));
+		} else if (kind == Kind.GOLEM_CAPSULE) {
+			tooltip.add(Text.translatable(
+					"tooltip.mechaniciancombat.golem_capsule.install"));
+			tooltip.add(Text.translatable(
+					"tooltip.mechaniciancombat.golem_capsule.summon"));
+			tooltip.add(Text.translatable(
+					"tooltip.mechaniciancombat.golem_capsule.creative"));
 		}
+	}
+
+	@Override
+	public ActionResult useOnBlock(ItemUsageContext context) {
+		if (kind != Kind.GOLEM_CAPSULE) {
+			return ActionResult.PASS;
+		}
+		PlayerEntity player = context.getPlayer();
+		if (player == null || !player.isCreative()
+				|| TkGunServer.MOLTEN_GOLEM == null) {
+			return ActionResult.PASS;
+		}
+		World world = context.getWorld();
+		if (world.isClient()) {
+			return ActionResult.SUCCESS;
+		}
+		com.tk.gun.entity.MoltenGolemEntity golem =
+				TkGunServer.MOLTEN_GOLEM.create(world);
+		if (golem == null) {
+			return ActionResult.FAIL;
+		}
+		BlockPos pos = context.getBlockPos().offset(context.getSide());
+		golem.refreshPositionAndAngles(
+				pos.getX() + 0.5D, pos.getY(),
+				pos.getZ() + 0.5D, player.getYaw(), 0.0F);
+		golem.setSummoner(player.getUuid());
+		if (!world.spawnEntity(golem)) {
+			return ActionResult.FAIL;
+		}
+		return ActionResult.SUCCESS;
 	}
 }

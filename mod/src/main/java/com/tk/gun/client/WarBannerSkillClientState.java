@@ -59,6 +59,11 @@ public final class WarBannerSkillClientState {
 		return entry != null && entry.gunHeld();
 	}
 
+	public static long startedAt(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? -1L : entry.startedAt();
+	}
+
 	public static double animationSeconds(int playerId, long now,
 			float tickDelta) {
 		Entry entry = ENTRIES.get(playerId);

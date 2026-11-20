@@ -40,13 +40,15 @@ const animsAfter = (typeof AnimationItem !== "undefined" && AnimationItem.all) ?
 // 逐面算好注入进来（job.skinUv）。之前手写那版把 east/west 写反了（官方是 east=皮肤右侧、
 // west=皮肤左侧），身体两侧就贴着错误的皮肤区域 —— 用户看到的"贴图混乱"就是这个。
 const SKIN_UV = job.skinUv;
-if (!SKIN_UV) throw new Error("job.skinUv 缺失（应由 gen_geckolib_official.py 注入）");
+if (!SKIN_UV && !job.allowNoSkinUv) {
+    throw new Error("job.skinUv 缺失（应由 gen_geckolib_official.py 注入）");
+}
 const rect = (r) => [r[0], r[1], r[0] + r[2], r[1] + r[3]];
 
 let uvFixed = 0;
 const bodyBones = [];
 for (const group of Project.groups) {
-    const tbl = SKIN_UV[group.name];
+    const tbl = SKIN_UV && SKIN_UV[group.name];
     if (!tbl) continue;
     bodyBones.push(group.name + ":" + group.children.length);
     for (const cube of group.children) {

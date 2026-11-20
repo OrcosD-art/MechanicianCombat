@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "ACA",
+    "ADA"
+  ],
+  "key": {
+    "A": {
+      "item": "mechaniciancombat:infused_leather"
+    },
+    "B": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    },
+    "C": {
+      "item": "minecraft:gold_ingot"
+    },
+    "D": {
+      "item": "mechaniciancombat:arcane_alloy"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:war_banner",
+    "count": 1
+  }
+}

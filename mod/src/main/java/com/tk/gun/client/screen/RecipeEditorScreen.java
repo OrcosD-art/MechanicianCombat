@@ -10,13 +10,23 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 /** Visual shaped/shapeless crafting recipe editor. */
 public final class RecipeEditorScreen extends HandledScreen<RecipeEditorScreenHandler> {
-	private static final int WIDTH = 200;
-	private static final int HEIGHT = 230;
+	private static final Identifier CRAFTING_TABLE_TEXTURE =
+			Identifier.ofVanilla("textures/gui/container/crafting_table.png");
+	private static final Identifier FURNACE_TEXTURE =
+			Identifier.ofVanilla("textures/gui/container/furnace.png");
+	private static final Identifier BREWING_STAND_TEXTURE =
+			Identifier.ofVanilla("textures/gui/container/brewing_stand.png");
+	private static final int WIDTH = 176;
+	private static final int BASE_HEIGHT = 166;
+	private static final int HEIGHT = 238;
 	private boolean shaped = true;
 	private TextFieldWidget recipeIdField;
+	private TextFieldWidget experienceField;
+	private TextFieldWidget cookingTimeField;
 	private ButtonWidget modeButton;
 
 	public RecipeEditorScreen(RecipeEditorScreenHandler handler,
@@ -24,40 +34,57 @@ public final class RecipeEditorScreen extends HandledScreen<RecipeEditorScreenHa
 		super(handler, inventory, title);
 		this.backgroundWidth = WIDTH;
 		this.backgroundHeight = HEIGHT;
-		this.titleX = 12;
-		this.titleY = 5;
+		this.titleX = 8;
+		this.titleY = 6;
+		this.playerInventoryTitleX = 8;
+		this.playerInventoryTitleY = 72;
 	}
 
 	@Override
 	protected void init() {
 		super.init();
 		recipeIdField = new TextFieldWidget(textRenderer,
-				x + 78, y + 10, 108, 18,
+				x + 58, y + 171, 110, 18,
 				Text.translatable("screen.mechaniciancombat.recipe_editor.id"));
 		recipeIdField.setMaxLength(128);
 		recipeIdField.setPlaceholder(Text.translatable(
 				"screen.mechaniciancombat.recipe_editor.id_hint"));
 		addDrawableChild(recipeIdField);
 
+		addDrawableChild(ButtonWidget.builder(Text.literal("←"), button ->
+				changePage(-1)).dimensions(x + 8, y + 194, 20, 18).build());
+		addDrawableChild(ButtonWidget.builder(Text.literal("→"), button ->
+				changePage(1)).dimensions(x + 30, y + 194, 20, 18).build());
 		modeButton = addDrawableChild(ButtonWidget.builder(
 				modeText(), button -> {
 					shaped = !shaped;
 					button.setMessage(modeText());
-				}).dimensions(x + 12, y + 208, 80, 18).build());
+				}).dimensions(x + 8, y + 216, 80, 18).build());
 		addDrawableChild(ButtonWidget.builder(
 				Text.translatable(
 						"screen.mechaniciancombat.recipe_editor.save"),
 				button -> ClientPlayNetworking.send(
-						new RecipeEditorActionPayload(shaped,
-								recipeIdField.getText(), false)))
-				.dimensions(x + 96, y + 208, 44, 18).build());
+						action(RecipeEditorActionPayload.ACTION_SAVE)))
+				.dimensions(x + 96, y + 194, 38, 18).build());
 		addDrawableChild(ButtonWidget.builder(
 				Text.translatable(
 						"screen.mechaniciancombat.recipe_editor.delete"),
 				button -> ClientPlayNetworking.send(
-						new RecipeEditorActionPayload(shaped,
-								recipeIdField.getText(), true)))
-				.dimensions(x + 142, y + 208, 44, 18).build());
+						action(RecipeEditorActionPayload.ACTION_DELETE)))
+				.dimensions(x + 136, y + 194, 32, 18).build());
+		experienceField = new TextFieldWidget(textRenderer,
+				x + 32, y + 216, 50, 18,
+				Text.translatable(
+						"screen.mechaniciancombat.recipe_editor.experience"));
+		experienceField.setText("0.1");
+		addDrawableChild(experienceField);
+		cookingTimeField = new TextFieldWidget(textRenderer,
+				x + 108, y + 216, 52, 18,
+				Text.translatable(
+						"screen.mechaniciancombat.recipe_editor.cooking_time"));
+		cookingTimeField.setText("200");
+		addDrawableChild(cookingTimeField);
+		updatePageControls();
 	}
 
 	private Text modeText() {
@@ -66,14 +93,69 @@ public final class RecipeEditorScreen extends HandledScreen<RecipeEditorScreenHa
 				: "screen.mechaniciancombat.recipe_editor.shapeless");
 	}
 
+	private void changePage(int offset) {
+		int next = Math.floorMod(handler.getPage() + offset,
+				RecipeEditorScreenHandler.PAGE_COUNT);
+		handler.setPage(next);
+		updatePageControls();
+		ClientPlayNetworking.send(new RecipeEditorActionPayload(
+				RecipeEditorActionPayload.ACTION_SET_PAGE, next,
+				shaped, "", 0.1F, 200));
+	}
+
+	private void updatePageControls() {
+		int page = handler.getPage();
+		modeButton.visible = page == RecipeEditorScreenHandler.PAGE_CRAFTING;
+		experienceField.setVisible(
+				page == RecipeEditorScreenHandler.PAGE_FURNACE);
+		cookingTimeField.setVisible(
+				page == RecipeEditorScreenHandler.PAGE_FURNACE);
+	}
+
+	private RecipeEditorActionPayload action(int action) {
+		return new RecipeEditorActionPayload(action, handler.getPage(),
+				shaped, recipeIdField.getText(), parseFloat(),
+				parseInt());
+	}
+
+	private float parseFloat() {
+		try {
+			return Math.max(0.0F,
+					Float.parseFloat(experienceField.getText().trim()));
+		} catch (NumberFormatException ignored) {
+			return 0.1F;
+		}
+	}
+
+	private int parseInt() {
+		try {
+			return Math.max(1,
+					Integer.parseInt(cookingTimeField.getText().trim()));
+		} catch (NumberFormatException ignored) {
+			return 200;
+		}
+	}
+
 	@Override
 	protected void drawBackground(DrawContext context, float delta,
 			int mouseX, int mouseY) {
-		context.fill(x, y, x + WIDTH, y + HEIGHT, 0xE018181A);
-		context.fill(x + 4, y + 4, x + WIDTH - 4, y + HEIGHT - 4,
-				0xE02A2A2E);
-		context.fill(x + 8, y + 28, x + 80, y + 84, 0xE0101012);
-		context.fill(x + 118, y + 28, x + 178, y + 84, 0xE0101012);
+		Identifier texture = switch (handler.getPage()) {
+			case RecipeEditorScreenHandler.PAGE_FURNACE -> FURNACE_TEXTURE;
+			case RecipeEditorScreenHandler.PAGE_BREWING ->
+					BREWING_STAND_TEXTURE;
+			default -> CRAFTING_TABLE_TEXTURE;
+		};
+		context.drawTexture(texture, x, y,
+				0.0F, 0.0F, WIDTH, BASE_HEIGHT, 256, 256);
+		// Extend the vanilla panel only far enough for the editor controls.
+		context.fill(x, y + BASE_HEIGHT, x + WIDTH, y + HEIGHT,
+				0xFFC6C6C6);
+		context.fill(x, y + BASE_HEIGHT, x + 1, y + HEIGHT,
+				0xFF373737);
+		context.fill(x + WIDTH - 1, y + BASE_HEIGHT, x + WIDTH,
+				y + HEIGHT, 0xFF373737);
+		context.fill(x, y + HEIGHT - 1, x + WIDTH, y + HEIGHT,
+				0xFF373737);
 	}
 
 	@Override
@@ -83,12 +165,37 @@ public final class RecipeEditorScreen extends HandledScreen<RecipeEditorScreenHa
 		super.render(context, mouseX, mouseY, delta);
 		context.drawText(textRenderer,
 				Text.translatable(
-						"screen.mechaniciancombat.recipe_editor.ingredients"),
-				x + 12, y + 20, 0xFFE8C66A, false);
-		context.drawText(textRenderer,
-				Text.translatable(
-						"screen.mechaniciancombat.recipe_editor.result"),
-				x + 122, y + 20, 0xFFE8C66A, false);
+						"screen.mechaniciancombat.recipe_editor.id"),
+				x + 8, y + 176, 0xFF404040, false);
+		context.drawText(textRenderer, pageText(),
+				x + 56, y + 199, 0xFF404040, false);
+		if (handler.getPage() == RecipeEditorScreenHandler.PAGE_BREWING) {
+			context.drawText(textRenderer,
+					Text.translatable(
+							"screen.mechaniciancombat.recipe_editor.brewing_hint"),
+					x + 8, y + 221, 0xFF404040, false);
+		} else if (handler.getPage()
+				== RecipeEditorScreenHandler.PAGE_FURNACE) {
+			context.drawText(textRenderer,
+					Text.translatable(
+							"screen.mechaniciancombat.recipe_editor.experience"),
+					x + 8, y + 221, 0xFF404040, false);
+			context.drawText(textRenderer,
+					Text.translatable(
+							"screen.mechaniciancombat.recipe_editor.cooking_time"),
+					x + 84, y + 221, 0xFF404040, false);
+		}
+	}
+
+	private Text pageText() {
+		return Text.translatable(switch (handler.getPage()) {
+			case RecipeEditorScreenHandler.PAGE_FURNACE ->
+					"screen.mechaniciancombat.recipe_editor.page.furnace";
+			case RecipeEditorScreenHandler.PAGE_BREWING ->
+					"screen.mechaniciancombat.recipe_editor.page.brewing";
+			default ->
+					"screen.mechaniciancombat.recipe_editor.page.crafting";
+		});
 	}
 
 	public static void registerClientScreen() {

@@ -20,7 +20,7 @@ public final class TkGun {
 	 * <p>为什么要它：进服日志里打出来，"是不是还在跑旧 jar / 客户端服务端是不是同一份"一眼就知道
 	 * （2026-10-17 排查时吃过一次亏：所有版本的启动日志长得一模一样）。
 	 */
-	public static final String BUILD = "r747-2026-11-11";
+	public static final String BUILD = "r828-2026-11-14";
 	/** Shared gain for backpack animation and target-mark feedback sounds. */
 	public static final float BACKPACK_SOUND_VOLUME = 0.5F;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
@@ -53,8 +53,8 @@ public final class TkGun {
 		 */
 		RELOAD(13),
 		/**
-		 * **翻滚后的快速蹲射过门**：和普通 `AIM_FAST` 同样是 14 tick，
-		 * 但客户端必须播作者新给的 `rolling_fast_ready`，不能借用滑铲的
+		 * **翻滚后的快速蹲射过门**：更新后的 `rolling_fast_ready` 为 0.5 秒，
+		 * 因此单独使用 10 tick；客户端必须播作者新给的这段，不能借用滑铲的
 		 * `sliding_fast_ready`。独立成一个状态，避免换弹后的快速举枪也误播翻滚动作。
 		 */
 		AIM_ROLL(14),
@@ -70,7 +70,9 @@ public final class TkGun {
 		/** Silent Storm's queued dive attack after the jump apex. */
 		FALL_ATTACK(22),
 		/** Authored fall_attack_over_to_idle recovery with movement locked. */
-		FALL_ATTACK_RECOVERY(23);
+		FALL_ATTACK_RECOVERY(23),
+		/** Focus-state roll resolved into movement: play the authored focus-roll-run clip. */
+		ROLL_TO_RUN(24);
 
 		public static boolean isAiming(State s) {
 			return s == AIM || s == AIM_FAST || s == AIM_ROLL || s == AIM_SLIDE
@@ -141,10 +143,10 @@ public final class TkGun {
 			(int) Math.ceil(1.25D * 20.0D) + 1;
 	/** Timelines authored inside ATK_hold_over. */
 	public static final int[] MELEE_HOLD_OVER_HIT_TICKS = {3, 10, 18};
-	/** Reach four blocks by the second authored hit frame. */
-	public static final double MELEE_HOLD_OVER_MOVE_DISTANCE = 4.0D;
-	/** Additional decaying momentum between the second and third hit frames. */
-	public static final double MELEE_HOLD_OVER_INERTIA_DISTANCE = 2.0D;
+	/** Forward motion completes exactly on the third authored hit frame. */
+	public static final double MELEE_HOLD_OVER_MOVE_DISTANCE = 6.0D;
+	/** No momentum remains after the third hit. */
+	public static final double MELEE_HOLD_OVER_INERTIA_DISTANCE = 0.0D;
 	public static final double MELEE_HOLD_OVER_TOTAL_DISTANCE =
 			MELEE_HOLD_OVER_MOVE_DISTANCE + MELEE_HOLD_OVER_INERTIA_DISTANCE;
 	/** Timeline strike markers in ATK_hold_over: fade-in, peak window, fade-out. */
@@ -152,10 +154,11 @@ public final class TkGun {
 			0;
 	public static final int MELEE_HOLD_OVER_STRIKE_START_TICK =
 			(int) Math.ceil(0.375D * 20.0D);
-	public static final int MELEE_HOLD_OVER_STRIKE_END_TICK =
-			(int) Math.ceil(1.0D * 20.0D);
 	public static final int MELEE_HOLD_OVER_STRIKE_FADE_END_TICK =
-			(int) Math.ceil(1.25D * 20.0D);
+			MELEE_HOLD_OVER_HIT_TICKS[2];
+	/** Keep the authored smooth stop, but finish it before the third hit. */
+	public static final int MELEE_HOLD_OVER_STRIKE_END_TICK =
+			MELEE_HOLD_OVER_STRIKE_FADE_END_TICK - 5;
 	public static final int MELEE_HOLD_OVER_MOTION_END_TICK =
 			MELEE_HOLD_OVER_STRIKE_FADE_END_TICK;
 	public static final int FORTRESS_SKILL_COOLDOWN_TICKS = 30 * 20;
@@ -208,9 +211,25 @@ public final class TkGun {
 	public static final String[] MELEE_HOLD_OVER_SOUND_KEYS = {
 			"glaive_slash02", "imp1", "imp1", "imp1"
 	};
+	/** Kinetic Sword authored damage commands, converted from seconds at 20 TPS. */
+	public static final int[][] KINETIC_SWORD_DAMAGE_TICKS = {
+			{8}, {4}, {4}, {4}, {4}, {3, 10}
+	};
+	/** One extra tick keeps the authored final pose visible before recovery. */
+	public static final int[] KINETIC_SWORD_ATTACK_TICKS = {
+			16, 11, 11, 11, 11, 16
+	};
+	/** Safe authored-tail handoff for ATK_2 -> 3 and ATK_4 -> 5. */
+	public static final int KINETIC_SWORD_QUICK_CHAIN_TICK = 8;
+	/** All six authored back-idle clips are 0.5 seconds. */
+	public static final int KINETIC_SWORD_BACK_IDLE_TICKS = 11;
+	public static final float KINETIC_SWORD_DAMAGE = 9.0F;
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
-	/** The second dash hit lands at 0.75 s; hard-stop runs from 0.75 s to 1.0 s. */
+	/**
+	 * The second dash hit lands at 0.75 s. The hard-stop inherits the actual
+	 * forward speed and fades it linearly from 0.75 s to 1.0 s.
+	 */
 	public static final int MELEE_DASH_MOVE_TICKS = 15;
 	public static final int MELEE_DASH_STUN_TICKS = 5;
 	/** 0.25 s authored clip plus one tick so its final keyframe is rendered. */
@@ -221,7 +240,6 @@ public final class TkGun {
 	public static final int MELEE_DASH_TOTAL_TICKS =
 			MELEE_DASH_MOVE_TICKS + MELEE_DASH_STUN_TICKS;
 	public static final double MELEE_DASH_DISTANCE = 4.6D;
-	public static final double MELEE_DASH_STUN_SPEED = 0.16D;
 	public static final double MELEE_RANGE = 4.0D;
 	public static final double MELEE_LATERAL_RADIUS = 3.0D;
 	/** Better Combat diamond axe attack damage. */
@@ -237,8 +255,10 @@ public final class TkGun {
 	public static final int SKILL_JUMP_HOVER_TICKS = 50;
 	/** Extended safety lifetime while the jump backpack may own the apex hover. */
 	public static final int SKILL_JUMP_THRUSTER_MAX_TICKS = 200;
-	/** Jump thruster doubles both the gun slide distance and its state duration. */
-	public static final double SLIDE_THRUSTER_DISTANCE_MULTIPLIER = 2.0D;
+	/** Jump thruster extends the gun slide to 10 blocks and doubles its duration. */
+	public static final double SLIDE_THRUSTER_DISTANCE = 10.0D;
+	public static final double SLIDE_THRUSTER_DISTANCE_MULTIPLIER =
+			SLIDE_THRUSTER_DISTANCE / 6.0D;
 	public static final int SLIDE_THRUSTER_DURATION_MULTIPLIER = 2;
 	/** Jump backpack: at most five seconds of held thrust. */
 	public static final int JUMP_BACKPACK_READY_TICKS = 5;
@@ -296,9 +316,9 @@ public final class TkGun {
 	}
 	/**
 	 * 连发节奏：两发之间隔几 tick（每发都把该发动画从头播一遍 → 后坐/枪口焰/弹壳跟着重播）。
-	 * 12 tick = 0.6s 一发：动画前 0.208s 是四段枪口焰，0.6s 时弹壳正好甩到一半。
+	 * 20 tick = 1.0s 一发；这是所有枪械共用的基础间隔。
 	 */
-	public static final int SHOT_CYCLE_TICKS = 12;
+	public static final int SHOT_CYCLE_TICKS = 20;
 	/** 调试命令和队列的硬上限；正常专注每轮只允许预输入 1 发，腰射不接受预输入。 */
 	public static final int SHOT_QUEUE_MAX = 9;
 
@@ -325,17 +345,16 @@ public final class TkGun {
 	 * 服务端随后的 AIM_HOLD 到了就直接 CONTINUE 保持在尾针上（用户 2026-10-13 的要求）。
 	 */
 	public static final int FIRE_TICKS = 30;
-	/** 散热窗口：5s 里不能开火 / 装填 / 进专注，排汽白汽也在这段持续放。 */
-	public static final int OVERHEAT_TICKS = 100;
 	/**
 	 * **过热动作（`Overheat` 动画）本身的时长** —— 用户 2026-10-17："修改过热动画当前该动作的持续时间"。
 	 *
-	 * <p>作者那段 `Overheat` 实测 **1.5s**（`animation_length = 1.5` = 30 tick）。原来状态也按
-	 * {@link #OVERHEAT_TICKS}（100 tick）播，动画 1.5s 就停在尾帧、后面 3.5s 一直举着枪"装散热"，
-	 * 和动画对不上。现在：**过热状态 + 缓慢 10 = 30 tick（动画播完就结束）**；
-	 * 散热窗口（能不能开火/装填/进专注、白汽）仍按 {@link #OVERHEAT_TICKS}。
+	 * <p>作者那段 `Overheat` 实测 **1.5s**（`animation_length = 1.5` = 30 tick）。
+	 * 过热状态、缓慢效果和禁止开火/装填/瞄准的散热锁统一使用该时长，
+	 * 动画到达尾帧时同步结束，不再保留额外锁定。
 	 */
 	public static final int OVERHEAT_ANIM_TICKS = 30;
+	/** 完整过热效果窗口：与 Overheat 动画同 tick 结束。 */
+	public static final int OVERHEAT_TICKS = OVERHEAT_ANIM_TICKS;
 	/** 检视动画时长，仅用于调试命令。 */
 	public static final int INSPECT_TICKS = 80;
 	/**
@@ -346,7 +365,10 @@ public final class TkGun {
 	 */
 	public static final int AIM_TICKS_NORMAL = 24;    // 1.2s（Focus_ready 0.83 倍速）
 	public static final int AIM_TICKS_FAST = 14;      // 0.7s（fast_ready 1 倍速）
-	public static final int AIM_TICKS_SLIDE = 7;      // 0.35s（fast_ready 约 2 倍速）
+	/** sliding_fast_ready is authored at 0.5 s and now plays at 1x. */
+	public static final int AIM_TICKS_SLIDE = 10;
+	/** BG261015 updated rolling_fast_ready to 0.5 s (10 ticks at 1x). */
+	public static final int AIM_TICKS_ROLL = 10;
 	/**
 	 * **主动装填**：播放作者的 `reload` 动画。空闲弹匣不会自动装填。
 	 *
@@ -357,12 +379,12 @@ public final class TkGun {
 	public static final int SLIDE_TICKS = 16;         // 滑铲时长（越短越"唰"）
 	/**
 	 * 滑铲滑多远（格）+ 滑多久。用户 2026-10-12 二次要求："不够快也不够远"。
-	 * 24 tick 拉到 16 tick、3.8 格拉到 4.6 格（初速 ≈ 0.58 格/tick ≈ 11.6 m/s）。
+	 * 24 tick 拉到 16 tick，当前普通滑铲为 6 格；推进滑铲为 10 格。
 	 * 位移按"离起点距离"封顶，所以按不按前进键都一样远（日志会打实测值）。
 	 */
-	public static final double SLIDE_DISTANCE = 4.6D;
-	/** Small forward momentum retained when a slide transitions into sliding_fast_ready. */
-	public static final double SLIDE_FAST_FOCUS_INERTIA = 0.18D;
+	public static final double SLIDE_DISTANCE = 6.0D;
+	/** Maximum forward distance retained after cancelling a slide into focus. */
+	public static final double SLIDE_FAST_FOCUS_MAX_DISTANCE = 2.0D;
 	public static final int SLIDE_COOLDOWN = 50;      // 滑铲冷却
 	/**
 	 * 滑铲收势长度。收势结束后回到 IDLE；若服务端仍标记为专注，则重新进入快速举枪。
@@ -399,9 +421,12 @@ public final class TkGun {
 	 * 用户 2026-10-16："按下进入专注模式，再次输入则退出并使用 Focus_over 动画"。
 	 * 这段里状态是 {@link State#OVER}，播完 {@code tickAll} 就回 {@link State#IDLE}。
 	 */
-	/** Updated Focus_over is 1.625 s; one extra tick renders its final key. */
+	/** Veritas Focus_over is 1.625 s; one extra tick renders its final key. */
 	public static final int FOCUS_EXIT_TICKS =
 			(int) Math.ceil(1.625D * 20.0D) + 1;
+	/** Fortress Destroyer and Silent Storm Focus_over is 1.0 s. */
+	public static final int FOCUS_EXIT_TICKS_SHORT =
+			(int) Math.ceil(1.0D * 20.0D) + 1;
 	/**
 	 * **"缓慢"效果的放大器** —— 现在只绑两件事（用户 2026-10-17：
 	 * "将缓慢效果绑定退出专注状态以及过热两种状态"）：
@@ -422,8 +447,12 @@ public final class TkGun {
 	 * 想更强就只能牺牲"翻滚能挣脱"这条 —— 两个要求在这个数值上互斥，取舍点就是这个常数。
 	 */
 	public static final int SLOW_ON_EXIT_AMPLIFIER = 5;
-	/** 退出专注时的缓慢时长：和退出过门动画（`Focus_over`）一样长。 */
-	public static final int SLOW_ON_EXIT_TICKS = FOCUS_EXIT_TICKS;
+	/** 退出专注时的缓慢时长与当前枪械的 Focus_over 动画一致。 */
+	public static int focusExitTicks(PlayerEntity player) {
+		return definition(player).id()
+				.equals(TkGun.id("veritas_et_justitia"))
+						? FOCUS_EXIT_TICKS : FOCUS_EXIT_TICKS_SHORT;
+	}
 	/** 历史兼容常量；当前腰射不接受预输入，专注模式每个射击间隔只接受一次预输入。 */
 	public static final int HIP_QUEUE_MAX = 2;
 	/**
@@ -451,7 +480,8 @@ public final class TkGun {
 	 *
 	 * <p>用户 2026-10-16："专注射击期间…可以按住左键全自动射击，每次射击间隔减少 0.25 秒"。
 	 * 节奏 = {@code max(FOCUS_CYCLE_MIN, SHOT_CYCLE_TICKS - ramp × FOCUS_CYCLE_STEP)}：
-	 * 第 1 发 12 tick（0.6s）→ 第 2 发 7 tick（0.35s）→ 第 3 发起 5 tick（0.25s）封顶。
+	 * 第 1 发 20 tick（1.0s）→ 第 2 发 15 tick（0.75s）→ 第 3 发 10 tick（0.5s）
+	 * → 第 4 发起 5 tick（0.25s）封顶。
 	 */
 	public static final int FOCUS_CYCLE_STEP = 5;
 	public static final float FOCUS_DAMAGE_START = 1.0F;
@@ -650,6 +680,10 @@ public final class TkGun {
 	public static final Identifier SND_SMASH_GROUND2 = id("smash_ground2");
 	/** Updated Veritas close-combat spark cue (`skill_spark.ogg`). */
 	public static final Identifier SND_SKILL_SPARK = id("skill_spark");
+	/** Kinetic Sword authored overhead slash cue. */
+	public static final Identifier SND_GREAT_SWORD_SLASH = id("great_sword_slash");
+	/** Updated ATK_3 0.375 s airflow cue, packaged as mono OGG. */
+	public static final Identifier SND_MAGIC_WIND1 = id("magic_wind_1");
 	/** Updated Veritas ATK_3_hold charge cue (`近战蓄力1.mp3`). */
 	public static final Identifier SND_VERITAS_MELEE_CHARGE =
 			id("veritas_melee_charge");
@@ -677,6 +711,8 @@ public final class TkGun {
 			id("helmet_mech2");
 	public static final Identifier SND_HUNTER_TURRET_FIRE =
 			id("hunter_turret_fire");
+	/** Soul Anchor throw cue authored at 0.1667s in chain_skill.bbmodel. */
+	public static final Identifier SND_CHAIN = id("chain");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 
@@ -736,6 +772,10 @@ public final class TkGun {
 					new KeyframeSound(SND_SMASH_GROUND2, 1.0F, 1.0F)),
 			Map.entry("skill_spark",
 					new KeyframeSound(SND_SKILL_SPARK, 2.0F, 1.0F)),
+			Map.entry("great_sword_slash",
+					new KeyframeSound(SND_GREAT_SWORD_SLASH, 1.0F, 1.0F)),
+			Map.entry("magic_wind_1.mp3",
+					new KeyframeSound(SND_MAGIC_WIND1, 1.0F, 1.0F)),
 			Map.entry("smash_ground_heavy",
 					new KeyframeSound(SND_SMASH_GROUND_HEAVY, 1.0F, 1.0F)),
 			Map.entry("smash_ground4",
@@ -757,6 +797,31 @@ public final class TkGun {
 	// ---- 物品判定：注册的物品本体（服务端/客户端都认）----
 	public static boolean isGun(ItemStack stack) {
 		return !stack.isEmpty() && stack.getItem() instanceof com.tk.gun.item.BowgunItem;
+	}
+
+	public static boolean isKineticSword(ItemStack stack) {
+		GunDefinition definition = GunRegistry.get(stack);
+		return definition != null
+				&& definition.id().equals(id("kinetic_sword"));
+	}
+
+	public static boolean isKineticSword(PlayerEntity player) {
+		return player != null && isKineticSword(player.getMainHandStack());
+	}
+
+	public static boolean isMeleeWeapon(ItemStack stack) {
+		GunDefinition definition = GunRegistry.get(stack);
+		return definition != null && definition.meleeOnly();
+	}
+
+	public static boolean isMeleeWeapon(PlayerEntity player) {
+		return player != null && isMeleeWeapon(player.getMainHandStack());
+	}
+
+	public static boolean supportsManualMelee(ItemStack stack) {
+		GunDefinition definition = GunRegistry.get(stack);
+		return definition != null && (definition.meleeOnly()
+				|| definition.id().equals(id("veritas_et_justitia")));
 	}
 
 	public static GunDefinition definition(ItemStack stack) {

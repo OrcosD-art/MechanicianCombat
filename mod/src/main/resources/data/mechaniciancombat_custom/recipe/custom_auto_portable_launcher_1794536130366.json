@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " A ",
+    "BCB",
+    "DED"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:calibrated_sculk_sensor"
+    },
+    "B": {
+      "item": "minecraft:ender_eye"
+    },
+    "C": {
+      "item": "minecraft:crossbow"
+    },
+    "D": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "E": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:auto_portable_launcher",
+    "count": 1
+  }
+}

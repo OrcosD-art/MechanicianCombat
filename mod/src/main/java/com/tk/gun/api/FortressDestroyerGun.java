@@ -9,6 +9,7 @@ public final class FortressDestroyerGun {
 			6,
 			10,
 			10,
+			false,
 			TkGun.FIRE_TICKS,
 			TkGun.SHOT_CYCLE_TICKS,
 			TkGun.FOCUS_CYCLE_STEP,

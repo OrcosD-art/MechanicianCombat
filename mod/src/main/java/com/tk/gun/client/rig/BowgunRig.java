@@ -36,11 +36,19 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>动画名与 {@code assets/mechaniciancombat/animations/entity/bowgun_rig.animation.json} 里的键一一对应。
  */
 public final class BowgunRig implements GeoReplacedEntity {
-	public static final BowgunRig INSTANCE = new BowgunRig();
 	/** 无操作后继续保留腰射上半身姿势的 tick 数（3 秒）。 */
 	/** playerId → 最近一次持枪/移动/开火操作的 world tick。 */
 
 	private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
+	private final AbstractClientPlayerEntity player;
+
+	public BowgunRig(AbstractClientPlayerEntity player) {
+		this.player = player;
+	}
+
+	public AbstractClientPlayerEntity player() {
+		return player;
+	}
 
 	@Override
 	public EntityType<?> getReplacingEntityType() {
@@ -60,9 +68,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 					logSwitch(currentAnimationName, speed);
 					return speed;
 				})
-				.setSoundKeyframeHandler(BowgunRig::onSoundKeyframe)
-				.setCustomInstructionKeyframeHandler(BowgunRig::onCustomKeyframe)
-				.setParticleKeyframeHandler(BowgunRig::onParticleKeyframe));
+				.setSoundKeyframeHandler(this::onSoundKeyframe)
+				.setCustomInstructionKeyframeHandler(this::onCustomKeyframe)
+				.setParticleKeyframeHandler(this::onParticleKeyframe));
 		// **第二条控制器：只做"移动开火"的上半身**（作者的 `stand_shooting` 里**没有**腿和躯干的通道，
 		// 就是给"腿在走路、上半身在开火"这种叠层用的 —— 2026-10-14 用户点名要的"移动开火"）。
 		// GeckoLib 4.8 的多控制器语义：所有控制器都往同一批骨骼上写，后注册的覆盖先注册的；
@@ -70,16 +78,15 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// 所以上层只写上半身、下层照旧写全身，合并出来的就是"边走边打"。
 		registrar.add(new AnimationController<>(this, "upper", 1, this::pickUpper)
 				.setAnimationSpeedHandler(rig -> {
-					AbstractClientPlayerEntity player = CURRENT_PLAYER;
 					return player != null
 							&& com.tk.gun.client.MeleeImpactClientState
 									.freezesAnimation(player.getId()) ? 0.0D : 1.0D;
 				})
 				// 上半身动画是从完整动画派生的，仍带有原动画的声音/timeline/粒子标记。
 				// 这些事件由主 rig 控制器或服务端处理；这里显式吸收，避免重复播放和日志刷屏。
-				.setSoundKeyframeHandler(BowgunRig::onUpperSoundKeyframe)
+				.setSoundKeyframeHandler(this::onUpperSoundKeyframe)
 				.setCustomInstructionKeyframeHandler(event -> { })
-				.setParticleKeyframeHandler(BowgunRig::onParticleKeyframe));
+				.setParticleKeyframeHandler(this::onParticleKeyframe));
 		// New guns may only author deploy/stow clips for their own gun subtree. This
 		// overlay keeps the gun at the correct terminal pose while inherited body,
 		// locomotion and shooting animations continue to play.
@@ -107,18 +114,21 @@ public final class BowgunRig implements GeoReplacedEntity {
 					.setCustomInstructionKeyframeHandler(event -> { })
 					.setParticleKeyframeHandler(event -> { }));
 		}
-		// Close-combat effect planes use their own controller. The main rig and
-		// upper controllers freeze at speed 0 during hitstop, but the authored
-		// visual effect timeline must continue through the impact frames.
+		// Close-combat effect planes use their own controller. Veritas effects
+		// deliberately ignore hitstop for both their authored bone transforms
+		// and the manually scheduled visibility windows.
 		registrar.add(new AnimationController<BowgunRig>(this, "close_effects", 0,
 				this::pickCloseCombatEffects)
-				.setAnimationSpeedHandler(rig -> {
-					AbstractClientPlayerEntity player = CURRENT_PLAYER;
-					return player != null
-							&& com.tk.gun.client.MeleeImpactClientState
-									.freezesAnimation(player.getId())
-							? 0.0D : 1.0D;
-				})
+				.setAnimationSpeedHandler(rig -> 1.0D)
+				.setSoundKeyframeHandler(event -> { })
+				.setCustomInstructionKeyframeHandler(event -> { })
+				.setParticleKeyframeHandler(event -> { }));
+		// The Soul Anchor clips only author the body parts they need.  Register
+		// them last so their authored channels override locomotion while every
+		// bone without a channel keeps the normal idle/walk/run pose.
+		registrar.add(new AnimationController<>(this, "soul_anchor_skill", 0,
+				this::pickSoulAnchorSkill)
+				.setAnimationSpeedHandler(rig -> 1.0D)
 				.setSoundKeyframeHandler(event -> { })
 				.setCustomInstructionKeyframeHandler(event -> { })
 				.setParticleKeyframeHandler(event -> { }));
@@ -162,10 +172,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * Spawns the authored particle effect at the model's locator. The current source
 	 * places `particles` on `Overheat` at 0.25 seconds.
 	 */
-	private static void onParticleKeyframe(
+	private void onParticleKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.ParticleKeyframeEvent<BowgunRig> event) {
 		String effect = event.getKeyframeData().getEffect();
-		AbstractClientPlayerEntity player = CURRENT_PLAYER;
 		if (effect == null || player == null || player.getWorld() == null) {
 			return;
 		}
@@ -203,9 +212,28 @@ public final class BowgunRig implements GeoReplacedEntity {
 					? BowgunRigRenderer.aimPosition(player.getId())
 					: BowgunRigRenderer.locatorPosition(player.getId());
 			if (locator != null && !com.tk.gun.client.SkillSparkParticle
-					.spawnAttached(player, locator, attachedLocator)) {
+					.spawnAttached(player, locator, attachedLocator,
+							activeAnimation())) {
 				TkGun.LOGGER.warn(
 						"[mechaniciancombat] skill_spark attached factory unavailable");
+			}
+			return;
+		}
+		if ("round_attack".equals(effect)) {
+			net.minecraft.util.math.Vec3d locator =
+					BowgunRigRenderer.e1Position(player.getId());
+			if (locator != null) {
+				com.tk.gun.client.RoundAttackClientState.spawn(
+						player, locator, activeAnimation());
+			}
+			return;
+		}
+		if ("cyclone".equals(effect)) {
+			net.minecraft.util.math.Vec3d locator =
+					BowgunRigRenderer.e1Position(player.getId());
+			if (locator != null) {
+				com.tk.gun.client.CycloneClientState.spawn(
+						player, locator, activeAnimation());
 			}
 			return;
 		}
@@ -218,6 +246,22 @@ public final class BowgunRig implements GeoReplacedEntity {
 				player.getWorld().addParticle(TkGunParticles.THUNDER,
 						locator.x, locator.y, locator.z, 0.0D, 0.0D, 0.0D);
 				TkGun.LOGGER.info("[mechaniciancombat] ATK_3 thunder particle -> locator（玩家 {}）",
+						player.getName().getString());
+			}
+			return;
+		}
+		if ("thunder_big".equals(effect)) {
+			String locatorName = event.getKeyframeData().getLocator();
+			net.minecraft.util.math.Vec3d locator = "aim".equals(locatorName)
+					? BowgunRigRenderer.aimPosition(player.getId())
+					: BowgunRigRenderer.locatorPosition(player.getId());
+			if (locator != null) {
+				net.minecraft.util.math.Vec3d spawn =
+						thunderBigGroundAnchor(player, locator);
+				player.getWorld().addParticle(TkGunParticles.THUNDER_BIG,
+						spawn.x, spawn.y, spawn.z,
+						0.0D, 0.0D, 0.0D);
+				TkGun.LOGGER.info("[mechaniciancombat] ATK_hold_over thunder_big -> locator player={}",
 						player.getName().getString());
 			}
 			return;
@@ -262,6 +306,34 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/**
+	 * The authored thunder_big frame has its lowest opaque pixel on the
+	 * billboard centre line. Keep the locator's X/Z impact point, but place the
+	 * particle centre on the first block surface below the player so the
+	 * visible lower edge sits on the ground instead of inheriting the low
+	 * weapon pose at 0.875 seconds.
+	 */
+	private static net.minecraft.util.math.Vec3d thunderBigGroundAnchor(
+			net.minecraft.entity.player.PlayerEntity player,
+			net.minecraft.util.math.Vec3d locator) {
+		net.minecraft.util.math.Vec3d start = new net.minecraft.util.math.Vec3d(
+				locator.x, player.getY() + 0.5D, locator.z);
+		net.minecraft.util.math.Vec3d end = new net.minecraft.util.math.Vec3d(
+				locator.x, player.getY() - 16.0D, locator.z);
+		net.minecraft.util.hit.BlockHitResult hit = player.getWorld().raycast(
+				new net.minecraft.world.RaycastContext(start, end,
+						net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
+						net.minecraft.world.RaycastContext.FluidHandling.NONE,
+						player));
+		if (hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK) {
+			return new net.minecraft.util.math.Vec3d(
+					locator.x, hit.getPos().y + 0.002D, locator.z);
+		}
+		// Void, unloaded terrain, or an unsupported location: retain the
+		// authored locator behaviour rather than dropping the effect.
+		return locator;
+	}
+
+	/**
 	 * 素材里作者在动画上埋了音效关键帧（`Focus_shooting*` 的 0.0417s = `ding`、`roll` = `roll`、
 	 * `sliding` 的 0.25s = `steam`）。GeckoLib 不注册 handler 就只打一句 WARN 什么都不放。
 	 *
@@ -281,7 +353,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 *       names to the server so nearby players hear one broadcast copy.</li>
 	 * </ul>
 	 */
-	private static void onSoundKeyframe(
+	private void onSoundKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.SoundKeyframeEvent<BowgunRig> event) {
 		String key = event.getKeyframeData().getSound();
 		if (key == null) {
@@ -290,8 +362,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// ⚠️ 只报**本地玩家自己**的关键帧：这套 rig 是所有手持弩炮的玩家共用的渲染器/控制器，
 		// 别人的关键帧会被服务端当成"**我们**放了这一声"放到我们身上。别人那一声应该由**他们的客户端**
 		// 报给服务端、服务端再广播给我们 —— 这正是本轮（关键帧音改走服务端）要的机制。
-		AbstractClientPlayerEntity who = CURRENT_PLAYER;
-		if (who == null || who != net.minecraft.client.MinecraftClient.getInstance().player) {
+		if (player == null
+				|| player != net.minecraft.client.MinecraftClient.getInstance().player) {
 			return;
 		}
 		// ★ **专注那几段：照模型引用的音频放**（用户 2026-10-17："将专注相关的音效替换为…模型所引用的
@@ -317,7 +389,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/** Normal melee clips run on the upper controller, so forward only their authored cues. */
-	private static void onUpperSoundKeyframe(
+	private void onUpperSoundKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.SoundKeyframeEvent<BowgunRig> event) {
 		String key = event.getKeyframeData().getSound();
 		if (key == null || upperName == null) {
@@ -397,7 +469,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 *
 	 * @return true = 这一声归这里管（调用方别再走下面的 switch）
 	 */
-	private static boolean reportFocusSoundKeyframe(String key) {
+	private boolean reportFocusSoundKeyframe(String key) {
 		if (!FOCUS_SOUND_ANIMS.contains(currentAnimationName)) {
 			return false;
 		}
@@ -415,16 +487,16 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		if ("empty".equals(key)
 				&& "Focus_shooting7".equals(currentAnimationName)
-				&& CURRENT_PLAYER != null
-				&& TkGun.definition(CURRENT_PLAYER).id()
+				&& player != null
+				&& TkGun.definition(player).id()
 						.equals(TkGun.id("veritas_et_justitia"))) {
 			// startOverheat already broadcasts the dedicated Veritas empty-mag
 			// cue; do not also play the generic authored keyframe.
 			return true;
 		}
 		if ("vent".equals(key) && "Overheat".equals(currentAnimationName)
-				&& CURRENT_PLAYER != null
-				&& TkGun.definition(CURRENT_PLAYER).id()
+				&& player != null
+				&& TkGun.definition(player).id()
 						.equals(TkGun.id("veritas_et_justitia"))) {
 			return true;
 		}
@@ -448,15 +520,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/** 最近一次 pick 选的动画名 + 打日志用（验收"待机=idle / 部署快慢 / 开火"看客户端日志即可）。 */
-	private static String currentAnimationName = "-";
+	private String currentAnimationName = "-";
+	/** Soul Anchor is an additive player-only layer, not the locomotion clip. */
+	private String soulAnchorSkillName;
+	private long baseAnchorRevision = -1L;
 
 	/** 当前 rig 控制器在播哪一段（渲染器判"这段要不要跟随视角"要用）。 */
-	public static String currentAnimation() {
+	public String currentAnimation() {
 		return currentAnimationName;
 	}
 
 	/** Animation layers affecting the current player's body in this GeckoLib render pass. */
-	public static java.util.Set<String> currentPlayerPoseAnimations() {
+	public java.util.Set<String> currentPlayerPoseAnimations() {
 		java.util.Set<String> names = new java.util.LinkedHashSet<>();
 		if (currentAnimationName != null && !currentAnimationName.isBlank()) {
 			names.add(currentAnimationName);
@@ -464,18 +539,30 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (upperName != null && !upperName.isBlank()) {
 			names.add(upperName);
 		}
+		if (soulAnchorSkillName != null && !soulAnchorSkillName.isBlank()) {
+			names.add(soulAnchorSkillName);
+		}
 		return names;
 	}
 
-	public static String currentUpperAnimation() {
+	public String currentUpperAnimation() {
 		return upperName;
 	}
-	private static String lastLogged = "";
+
+	public String activeAnimation() {
+		if (soulAnchorSkillName != null && !soulAnchorSkillName.isBlank()) {
+			return soulAnchorSkillName;
+		}
+		return upperName != null && !upperName.isBlank()
+				? upperName : currentAnimationName;
+	}
+
+	private String lastLogged = "";
 	/** 演示模式（`-Dmechaniciancombat.demo=1`）才打这类诊断日志。 */
 	private static final boolean VERBOSE_DEMO =
 			System.getProperty("mechaniciancombat.demo") != null || System.getProperty("mechaniciancombat.verbose") != null;
 
-	private static void logSwitch(String name, double speed) {
+	private void logSwitch(String name, double speed) {
 		String line = name + "（倍速 " + speed + "）";
 		if (!line.equals(lastLogged)) {
 			lastLogged = line;
@@ -483,12 +570,60 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 	}
 
+	private int kineticRunTransitionUntil = -1;
+	private boolean kineticWasRunning;
+
 	/** 播动画的统一入口（顺便记下名字给日志）。 */
-	private static PlayState play(AnimationState<BowgunRig> state, String name) {
+	private PlayState play(AnimationState<BowgunRig> state, String name) {
 		currentAnimationName = name;
 		// ⚠️ 这里必须是 setAndContinue，别写成 play(...)：2026-10-12 批量替换把这一行也替换掉了，
 		// 结果 play() 自己调自己 → 客户端一进服 StackOverflow 崩服（20:06~20:26 所有"进不去"都是它）。
 		return state.setAndContinue(rawFor(name));
+	}
+
+	private PlayState pickKineticSword(AnimationState<BowgunRig> state,
+			GunClientState.Entry entry) {
+		Entity entity = entityOf(state);
+		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
+			return play(state, "idle");
+		}
+		if (entry != null && entry.state == TkGun.State.MELEE) {
+			int step = Math.max(1, Math.min(6, entry.shotIndex));
+			String name = "GS_ATK_" + step
+					+ (entry.meleeReturning ? "_back-idle" : "");
+			entry.lastMeleeAnimation = name;
+			state.getController().transitionLength(0);
+			return play(state, name);
+		}
+		String walk = TkGunClient.walkAnimation(entity.getId());
+		boolean moving = TkGunClient.isMoving(entity.getId())
+				|| TkGunClient.hasMovementInput(entity.getId());
+		boolean sprintInput = player.isSprinting();
+		net.minecraft.client.MinecraftClient client =
+				net.minecraft.client.MinecraftClient.getInstance();
+		if (entity == client.player) {
+			sprintInput = sprintInput || client.options.sprintKey.isPressed();
+		}
+		double speed = player.getVelocity().horizontalLength();
+		boolean running = moving && (walk != null && "run".equals(walk)
+				|| sprintInput || speed >= 0.25D);
+		if (running && !kineticWasRunning) {
+			kineticRunTransitionUntil = TkGunClient.ticks() + 2;
+		}
+		kineticWasRunning = running;
+		if (running) {
+			state.getController().transitionLength(
+					"GS_run".equals(currentAnimationName) ? 0 : 1);
+			return play(state, "GS_run");
+		}
+		if (walk != null && walk.startsWith("walk_")) {
+			String directional = "GS_" + walk;
+			state.getController().transitionLength(
+					directional.equals(currentAnimationName) ? 0 : 1);
+			return play(state, directional);
+		}
+		state.getController().transitionLength(1);
+		return play(state, "idle");
 	}
 
 	/**
@@ -496,11 +631,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * 滑铲后/蹲着右键快（2 倍 ≈ 0.5s）；其余动画 1 倍。
 	 * 倍速和 {@link com.tk.gun.TkGun#AIM_TICKS_NORMAL}/{@link com.tk.gun.TkGun#AIM_TICKS_FAST} 是同一套数。
 	 *
-	 * <p>⚠️ 这里读的是**当前正在渲染的玩家**（{@link #CURRENT_PLAYER}，由 BowgunRigClient 每帧设置）——
-	 * 因为 GeoReplacedEntity 是单例，拿不到"这是谁"。用静态字段够了：同一帧内只有一个玩家在画。
+	 * <p>每名玩家拥有独立的 rig，因此这里读取的是该 rig 创建时绑定的玩家，
+	 * 不会在多人同屏时被其他玩家覆盖。
 	 */
-	private static double animationSpeed() {
-		AbstractClientPlayerEntity player = CURRENT_PLAYER;
+	private double animationSpeed() {
 		if (player == null) {
 			return 1.0D;
 		}
@@ -513,15 +647,14 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		if (currentAnimationName != null
 				&& (currentAnimationName.startsWith("walk_")
+						|| currentAnimationName.startsWith("GS_walk_")
+						|| "GS_run".equals(currentAnimationName)
 						|| "veritas_accelerated_run".equals(currentAnimationName))) {
 			return TkGunClient.walkAnimationSpeed(player.getId());
 		}
 		// 架枪三档（慢/快/滑铲抢枪）都写在 GunClientState.speedFor 里，和 TkGun.AIM_TICKS_* 一套数
 		return GunClientState.speedFor(player.getId());
 	}
-
-	/** 当前正在渲染的玩家（BowgunRigClient 每帧设；动画倍速要用）。 */
-	public static AbstractClientPlayerEntity CURRENT_PLAYER;
 
 	/**
 	 * 作者还在射击动画里埋了 **timeline（自定义指令）关键帧**（`Focus_shooting*` 0.0417s 的 `script: "shoot"`）。
@@ -530,7 +663,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * <p>它标的就是**出伤帧**（0.04167s = 1 tick），但开火这件事**必须由服务端/客户端那条链路做**
 	 * （枪口坐标是渲染时量的、伤害是服务端结算的），这里注册只是为了消警告 + 演示模式留一条证据行。
 	 */
-	private static void onCustomKeyframe(
+	private void onCustomKeyframe(
 			software.bernie.geckolib.animation.keyframe.event.CustomInstructionKeyframeEvent<BowgunRig> event) {
 		String script = event.getKeyframeData().getInstructions();
 		if (VERBOSE_DEMO) {
@@ -558,7 +691,30 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * 这里跟 {@code e.elapsed <= 1} 对齐给一个新实例（同一份 RawAnimation 实例 GeckoLib 不会重播）。
 	 */
 	private PlayState pickUpper(AnimationState<BowgunRig> state) {
+		recoverStoppedController(state);
 		Entity entity = entityOf(state);
+		if (entity != null
+				&& com.tk.gun.client.SoulAnchorSkillClientState
+						.active(entity.getId())) {
+			return PlayState.STOP;
+		}
+		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+				&& TkGun.isMeleeWeapon(player)) {
+			GunClientState.Entry swordState = GunClientState.get(entity.getId());
+			if (swordState != null
+					&& swordState.state == TkGun.State.MELEE
+					&& !swordState.meleeReturning) {
+				return PlayState.STOP;
+			}
+			boolean running = TkGunClient.isMoving(entity.getId())
+					&& (player.isSprinting() || "run".equals(
+							TkGunClient.walkAnimation(entity.getId())));
+			if (running && TkGunClient.ticks() < kineticRunTransitionUntil) {
+				state.getController().transitionLength(0);
+				return state.setAndContinue(rawFor("idle_to_run"));
+			}
+			return PlayState.STOP;
+		}
 		String name = entity == null ? null : upperAnimationFor(entity);
 		state.setControllerSpeed(1.0F);
 		// 诊断（用户 2026-10-17："蹲射结束 / 冲刺窗口 + 疾跑 + 装填时上半身换弹动作不完整"）：
@@ -630,8 +786,59 @@ public final class BowgunRig implements GeoReplacedEntity {
 		return state.setAndContinue(rawFor(play));
 	}
 
-	private PlayState pickGunPose(AnimationState<BowgunRig> state) {
+	/**
+	 * Additive controller for the T1 Soul Anchor animation.  GeckoLib merges
+	 * controllers by bone: channels present in these clips win, while bones the
+	 * author intentionally omitted continue to be driven by the normal rig.
+	 */
+	private PlayState pickSoulAnchorSkill(AnimationState<BowgunRig> state) {
 		Entity entity = entityOf(state);
+		com.tk.gun.client.SoulAnchorSkillClientState.Entry soulAnchor =
+				entity == null ? null
+						: com.tk.gun.client.SoulAnchorSkillClientState
+								.get(entity.getId());
+		if (soulAnchor != null && !soulAnchor.gunHeld()
+				&& soulAnchor.phase()
+						== com.tk.gun.net.SoulAnchorSkillPayload.DRAG) {
+			// The base controller owns the full-body drag clip.
+			soulAnchorSkillName = null;
+			return PlayState.STOP;
+		}
+		if (soulAnchor != null && soulAnchor.gunHeld()
+				&& soulAnchor.phase()
+						== com.tk.gun.net.SoulAnchorSkillPayload.GUN_RECALL
+				&& entity instanceof net.minecraft.entity.player.PlayerEntity player
+				&& GunClientState.get(player.getId()) != null
+				&& GunClientState.get(player.getId()).state
+						== TkGun.State.MELEE) {
+			// Melee has visual priority while the anchor recalls in the background.
+			soulAnchorSkillName = null;
+			return PlayState.STOP;
+		}
+		String name = soulAnchor == null ? null
+				: com.tk.gun.client.SoulAnchorSkillClientState
+						.animationName(entity.getId());
+		if (name == null) {
+			soulAnchorSkillName = null;
+			return PlayState.STOP;
+		}
+		if (!name.equals(soulAnchorSkillName)) {
+			soulAnchorSkillName = name;
+			state.getController().transitionLength(0);
+			state.getController().forceAnimationReset();
+			return state.setAndContinue(rawFor(name));
+		}
+		return state.setAndContinue(rawFor(name));
+	}
+
+	private PlayState pickGunPose(AnimationState<BowgunRig> state) {
+		recoverStoppedController(state);
+		Entity entity = entityOf(state);
+		if (entity != null
+				&& com.tk.gun.client.SoulAnchorSkillClientState
+						.active(entity.getId())) {
+			return PlayState.STOP;
+		}
 		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
 			return PlayState.STOP;
 		}
@@ -647,11 +854,15 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (entry == null) {
 			return PlayState.STOP;
 		}
+		// Focus_shooting* already animates the complete gun subtree. A later
+		// gun_pose controller must not replace its recoil with a static pose.
+		if (entry.state == TkGun.State.FIRE) {
+			return PlayState.STOP;
+		}
 		// Silent Storm's Focus_hold is already the canonical Fortress aim pose.
 		// Applying its source-only open clip afterwards shifts the assembled gun.
 		boolean silentStorm = gunId.equals(TkGun.id("abyssal_ancient_cannon"));
-		if (silentStorm && (entry.state == TkGun.State.AIM_HOLD
-				|| entry.state == TkGun.State.FIRE)) {
+		if (silentStorm && entry.state == TkGun.State.AIM_HOLD) {
 			return state.setAndContinue(
 					rawFor("silent_storm_open_static"));
 		}
@@ -661,9 +872,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 			// canonical Fortress gun keys. Applying the separate folded pose here
 			// would override those keys and tilt the gun differently.
 			return PlayState.STOP;
-		}
-		if (!silentStorm && entry.state == TkGun.State.FIRE && entry.focus) {
-			return state.setAndContinue(rawFor("gun_open_hold"));
 		}
 		if (!silentStorm && entry.state == TkGun.State.AIM_HOLD && entry.focus) {
 			return state.setAndContinue(rawFor("open"));
@@ -698,7 +906,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/** upper 控制器当前在播哪一段（换段才给新实例）。 */
-	private static String upperName;
+	private String upperName;
 	/** 本次装填用不用"只叠上半身"（**装填开始那一刻**定死，避免中途切换导致动画重播）。 */
 	/** 上面这个值本轮装填定过没有（装填结束时清掉，下一次重新判定）。 */
 
@@ -708,11 +916,11 @@ public final class BowgunRig implements GeoReplacedEntity {
 	/** 弹壳骨的数量（`shell` + `shell2..shell7`）—— 和导出的 `shell_eject_<k>` 一一对应。 */
 	private static final int SHELL_COUNT = 7;
 	/** 每根弹壳"已经抛出"了吗（true = 播抛出/停在消失帧；false = 在弹夹里）。 */
-	private static final boolean[] shellEjected = new boolean[SHELL_COUNT];
+	private final boolean[] shellEjected = new boolean[SHELL_COUNT];
 	/** 每根弹壳上次响应过的**射击序号**（变了才重播抛出，和 rig 那条同一个信号源）。 */
-	private static final int[] shellSeenSeq = new int[SHELL_COUNT];
+	private final int[] shellSeenSeq = new int[SHELL_COUNT];
 
-	static {
+	{
 		java.util.Arrays.fill(shellSeenSeq, -1);
 	}
 
@@ -728,7 +936,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 *       **绝不 STOP**（没有通道的骨骼会被 GeckoLib 拉回 geo 初始位，弹壳会当场弹回弹夹）。</li>
 	 * </ol>
 	 */
-	private static PlayState pickShell(AnimationState<BowgunRig> state, int idx) {
+	private PlayState pickShell(AnimationState<BowgunRig> state, int idx) {
 		int k = idx + 1;
 		Entity entity = entityOf(state);
 		GunClientState.Entry e = entity == null ? null : GunClientState.get(entity.getId());
@@ -757,9 +965,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 				rawFor(shellEjected[idx] ? "shell_eject_" + k : "shell_hold_" + k));
 	}
 	/** 上一次处理过的**射击序号**（rig 那条控制器：变了就重播这一段射击动画）。 */
-	private static int lastShotSeq = -1;
+	private int lastShotSeq = -1;
 	/** 同上，upper 控制器用（腰射时的 `stand_shooting`）。 */
-	private static int lastUpperShotSeq = -1;
+	private int lastUpperShotSeq = -1;
 
 	/**
 	 * **上半身该叠哪一段**（返回 null = 不叠层，走全身动画）。
@@ -783,6 +991,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 */
 	public static String upperAnimationFor(Entity entity) {
 		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity)) {
+			return null;
+		}
+		if (TkGun.isMeleeWeapon((net.minecraft.entity.player.PlayerEntity) entity)) {
 			return null;
 		}
 		if (WarBannerSkillClientState.isActive(entity.getId())) {
@@ -809,9 +1020,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 				// ATK_run owns the complete dash attack and hard-stop. The main
 				// controller also owns the direct cut to recovery.
 				e.lastMeleeAnimation = e.meleeReturning
-						? (e.dashMeleeReturnRun
-								? "ATK_2_dash_to_run" : "ATK_2_dash_to_idle")
-						: "ATK_run";
+						? "ATK_run_to_idle" : "ATK_run";
 				return null;
 			}
 			if (!e.active()) {
@@ -878,7 +1087,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// 名单与 {@code pick()} 里那些"全身状态"一致；上半身叠层只对"走路 / 待机 / 腰射"这几种情况生效。
 		if (e.active()) {
 			switch (e.state) {
-				case OVERHEAT, ROLL, ROLL_TO_IDLE,
+				case OVERHEAT, ROLL, ROLL_TO_IDLE, ROLL_TO_RUN,
 						SLIDE, SLIDE_READY, OVER, INSPECT, SKILL_JUMP,
 						FALL_ATTACK, FALL_ATTACK_RECOVERY,
 						FORTRESS_SKILL_LOAD, FORTRESS_SKILL_READY_GATHER,
@@ -987,7 +1196,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	/** {@link #pickUpper} 的"变化才打日志"用。 */
-	private static String lastLoggedUpper = "-";
+	private String lastLoggedUpper = "-";
 
 	/**
 	 * **腰射 / 行走射击**：正在开枪，而且**没进专注**（没架枪）。
@@ -1102,7 +1311,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * <p>排除项：正在播**一次性全身动作**（翻滚/滑铲/过热/换弹/进专注的过门/收枪）时不插手，
 	 * 那些动作本来就该盖住腿。
 	 */
-	private static boolean stillAndWasWalking(Entity entity, GunClientState.Entry e) {
+	private boolean stillAndWasWalking(Entity entity, GunClientState.Entry e) {
 		if (TkGunClient.isMoving(entity.getId())) {
 			return false;
 		}
@@ -1111,7 +1320,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		if (e != null && e.active()) {
 			switch (e.state) {
-				case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
+				case ROLL, ROLL_TO_IDLE, ROLL_TO_RUN, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
 						AIM, AIM_FAST, AIM_ROLL, AIM_SLIDE,
 						SKILL_JUMP, FALL_ATTACK, FALL_ATTACK_RECOVERY,
 						FORTRESS_SKILL_LOAD, FORTRESS_SKILL_READY_GATHER,
@@ -1126,16 +1335,53 @@ public final class BowgunRig implements GeoReplacedEntity {
 
 	/** 按当前动作状态挑动画。CONTINUE = 什么都不动（保持上一段），STOP = 交回默认姿势。 */
 	private PlayState pick(AnimationState<BowgunRig> state) {
+		recoverStoppedController(state);
 		Entity entity = entityOf(state);
 		if (entity == null) {
 			// 同上：宁可给个待机姿势也不要 STOP（STOP = 整模型弹回 geo 初始姿势）
 			return play(state, "idle");
+		}
+		if (com.tk.gun.client.SoulAnchorSkillClientState
+				.gunSliding(entity.getId())
+				|| com.tk.gun.client.SoulAnchorSkillClientState
+						.gunSlidingToIdle(entity.getId())
+				|| com.tk.gun.client.SoulAnchorSkillClientState
+						.gunSlidingToRun(entity.getId())) {
+			// Chain-slide owns both upper and lower body. Stop locomotion so a
+			// residual run/walk controller cannot replace its authored legs.
+			state.getController().transitionLength(0);
+			return PlayState.STOP;
+		}
+		if (com.tk.gun.client.SoulAnchorSkillClientState
+				.playerDragging(entity.getId())) {
+			// Pulling owns the complete player pose. Driving this clip through
+			// the base controller also neutralizes bones omitted by the author
+			// instead of letting locomotion or another action leak through.
+			com.tk.gun.client.SoulAnchorSkillClientState.Entry soulAnchor =
+					com.tk.gun.client.SoulAnchorSkillClientState
+							.get(entity.getId());
+			if (soulAnchor != null
+					&& soulAnchor.revision() != baseAnchorRevision) {
+				baseAnchorRevision = soulAnchor.revision();
+				state.getController().forceAnimationReset();
+			}
+			state.getController().transitionLength(0);
+			return play(state, "chain_drag");
+		}
+		if (com.tk.gun.client.SoulAnchorSkillClientState
+				.ready(entity.getId())) {
+			String walk = TkGunClient.walkAnimation(entity.getId());
+			return play(state, walk == null ? "idle" : walk);
 		}
 		if (WarBannerSkillClientState.isActive(entity.getId())) {
 			state.getController().transitionLength(0);
 			return play(state, "skill_flag_gun");
 		}
 		GunClientState.Entry e = GunClientState.get(entity.getId());
+		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+				&& TkGun.isMeleeWeapon(player)) {
+			return pickKineticSword(state, e);
+		}
 		if (e != null && e.airborneIdle) {
 			return play(state, "idle");
 		}
@@ -1167,8 +1413,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 				e.lastMeleeAnimation = "ATK_run";
 				return play(state, "ATK_run");
 			}
-			String recovery = e.dashMeleeReturnRun
-					? "ATK_2_dash_to_run" : "ATK_2_dash_to_idle";
+			String recovery = "ATK_run_to_idle";
 			e.lastMeleeAnimation = recovery;
 			state.getController().transitionLength(0);
 			return play(state, recovery);
@@ -1322,6 +1567,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 					return play(state, "roll");
 				case ROLL_TO_IDLE:
 					return play(state, "roll_to_idle");
+				case ROLL_TO_RUN:
+					return play(state, "focus-roll-run");
 				case MELEE:
 					// Locomotion must not take over the legs mid-attack.
 					return play(state, meleeLowerAnimation(e));
@@ -1381,7 +1628,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 */
 	private static final Set<String> LOOPING = new HashSet<>(Set.of(
 			"idle", "run", "walk_front", "walk_back", "walk_left", "walk_right",
-			"veritas_accelerated_run", "Focus_hold", "idle_upper"));
+			"GS_walk_front", "GS_walk_back", "GS_walk_left", "GS_walk_right",
+			"GS_run", "veritas_accelerated_run", "Focus_hold", "idle_upper"));
 	private static final Map<String, RawAnimation> RAW = new HashMap<>();
 
 	private static RawAnimation rawFor(String name) {
@@ -1393,6 +1641,18 @@ public final class BowgunRig implements GeoReplacedEntity {
 		return RAW.computeIfAbsent(name, n -> isLooping(n)
 				? RawAnimation.begin().thenLoop(n)
 				: RawAnimation.begin().thenPlayAndHold(n));
+	}
+
+	/**
+	 * GeckoLib keeps currentRawAnimation after STOP. Restoring the same clip
+	 * (idle/idle_upper/close are common cases) otherwise hits setAnimation's
+	 * equality fast path and leaves the controller STOPPED indefinitely.
+	 */
+	private static void recoverStoppedController(AnimationState<BowgunRig> state) {
+		AnimationController<BowgunRig> controller = state.getController();
+		if (controller.getAnimationState() == AnimationController.State.STOPPED) {
+			controller.forceAnimationReset();
+		}
 	}
 
 	/**
@@ -1412,6 +1672,4 @@ public final class BowgunRig implements GeoReplacedEntity {
 		return LOOPING.contains(name);
 	}
 
-	private BowgunRig() {
-	}
 }

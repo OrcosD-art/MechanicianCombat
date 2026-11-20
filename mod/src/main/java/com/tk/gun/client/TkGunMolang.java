@@ -22,7 +22,7 @@ import java.util.function.ToDoubleFunction;
  *   query.body_y_rotation = lerp(tick, prevBodyYaw, bodyYaw)
  *   query.body_x_rotation = actor.animatable() instanceof LivingEntity ? 0 : ((Entity) …).getPitch(tick)
  * </pre>
- * 而 mechaniciancombat 的 rig 是 **`GeoReplacedEntity`（`BowgunRig.INSTANCE`，不是实体）** → 每条都命中
+ * 而 mechaniciancombat 的 rig 是 **`GeoReplacedEntity`（不是实体）** → 每条都命中
  * `Attempted to use Molang variable for incompatible animatable type (…)` 然后**按 0 处理**
  * （v3 素材那句 `-query.body_x_rotation / 3` 就是这么静默失效的：枪一直没跟着俯仰抬）。
  *
@@ -32,7 +32,7 @@ import java.util.function.ToDoubleFunction;
  * —— 所以这里把这 4 个 query **用同一套语义重新实现一遍**：
  * <ul>
  *   <li>**我们的 rig**：从"正在画的那个玩家"（动画状态里的 ENTITY ticket，兜底用
- *       {@link BowgunRig#CURRENT_PLAYER}）取值，并且**按 Bedrock 的口径**给（因为作者的模型是照
+ *       该 rig 自己的玩家引用）取值，并且**按 Bedrock 的口径**给（因为作者的模型是照
  *       Bedrock 写的）：抬头为正 → `-pitch`；`head_y_rotation` 是"头相对身体"且符号与 MC 的
  *       `(headYaw - bodyYaw)` 相反 → `-(headYaw - bodyYaw)`；`body_y_rotation` 仍是绝对 `bodyYaw`。</li>
  *   <li>**其它 animatable**（tkm 的怪、别的 mod 的 GeckoLib 模型）：**原样**走 GeckoLib 那两个公式，
@@ -97,7 +97,7 @@ public final class TkGunMolang {
 		if (ticket instanceof LivingEntity living) {
 			return living;
 		}
-		return BowgunRig.CURRENT_PLAYER;   // 渲染器每帧设的"正在画的那个玩家"，和动画倍速用的是同一个
+		return ((BowgunRig) actor.animatable()).player();
 	}
 
 	private static double headXRotation(MolangQueries.Actor<?> actor) {

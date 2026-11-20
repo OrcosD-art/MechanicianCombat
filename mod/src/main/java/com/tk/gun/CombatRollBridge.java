@@ -18,8 +18,15 @@ final class CombatRollBridge {
 			if (!holdingGun && !armorDodge) {
 				return;
 			}
+			if (!holdingGun) {
+				if (!TkGunServer.onArmorRollStarted(player)) {
+					return;
+				}
+				spawnRollParticles(player);
+				return;
+			}
 			double horizontalSq = direction.x * direction.x + direction.z * direction.z;
-			if (holdingGun && horizontalSq > 1.0E-6D) {
+			if (horizontalSq > 1.0E-6D) {
 				float rollYaw = (float) Math.toDegrees(Math.atan2(-direction.x, direction.z));
 				player.setYaw(rollYaw);
 				player.setBodyYaw(rollYaw);
@@ -27,19 +34,23 @@ final class CombatRollBridge {
 				player.prevYaw = rollYaw;
 			}
 			TkGunServer.onRollStarted(player);
-			var world = player.getServerWorld();
-			for (int i = 0; i < 10; i++) {
-				double angle = i * Math.PI / 5.0;
-				world.spawnParticles(net.minecraft.particle.ParticleTypes.CLOUD,
-						player.getX() + Math.cos(angle) * 0.8,
-						player.getY() + 0.9,
-						player.getZ() + Math.sin(angle) * 0.8,
-						1, 0.0, 0.0, 0.0, 0.02);
-			}
-			world.spawnParticles(net.minecraft.particle.ParticleTypes.SWEEP_ATTACK,
-					player.getX(), player.getY() + 0.9, player.getZ(),
-					3, 0.4, 0.3, 0.4, 0.0);
+			spawnRollParticles(player);
 		});
+	}
+
+	private static void spawnRollParticles(net.minecraft.server.network.ServerPlayerEntity player) {
+		var world = player.getServerWorld();
+		for (int i = 0; i < 10; i++) {
+			double angle = i * Math.PI / 5.0;
+			world.spawnParticles(net.minecraft.particle.ParticleTypes.CLOUD,
+					player.getX() + Math.cos(angle) * 0.8,
+					player.getY() + 0.9,
+					player.getZ() + Math.sin(angle) * 0.8,
+					1, 0.0, 0.0, 0.0, 0.02);
+		}
+		world.spawnParticles(net.minecraft.particle.ParticleTypes.SWEEP_ATTACK,
+				player.getX(), player.getY() + 0.9, player.getZ(),
+				3, 0.4, 0.3, 0.4, 0.0);
 	}
 
 	private CombatRollBridge() {

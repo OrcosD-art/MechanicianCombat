@@ -1,10 +1,10 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.TkGunServer;
+import com.tk.gun.item.BackpackAmmoData;
 import com.tk.gun.item.BackpackLauncherRules;
 import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.enchantment.Enchantments;
-import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.entity.projectile.TridentEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.RegistryKeys;
@@ -40,24 +40,9 @@ public abstract class BackpackLoyaltyPickupMixin {
 			return;
 		}
 
-		PlayerInventory inventory = player.getInventory();
 		ItemStack returned = weapon.copyWithCount(1);
-		ItemStack stored = inventory.getStack(PlayerInventory.OFF_HAND_SLOT);
-		boolean accepted = false;
-		if (stored.isEmpty()) {
-			inventory.setStack(PlayerInventory.OFF_HAND_SLOT, returned);
-			accepted = true;
-		} else if (ItemStack.areItemsAndComponentsEqual(stored, returned)
-				&& stored.getCount() < stored.getMaxCount()) {
-			stored.increment(1);
-			accepted = true;
-		}
+		boolean accepted = BackpackAmmoData.storeIncoming(serverPlayer, returned);
 		if (accepted) {
-			inventory.markDirty();
-			serverPlayer.playerScreenHandler.syncState();
-			if (serverPlayer.currentScreenHandler != serverPlayer.playerScreenHandler) {
-				serverPlayer.currentScreenHandler.syncState();
-			}
 			TkGunServer.restoreBackpackChargeAfterLoyalty(serverPlayer);
 			cir.setReturnValue(true);
 		}

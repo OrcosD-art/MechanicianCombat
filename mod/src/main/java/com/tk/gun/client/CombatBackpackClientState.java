@@ -3,6 +3,7 @@ package com.tk.gun.client;
 import com.tk.gun.TkGun;
 import com.tk.gun.item.CombatBackpackAnimation;
 import com.tk.gun.item.CombatBackpackItem;
+import com.tk.gun.item.BackpackAmmoData;
 import com.tk.gun.item.BackpackUpgradeData;
 import com.tk.gun.net.CombatBackpackStatusPayload;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -34,6 +35,9 @@ public final class CombatBackpackClientState {
 		boolean jumpEnergyLocked;
 		int charges;
 		int remainingTicks;
+		int turretActivationAt = -1;
+		boolean turretCdLatched;
+		int turretCdStartedAt = -1;
 		boolean aimLatched;
 		BackpackUpgradeData.LauncherType launcherType = BackpackUpgradeData.LauncherType.NONE;
 		CombatBackpackAnimation.Phase animationPhase = CombatBackpackAnimation.Phase.READY;
@@ -64,12 +68,17 @@ public final class CombatBackpackClientState {
 			return;
 		}
 		if (launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
-			ENTRIES.computeIfAbsent(player.getId(),
-					ignored -> new Entry()).bannerCastUntil = ticks + 23;
+			Entry banner = ENTRIES.computeIfAbsent(player.getId(),
+					ignored -> new Entry());
+			banner.bannerCastUntil = ticks + 23;
+			banner.launcherType = BackpackUpgradeData.LauncherType.BATTLE_BANNER;
+			banner.phase = CombatBackpackStatusPayload.PHASE_BANNER_READY;
+			updateAnimationPhase(player.getId(), banner);
 			sendAction(player);
 			return;
 		}
 		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
+		entry.launcherType = launcherType;
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_COOLDOWN
 				|| entry.firingRequested) {
 			return;
@@ -84,7 +93,8 @@ public final class CombatBackpackClientState {
 	public static boolean triggerMissileBoxStart(ClientPlayerEntity player) {
 		ItemStack backpack = CombatBackpackItem.equippedStack(player);
 		if (!BackpackUpgradeData.canUseMissileBox(backpack)
-				|| !player.getOffHandStack().isOf(net.minecraft.item.Items.FIREWORK_ROCKET)) {
+				|| !BackpackAmmoData.stored(player)
+						.isOf(net.minecraft.item.Items.FIREWORK_ROCKET)) {
 			return false;
 		}
 		Entry entry = ENTRIES.computeIfAbsent(player.getId(), ignored -> new Entry());
@@ -235,9 +245,12 @@ public final class CombatBackpackClientState {
 								   int missilePhase, int jumpEnergyPixels,
 								   boolean jumpEnergyLocked) {
 		Entry entry = ENTRIES.computeIfAbsent(ownerEntityId, ignored -> new Entry());
+		int previousPhase = entry.phase;
+		BackpackUpgradeData.LauncherType previousType = entry.launcherType;
 		entry.targetEntityId = Math.max(-1, targetEntityId);
 		entry.phase = Math.max(CombatBackpackStatusPayload.PHASE_READY,
-				Math.min(CombatBackpackStatusPayload.PHASE_CLOSE, phase));
+				Math.min(CombatBackpackStatusPayload.PHASE_BANNER_CD,
+						phase));
 		entry.missilePhase = Math.max(CombatBackpackStatusPayload.MISSILE_NONE,
 				Math.min(CombatBackpackStatusPayload.MISSILE_CD, missilePhase));
 		entry.jumpEnergyPixels = Math.max(0, Math.min(
@@ -252,6 +265,55 @@ public final class CombatBackpackClientState {
 			case 5 -> BackpackUpgradeData.LauncherType.BATTLE_BANNER;
 			default -> BackpackUpgradeData.LauncherType.NONE;
 		};
+		boolean turretActivatedNow = entry.targetEntityId >= 0
+				&& ((entry.launcherType
+						== BackpackUpgradeData.LauncherType.PORTABLE
+						&& entry.phase
+							== CombatBackpackStatusPayload.PHASE_MARKED
+						&& previousPhase
+							!= CombatBackpackStatusPayload.PHASE_MARKED)
+					|| (entry.launcherType
+						== BackpackUpgradeData.LauncherType.AUTO
+						&& entry.phase
+							== CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
+						&& previousPhase
+							!= CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE));
+		if (entry.launcherType != previousType) {
+			entry.turretActivationAt = -1;
+			entry.turretCdLatched = false;
+			entry.turretCdStartedAt = -1;
+		}
+		if (turretActivatedNow) {
+			entry.turretActivationAt = ticks;
+			entry.turretCdLatched = false;
+			entry.turretCdStartedAt = -1;
+		} else if (entry.launcherType
+				== BackpackUpgradeData.LauncherType.PORTABLE
+				&& previousPhase == CombatBackpackStatusPayload.PHASE_MARKED
+				&& entry.phase != CombatBackpackStatusPayload.PHASE_MARKED) {
+			entry.turretCdLatched = true;
+			entry.turretCdStartedAt = ticks;
+		} else if (entry.launcherType
+				== BackpackUpgradeData.LauncherType.AUTO
+				&& previousPhase
+					== CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
+				&& (entry.phase
+						== CombatBackpackStatusPayload.PHASE_READY
+					|| entry.phase
+						== CombatBackpackStatusPayload.PHASE_AUTO_PAUSED
+					|| entry.phase
+						== CombatBackpackStatusPayload.PHASE_COOLDOWN)) {
+			entry.turretCdLatched = true;
+			entry.turretCdStartedAt = ticks;
+		}
+		if (entry.launcherType != BackpackUpgradeData.LauncherType.NONE
+				&& entry.phase
+					== CombatBackpackStatusPayload.PHASE_COOLDOWN) {
+			entry.turretCdLatched = true;
+			if (entry.turretCdStartedAt < 0) {
+				entry.turretCdStartedAt = ticks;
+			}
+		}
 		entry.charges = Math.max(0, Math.min(MAX_CHARGES, charges));
 		entry.remainingTicks = Math.max(0, remainingTicks);
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_MARKED) {
@@ -289,6 +351,34 @@ public final class CombatBackpackClientState {
 			return;
 		}
 		entry.firingRequested = false;
+	}
+
+	public static boolean firingRequested(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry != null && entry.firingRequested;
+	}
+
+	public static boolean turretCdLatched(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry != null && entry.turretCdLatched;
+	}
+
+	public static int turretActivationAt(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? -1 : entry.turretActivationAt;
+	}
+
+	public static boolean turretActivated(int playerId) {
+		return turretActivationAt(playerId) >= 0;
+	}
+
+	public static int turretCdStartedAt(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? -1 : entry.turretCdStartedAt;
+	}
+
+	public static int clientTicks() {
+		return ticks;
 	}
 
 	public static void reset(int playerId) {
@@ -335,6 +425,8 @@ public final class CombatBackpackClientState {
 			playBackpackSound("open");
 			entry.closeSoundAt = ticks + 6;
 		} else if (next == CombatBackpackAnimation.Phase.CLOSE) {
+			playBackpackSound("close");
+		} else if (next == CombatBackpackAnimation.Phase.BANNER_CD) {
 			playBackpackSound("close");
 		} else if (next == CombatBackpackAnimation.Phase.CD) {
 			entry.openSoundAt = ticks + 1;
@@ -394,6 +486,11 @@ public final class CombatBackpackClientState {
 		Entry entry = ENTRIES.get(playerId);
 		return entry == null ? 0.0D
 				: Math.max(0, ticks - entry.animationStartedAt) + tickDelta;
+	}
+
+	public static long animationStartedAt(int playerId) {
+		Entry entry = ENTRIES.get(playerId);
+		return entry == null ? -1L : entry.animationStartedAt;
 	}
 
 	public static int missilePhase(int playerId) {
@@ -471,7 +568,13 @@ public final class CombatBackpackClientState {
 					: CombatBackpackAnimation.Phase.READY;
 		}
 		if (entry.launcherType == BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
-			return CombatBackpackAnimation.Phase.CD;
+			return switch (entry.phase) {
+				case CombatBackpackStatusPayload.PHASE_BANNER_READY ->
+						CombatBackpackAnimation.Phase.BANNER_READY;
+				case CombatBackpackStatusPayload.PHASE_BANNER_ACTIVE ->
+						CombatBackpackAnimation.Phase.BANNER_AIM;
+				default -> CombatBackpackAnimation.Phase.BANNER_CD;
+			};
 		}
 		if (entry.phase == CombatBackpackStatusPayload.PHASE_READY && entry.aimLatched) {
 			return CombatBackpackAnimation.Phase.AIM;

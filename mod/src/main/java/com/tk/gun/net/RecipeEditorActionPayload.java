@@ -5,9 +5,13 @@ import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 
-/** Save or delete request from the visual recipe editor. */
-public record RecipeEditorActionPayload(boolean shaped, String recipeId,
-										boolean delete) implements CustomPayload {
+/** Page, save, or delete request from the visual recipe editor. */
+public record RecipeEditorActionPayload(int action, int page, boolean shaped,
+										String recipeId, float experience,
+										int cookingTime) implements CustomPayload {
+	public static final int ACTION_SET_PAGE = 0;
+	public static final int ACTION_SAVE = 1;
+	public static final int ACTION_DELETE = 2;
 	private static final int MAX_RECIPE_ID_LENGTH = 128;
 	public static final Id<RecipeEditorActionPayload> ID =
 			new Id<>(TkGun.id("recipe_editor_action"));
@@ -17,14 +21,21 @@ public record RecipeEditorActionPayload(boolean shaped, String recipeId,
 
 	private static void write(RecipeEditorActionPayload payload,
 			RegistryByteBuf buffer) {
+		buffer.writeVarInt(payload.action());
+		buffer.writeVarInt(payload.page());
 		buffer.writeBoolean(payload.shaped());
 		buffer.writeString(payload.recipeId(), MAX_RECIPE_ID_LENGTH);
-		buffer.writeBoolean(payload.delete());
+		buffer.writeFloat(payload.experience());
+		buffer.writeVarInt(payload.cookingTime());
 	}
 
 	private static RecipeEditorActionPayload read(RegistryByteBuf buffer) {
-		return new RecipeEditorActionPayload(buffer.readBoolean(),
-				buffer.readString(MAX_RECIPE_ID_LENGTH), buffer.readBoolean());
+		return new RecipeEditorActionPayload(buffer.readVarInt(),
+				buffer.readVarInt(),
+				buffer.readBoolean(),
+				buffer.readString(MAX_RECIPE_ID_LENGTH),
+				buffer.readFloat(),
+				buffer.readVarInt());
 	}
 
 	@Override

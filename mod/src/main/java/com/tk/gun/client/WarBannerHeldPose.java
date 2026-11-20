@@ -14,15 +14,37 @@ import java.util.TreeMap;
 
 /** Samples the authored flag subtree for the player-held skill prop. */
 final class WarBannerHeldPose {
-	private static final Identifier RESOURCE =
+	private static final Identifier HELD_RESOURCE =
 			TkGun.id("animations/entity/war_banner_held.animation.json");
-	private static Map<String, Map<String, BoneChannels>> animationBones;
+	private static final Identifier FPA_RESOURCE =
+			TkGun.id("animations/entity/war_banner_fpa.animation.json");
+	private static final Identifier ANCHOR_FPA_RESOURCE =
+			TkGun.id("animations/entity/soul_anchor_fpa.animation.json");
+	private static final Map<Identifier,
+			Map<String, Map<String, BoneChannels>>> ANIMATION_BONES =
+			new HashMap<>();
 
 	static void clearCache() {
-		animationBones = null;
+		ANIMATION_BONES.clear();
 	}
 
 	static void apply(GeoBone bone, double seconds, boolean gunHeld) {
+		apply(bone, seconds, HELD_RESOURCE,
+				gunHeld ? "skill_flag_gun" : "skill_flag");
+	}
+
+	static void applyFirstPerson(GeoBone bone, double seconds) {
+		apply(bone, seconds, FPA_RESOURCE, "skill_flag_fpa");
+	}
+
+	static void applyAnchorFirstPerson(GeoBone bone, double seconds,
+			boolean throwing) {
+		apply(bone, seconds, ANCHOR_FPA_RESOURCE,
+				throwing ? "throw" : "ready");
+	}
+
+	private static void apply(GeoBone bone, double seconds,
+			Identifier resource, String animationName) {
 		BoneSnapshot initial = bone.getInitialSnapshot();
 		if (initial != null) {
 			bone.setPosX(initial.getOffsetX());
@@ -35,8 +57,8 @@ final class WarBannerHeldPose {
 			bone.setScaleY(initial.getScaleY());
 			bone.setScaleZ(initial.getScaleZ());
 		}
-		BoneChannels channels = channels(
-				gunHeld ? "skill_flag_gun" : "skill_flag", bone.getName());
+		BoneChannels channels =
+				channels(resource, animationName, bone.getName());
 		if (channels == null) {
 			return;
 		}
@@ -71,20 +93,23 @@ final class WarBannerHeldPose {
 		}
 	}
 
-	private static BoneChannels channels(String animationName, String boneName) {
-		load();
+	private static BoneChannels channels(Identifier resource,
+			String animationName, String boneName) {
 		Map<String, BoneChannels> bones =
-				animationBones.get(animationName);
+				load(resource).get(animationName);
 		return bones == null ? null : bones.get(boneName);
 	}
 
-	private static void load() {
-		if (animationBones != null) {
-			return;
+	private static Map<String, Map<String, BoneChannels>> load(
+			Identifier resource) {
+		Map<String, Map<String, BoneChannels>> loaded =
+				ANIMATION_BONES.get(resource);
+		if (loaded != null) {
+			return loaded;
 		}
-		Map<String, Map<String, BoneChannels>> loaded = new HashMap<>();
+		loaded = new HashMap<>();
 		MinecraftClient client = MinecraftClient.getInstance();
-		try (var stream = client.getResourceManager().getResource(RESOURCE)
+		try (var stream = client.getResourceManager().getResource(resource)
 				.orElseThrow().getInputStream();
 			 var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
 			var animations = com.google.gson.JsonParser.parseReader(reader)
@@ -107,9 +132,12 @@ final class WarBannerHeldPose {
 			}
 		} catch (Exception exception) {
 			TkGun.LOGGER.error("[mechaniciancombat] Failed to load held War Banner pose {}",
-					RESOURCE, exception);
+					resource, exception);
 		}
-		animationBones = Map.copyOf(loaded);
+		Map<String, Map<String, BoneChannels>> immutable =
+				Map.copyOf(loaded);
+		ANIMATION_BONES.put(resource, immutable);
+		return immutable;
 	}
 
 	private static TreeMap<Double, Vec3> channel(

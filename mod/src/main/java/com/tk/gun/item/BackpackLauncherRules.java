@@ -28,6 +28,22 @@ public final class BackpackLauncherRules {
 						CombatBackpackItem.equippedStack(entity)));
 	}
 
+	/** Only these installed launchers expose the extra backpack ammunition slot. */
+	public static boolean usesAmmoStorage(LivingEntity entity) {
+		if (entity == null) {
+			return false;
+		}
+		ItemStack backpack = CombatBackpackItem.equippedStack(entity);
+		if (!BackpackUpgradeData.canUseLauncher(backpack)) {
+			return false;
+		}
+		return switch (BackpackUpgradeData.launcherType(backpack)) {
+			case PORTABLE, AUTO -> true;
+			case JUMP_THRUSTER -> BackpackUpgradeData.canUseMissileBox(backpack);
+			default -> false;
+		};
+	}
+
 	public static boolean isBattleBannerInstalled(LivingEntity entity) {
 		return entity != null
 				&& BackpackUpgradeData.launcherType(

@@ -46,6 +46,8 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean meleeAttackDown = false;
 	private static boolean backpackActionDown = false;
 	private static boolean missileBoxHeld = false;
+	private static boolean soulAnchorKeyDown = false;
+	private static boolean soulAnchorSneakDown = false;
 	private static boolean helmetToggleKeyDown = false;
 	/** 左键已经连着按了多少 tick（用来区分"轻点"和"按住连发"）。 */
 	private static int attackHeldTicks = 0;
@@ -352,9 +354,14 @@ public class TkGunClient implements ClientModInitializer {
 		double rz = -Math.sin(yaw);
 		double fwd = m.dx * fx + m.dz * fz;
 		double right = m.dx * rx + m.dz * rz;
+		boolean soulAnchorReady =
+				SoulAnchorSkillClientState.ready(entityId);
+		boolean anchorDashSprint = soulAnchorReady
+				&& GunClientState.dashing(entityId);
 		// run has no directional variants. Use it only for real forward movement;
 		// backpedaling and strafing must use their corresponding walk_* animation.
-		if (!m.aiming && (m.sprinting || speed > RUN_SPEED_MIN)
+		if ((!soulAnchorReady || anchorDashSprint) && !m.aiming
+				&& (m.sprinting || speed > RUN_SPEED_MIN)
 				&& fwd > 0.0D && Math.abs(fwd) >= Math.abs(right)) {
 			return "run";
 		}
@@ -412,7 +419,10 @@ public class TkGunClient implements ClientModInitializer {
 					|| ge.state == TkGun.State.AIM_SLIDE
 					|| (ge.state == TkGun.State.AIM_HOLD
 						&& GunClientState.focusish(player.getId())));
-			if (skillMotion && !hasMovementInput(player.getId())) {
+			boolean soulAnchorDrag =
+					SoulAnchorSkillClientState.playerDragging(player.getId());
+			if (soulAnchorDrag
+					|| (skillMotion && !hasMovementInput(player.getId()))) {
 				m.until = 0;
 				m.dx = 0.0D;
 				m.dz = 0.0D;
@@ -428,16 +438,29 @@ public class TkGunClient implements ClientModInitializer {
 			// 必须走 `GunCamera.aiming`：翻滚/滑铲后的右键锁期间，右键即使按着也不算瞄准，
 			// 不能因此取消疾跑或把 run 采样成 walk。
 			boolean aiming = player == client.player && GunCamera.aiming(client);
-			if (aiming && player.isSprinting()) {
+			boolean soulAnchorReady =
+					SoulAnchorSkillClientState.ready(player.getId());
+			boolean anchorDashSprint = soulAnchorReady
+					&& GunClientState.dashing(player.getId());
+			if ((aiming || soulAnchorReady && !anchorDashSprint)
+					&& player.isSprinting()) {
 				player.setSprinting(false);
 			}
 			// The post-roll acceleration window now uses vanilla sprint rather
 			// than a separate dash movement/rotation mode. Vanilla and
 			// ShoulderSurfing remain responsible for sprint turning.
 			if (player == client.player && !aiming
+					&& (!soulAnchorReady || anchorDashSprint)
 					&& GunClientState.dashing(player.getId())
 					&& dx * dx + dz * dz > MOVING_EPS2
 					&& !player.isSneaking() && !player.isUsingItem()) {
+				player.setSprinting(true);
+			}
+			if (player == client.player && !aiming
+					&& TkGun.isMeleeWeapon(player)
+					&& !player.isSneaking() && !player.isUsingItem()
+					&& hasMovementInput(player.getId())
+					&& client.options.sprintKey.isPressed()) {
 				player.setSprinting(true);
 			}
 			if (dx * dx + dz * dz > MOVING_EPS2) {
@@ -445,7 +468,8 @@ public class TkGunClient implements ClientModInitializer {
 				m.dx = dx;
 				m.dz = dz;
 				m.yaw = player.getYaw();
-				m.sprinting = player.isSprinting() && !aiming;
+				m.sprinting = player.isSprinting() && !aiming
+						&& (!soulAnchorReady || anchorDashSprint);
 				m.aiming = aiming;
 				float horizontalSpeed = (float) Math.sqrt(dx * dx + dz * dz);
 				m.walkAnimationSpeed = net.minecraft.util.math.MathHelper.clamp(
@@ -598,7 +622,7 @@ public class TkGunClient implements ClientModInitializer {
 
 	/** 某个玩家此刻在播我们哪个动画（渲染 props 时要读）。 */
 	public static String currentAnimation(UUID uuid) {
-		return com.tk.gun.client.rig.BowgunRig.currentAnimation();
+		return com.tk.gun.client.rig.BowgunRigClient.currentAnimation(uuid);
 	}
 
 	/**
@@ -622,12 +646,18 @@ public class TkGunClient implements ClientModInitializer {
 		if (client.player == null || client.currentScreen != null
 				|| client.player.isUsingItem()
 				|| !TkGun.isGun(client.player.getMainHandStack())
-				|| !TkGun.definition(client.player.getMainHandStack()).id()
-						.equals(TkGun.id("veritas_et_justitia"))
+				|| !TkGun.supportsManualMelee(client.player.getMainHandStack())
 				|| GunClientState.focusish(client.player.getId())) {
 			return false;
 		}
 		GunClientState.Entry state = GunClientState.get(client.player.getId());
+		SoulAnchorSkillClientState.Entry anchor =
+				SoulAnchorSkillClientState.get(client.player.getId());
+		if (anchor != null
+				&& anchor.phase()
+						!= com.tk.gun.net.SoulAnchorSkillPayload.GUN_RECALL) {
+			return false;
+		}
 		if (state != null && (state.state == TkGun.State.SKILL_JUMP
 				|| state.state == TkGun.State.FALL_ATTACK
 				|| state.state == TkGun.State.FALL_ATTACK_RECOVERY)) {
@@ -742,6 +772,9 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
 				com.tk.gun.TkGunServer.STEEL_ARROW_IMPACT_ENTITY,
 				com.tk.gun.client.entity.SteelArrowImpactEntityRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.SOUL_ANCHOR_ENTITY,
+				com.tk.gun.client.entity.SoulAnchorProjectileGeoRenderer::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.HEAT_VENT, HeatVentParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -774,6 +807,9 @@ public class TkGunClient implements ClientModInitializer {
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.THUNDER, ThunderParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
+				.register(com.tk.gun.TkGunParticles.THUNDER_BIG,
+						ThunderBigParticle.Factory::new);
+		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.FLASH, FlashParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.GOLEM_ENERGY_CONVERGE,
@@ -803,7 +839,12 @@ public class TkGunClient implements ClientModInitializer {
 		// 越肩视角的准星：中间 `- . -` + 枪口那个圈圈
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
 				(context, tickCounter) -> GunReticle.render(context));
-			SoulChainWorldRenderer.register();
+		SoulChainWorldRenderer.register();
+		AnchorLockParticleRenderer.register();
+		SkillSparkForegroundRenderer.register();
+		RoundAttackRenderer.register();
+		CycloneRenderer.register();
+		SoulAnchorRopeRenderer.register();
 		WarBannerDebugRenderer.register();
 		ClientPlayNetworking.registerGlobalReceiver(GunStatePayload.ID,
 				(payload, context) -> context.client().execute(() -> GunClientState.apply(payload)));
@@ -851,6 +892,14 @@ public class TkGunClient implements ClientModInitializer {
 							}
 						}
 					}));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.SoulAnchorSkillPayload.ID,
+				(payload, context) -> context.client().execute(
+						() -> SoulAnchorSkillClientState.apply(payload)));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.SoulAnchorStatusPayload.ID,
+				(payload, context) -> context.client().execute(
+						() -> SoulAnchorMarkClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunDemoPayload.ID,
 				(payload, context) -> context.client().execute(
 						() -> GunDebugHarness.setRemoteEnabled(payload.on())));
@@ -933,6 +982,7 @@ public class TkGunClient implements ClientModInitializer {
 			CombatBackpackPoseAnimation.clearCache();
 			WarBannerHeldPose.clearCache();
 			HunterSpearHeldPose.clearCache();
+			CombatPropHeldPose.clearCache();
 			CombatBackpackGeoRenderer.clearPoseDiagnostics();
 			MechanicianArmorGeometry.clearCache();
 		}
@@ -949,6 +999,11 @@ public class TkGunClient implements ClientModInitializer {
 			if (client.world != null) {
 				SoulChainClientState.tick(client.world.getTime());
 			}
+			SoulAnchorSkillClientState.tick();
+			SoulAnchorMarkClientState.tick();
+			SkillSparkClientState.tick(client);
+			RoundAttackClientState.tick(client);
+			CycloneClientState.tick(client);
 		ticks++;
 		// 第一次自检可能正好撞在资源重载中间（会误报 0/8），所以隔几秒再打两次
 		if ((ticks == 100 || ticks == 400 || ticks == 1200) && client.getResourceManager() != null) {
@@ -961,6 +1016,8 @@ public class TkGunClient implements ClientModInitializer {
 			jumpKeyDown = false;
 			MOVES.clear();
 			backpackActionDown = false;
+			soulAnchorKeyDown = false;
+			soulAnchorSneakDown = false;
 				missileBoxHeld = false;
 			helmetToggleKeyDown = false;
 			CombatBackpackClientState.resetAll();
@@ -970,12 +1027,19 @@ public class TkGunClient implements ClientModInitializer {
 				WarBannerSkillClientState.reset();
 				HunterSpearSkillClientState.reset();
 				SoulChainClientState.clear();
+				SoulAnchorSkillClientState.clearAll();
+				SoulAnchorMarkClientState.clear();
+				SkillSparkClientState.clear();
+				RoundAttackClientState.clear();
+				CycloneClientState.clear();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
+			com.tk.gun.client.rig.BowgunRigClient.clear();
 			return;
 		}
 		// Backpack X is intentionally handled before focus, roll, reload and other
 		// state-specific input so those input locks cannot consume or suppress it.
 		handleBackpackActionKey(client);
+		tickSoulAnchorInput(client);
 		InputUtil.Key helmetKey = bindingKey(
 				HELMET_TOGGLE_KEY, GLFW.GLFW_KEY_G);
 		boolean helmetKeyRaw = isInputDown(client, helmetKey);
@@ -1000,7 +1064,9 @@ public class TkGunClient implements ClientModInitializer {
 			TkGun.LOGGER.info("[mechaniciancombat] jump key -> request held gun skill");
 		}
 		jumpKeyDown = jumpDown;
-		if (holdingGunNow && client.player.isSneaking()) {
+		if (holdingGunNow && client.player.isSneaking()
+				&& !SoulAnchorSkillClientState.dragging(
+						client.player.getId())) {
 			client.player.setSneaking(false);
 		}
 		if (!holdingGunNow && heldGunLastTick) {
@@ -1012,6 +1078,13 @@ public class TkGunClient implements ClientModInitializer {
 		heldGunLastTick = holdingGunNow;
 		tickClientStepHeight(client, holdingGunNow);
 		trackMovement(client);
+		if (holdingGunNow && !TkGun.isMeleeWeapon(client.player)
+				&& client.player.isSprinting()
+				&& !GunClientState.dashing(client.player.getId())) {
+			// Fallback guard for vanilla paths that set the sprint flag after
+			// our setSprinting mixin injection point.
+			client.player.setSprinting(false);
+		}
 		forceOverShoulder(client);
 		FallbackShoulderCamera.tick(client);
 		// 越肩视角 + "身体/视角解耦"的状态机（鼠标增量、身体转向、FOV 放大系数都在里面推进）
@@ -1027,7 +1100,8 @@ public class TkGunClient implements ClientModInitializer {
 		// **Z = 切换专注**（用户 2026-10-17："将 z 的长按专注回调为切换"）：**只在按下那一下发一包**，
 		// 服务端按当前是否已专注决定进（`Focus_ready`）/ 出（`Focus_over`）。
 		boolean fallAttackInputConsumed = false;
-		if (focusDown && !focusKeyDown && TkGun.holdingGun(client.player)) {
+		if (focusDown && !focusKeyDown && TkGun.holdingGun(client.player)
+				&& !TkGun.isMeleeWeapon(client.player)) {
 			GunClientState.Entry jumpState =
 					GunClientState.get(client.player.getId());
 			boolean silentStormHeld = TkGun.definition(client.player).id()
@@ -1050,7 +1124,11 @@ public class TkGunClient implements ClientModInitializer {
 		}
 		if (!fallAttackInputConsumed && focusDown != focusKeyDown) {
 			focusKeyDown = focusDown;
-			if (focusDown && TkGun.holdingGun(client.player)) {
+			boolean soulAnchorLock =
+					SoulAnchorSkillClientState.active(client.player.getId());
+			if (focusDown && TkGun.holdingGun(client.player)
+					&& !TkGun.isMeleeWeapon(client.player)
+					&& !soulAnchorLock) {
 				// **翻滚中按 Z = 快速蹲射**（用户 2026-10-17）：不再屏蔽 —— 服务端会打断翻滚动画、
 				// 按快档（`fast_ready`）直接进架枪，见 `TkGunServer#startFocus` 里的 ROLL 分支。
 				// 翻滚中按 Z 一定是"进入快速蹲射"意图：此时客户端镜像可能还残留着翻滚前的
@@ -1078,7 +1156,7 @@ public class TkGunClient implements ClientModInitializer {
 				}
 				TkGun.LOGGER.info("[mechaniciancombat] 下蹲/专注键 -> 切换专注（当前{}，闪避组合={}）",
 						entering ? "未专注 → 进" : "已专注 → 出（Focus_over）", dodgeCombo);
-			} else if (focusDown) {
+			} else if (focusDown && !soulAnchorLock) {
 				TkGun.LOGGER.info("[mechaniciancombat] 下蹲/专注键：手上不是破垒重炮，忽略");
 			}
 		}
@@ -1088,7 +1166,8 @@ public class TkGunClient implements ClientModInitializer {
 		int reloadKeyCode = reloadKey.getCode();
 		boolean reloadRaw = isInputDown(client, reloadKey);
 		boolean reloadDown = client.currentScreen == null && reloadRaw;
-		if (reloadDown && !reloadKeyDown && TkGun.holdingGun(client.player)) {
+		if (reloadDown && !reloadKeyDown && TkGun.holdingGun(client.player)
+				&& !TkGun.isMeleeWeapon(client.player)) {
 			// 专注里 F 也属于"被屏蔽的按键"（用户 2026-10-17："屏蔽除射击和翻滚以外的所有按键输入"）
 			// —— 要装填就松开 Z 退出专注再按。
 			if (GunClientState.focusish(client.player.getId())) {
@@ -1116,7 +1195,8 @@ public class TkGunClient implements ClientModInitializer {
 		int ammoUiKeyCode = ammoUiKey.getCode();
 		boolean ammoUiRaw = isInputDown(client, ammoUiKey);
 		boolean ammoUiDown = client.currentScreen == null && ammoUiRaw;
-		if (ammoUiDown && !ammoUiKeyDown && TkGun.holdingGun(client.player)) {
+		if (ammoUiDown && !ammoUiKeyDown && TkGun.holdingGun(client.player)
+				&& !TkGun.isMeleeWeapon(client.player)) {
 			ClientPlayNetworking.send(new com.tk.gun.net.OpenAmmoStoragePayload());
 			TkGun.LOGGER.info("[mechaniciancombat] 弹药环键 {}（码 {}）-> 打开弹药环",
 					ammoUiKey.getLocalizedText().getString(), ammoUiKeyCode);
@@ -1132,6 +1212,7 @@ public class TkGunClient implements ClientModInitializer {
 		//    现在**服务端那条整段删掉**，连发只有这一个来源，并且**按住超过 6 tick 才起连发**，
 		//    所以轻点永远只有一发。
 		boolean trig = client.currentScreen == null && TkGun.holdingGun(client.player)
+				&& !TkGun.isMeleeWeapon(client.player)
 				&& client.options.attackKey.isPressed();
 		if (trig) {
 			attackHeldTicks++;
@@ -1151,12 +1232,19 @@ public class TkGunClient implements ClientModInitializer {
 		// （用户报的"翻滚未生效"就是这个根因）。服务端收到后：若是过热/退门 → 打断动画 +
 		// 清掉缓慢 + 状态切成 ROLL；其余情况什么都不做，翻滚照旧由 combat_roll 自己走。
 		boolean rollDown = readRollKeyDown(client);
-		boolean armorDodge = com.tk.gun.item.MechanicianUndersuitItem
-				.canUseArmorDodge(client.player);
+		boolean armorDodge = !holdingGunNow
+				&& com.tk.gun.item.MechanicianUndersuitItem
+						.canUseArmorDodge(client.player);
+		boolean armorDodgeLocked = armorDodge
+				&& GunClientState.armorDodgeLocked(client.player.getId());
 		if (rollDown && !rollKeyDown
-				&& (TkGun.holdingGun(client.player) || armorDodge)) {
+				&& (holdingGunNow || armorDodge)
+				&& !armorDodgeLocked
+				&& !SoulAnchorSkillClientState.chainSlideLocksDodge(
+						client.player.getId())) {
 			GunClientState.Entry rollState = GunClientState.get(client.player.getId());
-			boolean prep = rollState != null && (rollState.state == TkGun.State.AIM
+			boolean prep = holdingGunNow && rollState != null
+					&& (rollState.state == TkGun.State.AIM
 					|| rollState.state == TkGun.State.AIM_FAST
 					|| rollState.state == TkGun.State.AIM_ROLL
 					|| rollState.state == TkGun.State.AIM_SLIDE);
@@ -1199,7 +1287,7 @@ public class TkGunClient implements ClientModInitializer {
 					ClientPlayNetworking.send(new com.tk.gun.net.GunMeleePayload(
 							true, movingForward));
 					meleeAttackDown = true;
-					TkGun.LOGGER.info("[mechaniciancombat] 左键 -> Veritas close combat");
+					TkGun.LOGGER.info("[mechaniciancombat] 左键 -> held melee weapon");
 					attackWasDown = down;
 					return;
 				}
@@ -1230,7 +1318,8 @@ public class TkGunClient implements ClientModInitializer {
 		if (Math.abs(forward) < 0.01F && Math.abs(sideways) < 0.01F) {
 			return new GunRollPayload(0.0F, 0.0F);
 		}
-		double yaw = Math.toRadians(client.gameRenderer.getCamera().getYaw());
+		double yaw = Math.toRadians(
+				SprintDirectionCorrection.movementCameraYaw(client));
 		Vec3d look = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
 		// Minecraft yaw 0 faces +Z. Its left-hand direction is +X at yaw 0.
 		Vec3d left = new Vec3d(Math.cos(yaw), 0.0D, Math.sin(yaw));
@@ -1269,6 +1358,11 @@ public class TkGunClient implements ClientModInitializer {
 						com.tk.gun.item.CombatBackpackItem.equippedStack(client.player))) {
 			boolean missileBox = com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(
 					com.tk.gun.item.CombatBackpackItem.equippedStack(client.player));
+			boolean soulAnchorLock =
+					SoulAnchorSkillClientState.active(client.player.getId());
+			boolean battleBanner =
+					com.tk.gun.item.BackpackLauncherRules
+							.isBattleBannerInstalled(client.player);
 			if (missileBox && backpackActionRaw && !backpackActionDown) {
 				missileBoxHeld = CombatBackpackClientState
 						.triggerMissileBoxStart(client.player);
@@ -1277,11 +1371,57 @@ public class TkGunClient implements ClientModInitializer {
 			} else if (missileBox && !backpackActionRaw && missileBoxHeld) {
 				CombatBackpackClientState.releaseMissileBox(client.player);
 				missileBoxHeld = false;
-			} else if (backpackActionRaw && !backpackActionDown && !missileBox) {
+			} else if (backpackActionRaw && !backpackActionDown && !missileBox
+					&& !(battleBanner && soulAnchorLock)) {
 				CombatBackpackClientState.trigger(client.player);
 			}
 		}
 		backpackActionDown = backpackActionRaw;
+	}
+
+	private static void tickSoulAnchorInput(MinecraftClient client) {
+		boolean down = client.currentScreen == null
+				&& client.options.sprintKey.isPressed();
+		boolean sneakDown = client.currentScreen == null
+				&& client.options.sneakKey.isPressed();
+		boolean sprintingBeforeAnchor =
+				down && client.player.isSprinting();
+		if (sneakDown && !soulAnchorSneakDown
+				&& SoulAnchorSkillClientState.cancelable(
+						client.player.getId())) {
+			ClientPlayNetworking.send(
+					new com.tk.gun.net.SoulAnchorInputPayload(
+							false, true, false));
+		}
+		soulAnchorSneakDown = sneakDown;
+		if (sprintingBeforeAnchor) {
+			client.player.setSprinting(false);
+		}
+		if (down != soulAnchorKeyDown) {
+			boolean blockedByBanner = down
+					&& WarBannerSkillClientState.isActive(
+							client.player.getId());
+			if (down && !blockedByBanner) {
+				// Ready couples the view immediately so the server's target ray
+				// uses the current crosshair rather than a stale decoupled yaw.
+				float yaw = client.gameRenderer.getCamera().getYaw();
+				float pitch = client.gameRenderer.getCamera().getPitch();
+				client.player.setYaw(yaw);
+				client.player.setHeadYaw(yaw);
+				client.player.setBodyYaw(yaw);
+				client.player.setPitch(pitch);
+				client.player.prevYaw = yaw;
+				client.player.prevHeadYaw = yaw;
+				client.player.prevPitch = pitch;
+			}
+			soulAnchorKeyDown = down;
+			if (!blockedByBanner) {
+				ClientPlayNetworking.send(
+						new com.tk.gun.net.SoulAnchorInputPayload(
+								down, false,
+								down && sprintingBeforeAnchor));
+			}
+		}
 	}
 
 	private static void forceOverShoulder(MinecraftClient client) {

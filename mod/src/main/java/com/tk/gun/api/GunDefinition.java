@@ -16,6 +16,7 @@ public record GunDefinition(
 		int hipMagazineCapacity,
 		int focusMagazineCapacity,
 		int maxShotIndex,
+		boolean meleeOnly,
 		int fireTicks,
 		int hipShotCycleTicks,
 		int focusCycleStepTicks,
@@ -93,6 +94,7 @@ public record GunDefinition(
 		private int hipMagazineCapacity = 6;
 		private int focusMagazineCapacity = 10;
 		private int maxShotIndex = 10;
+		private boolean meleeOnly;
 		private int fireTicks = 30;
 		private int hipShotCycleTicks = 12;
 		private int focusCycleStepTicks = 5;
@@ -125,6 +127,11 @@ public record GunDefinition(
 
 		public Builder shotAnimationMax(int maxShotIndex) {
 			this.maxShotIndex = maxShotIndex;
+			return this;
+		}
+
+		public Builder meleeOnly() {
+			this.meleeOnly = true;
 			return this;
 		}
 
@@ -162,7 +169,7 @@ public record GunDefinition(
 
 		public GunDefinition build() {
 			return new GunDefinition(id, hipMagazineCapacity, focusMagazineCapacity,
-					maxShotIndex, fireTicks, hipShotCycleTicks, focusCycleStepTicks,
+					maxShotIndex, meleeOnly, fireTicks, hipShotCycleTicks, focusCycleStepTicks,
 					focusCycleMinTicks, baseDamage, model, animation, gunTexture,
 					textureWidth, textureHeight, nameTranslationKey, descriptionTranslationKey);
 		}

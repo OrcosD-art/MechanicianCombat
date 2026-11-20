@@ -4,6 +4,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.tk.gun.TkGun;
+import com.tk.gun.client.SoulAnchorSkillClientState;
 import dev.kosmx.playerAnim.api.TransformType;
 import dev.kosmx.playerAnim.api.layered.IAnimation;
 import dev.kosmx.playerAnim.core.util.Vec3f;
@@ -27,7 +28,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /** Bridges evaluated GeckoLib body poses into PlayerAnimator's vanilla player model. */
 public final class BowgunPlayerAnimatorPose implements IAnimation {
-	private static final int LAYER_PRIORITY = 20;
+	/**
+	 * Better Combat owns its attack layer at priority 2000. Holding a gun must
+	 * keep the GeckoLib-evaluated pose authoritative over stale attack layers.
+	 * Jump-backpack clips are explicitly excluded below and retain their own
+	 * higher-level visuals.
+	 */
+	private static final int LAYER_PRIORITY = 2100;
 	private static final boolean TRACE =
 			System.getProperty("mechaniciancombat.posebridge") != null;
 	private static final Set<String> TRACED_PARTS = ConcurrentHashMap.newKeySet();
@@ -38,8 +45,10 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 			"head.rotation", "head.position",
 			"arm_left.rotation", "arm_left.position",
 			"arm_right.rotation", "arm_right.position");
+	private static final Set<String> REQUIRED_POSE_BONES = Set.of(
+			"body", "chest", "head", "arm_left", "arm_right",
+			"leg_left", "leg_right");
 	private static ClientWorld cachedWorld;
-	private static long lastPruneTime = Long.MIN_VALUE;
 	private static final Map<Identifier, Map<String, Set<String>>> ANIMATION_CHANNELS =
 			new ConcurrentHashMap<>();
 
@@ -61,20 +70,13 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 	}
 
 	public static void capture(int playerId, Identifier animationResource,
-			Map<String, BonePose> pose) {
+			Map<String, BonePose> pose, Set<String> activeAnimations) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (cachedWorld != client.world) {
 			POSES.clear();
 			cachedWorld = client.world;
-			lastPruneTime = Long.MIN_VALUE;
 		}
 		long gameTime = client.world == null ? 0L : client.world.getTime();
-		if (gameTime != lastPruneTime) {
-			lastPruneTime = gameTime;
-			POSES.entrySet().removeIf(entry ->
-					gameTime - entry.getValue().gameTime() > 2L);
-		}
-		Set<String> activeAnimations = BowgunRig.currentPlayerPoseAnimations();
 		Set<String> channels = new HashSet<>();
 		Map<String, Set<String>> knownChannels = channels(animationResource);
 		for (String animation : activeAnimations) {
@@ -84,24 +86,50 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		// Do not let a one-tick animation-name/cache mismatch drop the entire
 		// upper body back to the vanilla pose.
 		channels.addAll(REQUIRED_UPPER_CHANNELS);
+		SoulAnchorSkillClientState.Entry anchor =
+				SoulAnchorSkillClientState.get(playerId);
+		if (SoulAnchorSkillClientState.ready(playerId)
+				|| anchor != null && !anchor.gunHeld()) {
+			// Ready and every non-gun anchor phase leave direct head rotation to
+			// vanilla/PlayerAnimator while the chest still carries the body pose.
+			channels.remove("head.rotation");
+		}
 		BonePose chest = pose.get("chest");
 		// The walk_* chest bob is added by the renderer, not authored in JSON.
 		if (chest != null && chest.y() != 0.0F) {
 			channels.add("chest.position");
 		}
+		Map<String, BonePose> stablePose = pose;
+		Set<String> stableChannels = channels;
+		PoseSnapshot previous = POSES.get(playerId);
+		if (previous != null && gameTime - previous.gameTime() <= 2L
+				&& !pose.keySet().containsAll(REQUIRED_POSE_BONES)) {
+			// A single incomplete GeckoLib pass must not collapse the vanilla
+			// player model back to bind pose for upper body or arms.
+			Map<String, BonePose> mergedPose = new HashMap<>(previous.bones());
+			mergedPose.putAll(pose);
+			Set<String> mergedChannels = new HashSet<>(previous.channels());
+			mergedChannels.addAll(channels);
+			stablePose = mergedPose;
+			stableChannels = mergedChannels;
+		}
 		POSES.put(playerId, new PoseSnapshot(
-				Map.copyOf(pose), Set.copyOf(channels), gameTime));
+				Map.copyOf(stablePose), Set.copyOf(stableChannels), gameTime));
 	}
 
 	public static void clear() {
 		POSES.clear();
 		cachedWorld = null;
-		lastPruneTime = Long.MIN_VALUE;
 	}
 
 	@Override
 	public boolean isActive() {
-		return player.isAlive() && TkGun.holdingGun(player);
+		boolean active = player.isAlive() && (TkGun.holdingGun(player)
+				|| SoulAnchorSkillClientState.active(player.getId()));
+		if (!active) {
+			POSES.remove(player.getId());
+		}
+		return active;
 	}
 
 	@Override
@@ -112,7 +140,7 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		}
 		PoseSnapshot snapshot = POSES.get(player.getId());
 		if (snapshot == null || player.getWorld() == null
-				|| player.getWorld().getTime() - snapshot.gameTime() > 2L) {
+				|| cachedWorld != player.getWorld()) {
 			return fallback;
 		}
 

@@ -5,13 +5,20 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "ItemCooldownManagerAccessor",
+    "BrewingStandBlockEntityAccessor",
+    "MechanicianBrewingStandMixin",
+    "BrewingStandIngredientSlotMixin",
+    "BrewingStandPotionSlotMixin",
     "TridentGravityMixin",
     "BackpackLoyaltyPickupMixin",
+    "CreativeBackpackAmmoServerMixin",
     "TridentEntityAccessor",
     "FireworkRocketEntityAccessor",
     "OffhandSwapGuardMixin",
     "OffhandPlacementGuardMixin",
     "BackpackFireworkSelfDamageMixin",
+    "PlayerBackpackAmmoSlotMixin",
+    "ScreenHandlerAddSlotAccessor",
     "PlayerFallDamageMixin",
     "GunCrouchPoseGuardMixin",
     "OffhandUseGuardMixin"
@@ -20,7 +27,12 @@
     "PlayerEntityRendererRigMixin",
     "GunMeleeAttackGuardMixin",
     "GunVanillaAttackGuardMixin",
-    "ClientPlayerCrouchGuardMixin"
+    "ClientPlayerCrouchGuardMixin",
+    "ClientPlayerSprintGuardMixin",
+    "ClientPlayerSprintStartMixin",
+    "CombatPropFirstPersonMixin",
+    "BackpackMissileRenderMixin",
+    "EntityGlowColorMixin"
   ],
   "injectors": {
     "defaultRequire": 1

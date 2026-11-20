@@ -1,11 +1,11 @@
 package com.tk.gun.client;
 
 import com.tk.gun.item.BackpackLauncherRules;
+import com.tk.gun.item.BackpackAmmoData;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Arm;
-import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 
 /** Draws the launcher's occupied offhand frame and virtual accessory icon. */
@@ -16,12 +16,9 @@ public final class OffhandStorageHud {
 				|| !BackpackLauncherRules.hasActiveLauncher(client.player)) {
 			return;
 		}
-		ItemStack offhand = client.player.getStackInHand(Hand.OFF_HAND);
+		ItemStack stored = BackpackAmmoData.stored(client.player);
 		boolean battleBanner =
 				BackpackLauncherRules.isBattleBannerInstalled(client.player);
-		if (!battleBanner && !offhand.isEmpty()) {
-			return; // Vanilla draws both the occupied frame and item icon.
-		}
 
 		Arm offhandArm = client.player.getMainArm().getOpposite();
 		int width = context.getScaledWindowWidth();
@@ -36,6 +33,9 @@ public final class OffhandStorageHud {
 			context.drawItem(icon, x + 3, y + 3);
 			// drawItemInSlot applies the vanilla WAR_BANNER cooldown mask.
 			context.drawItemInSlot(client.textRenderer, icon, x + 3, y + 3);
+		} else if (!stored.isEmpty()) {
+			context.drawItem(stored, x + 3, y + 3);
+			context.drawItemInSlot(client.textRenderer, stored, x + 3, y + 3);
 		}
 	}
 

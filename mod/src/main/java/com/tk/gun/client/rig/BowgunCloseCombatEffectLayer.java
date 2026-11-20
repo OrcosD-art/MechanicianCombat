@@ -27,7 +27,10 @@ import java.util.Set;
  * <p>The animation uses step-held scale keys to switch each plane on and off.
  * A group whose only scale key is zero stays hidden for the whole clip. The
  * layer also gates rendering to clips that actually contain close-combat
- * effects, preventing an unanimated group from falling back to scale 1.</p>
+ * effects, preventing an unanimated group from falling back to scale 1.
+ * Veritas effects intentionally use an independent clock and never pause for
+ * hitstop. Ask whether a future weapon's effect should use hitstop before
+ * reusing this schedule.</p>
  */
 public final class BowgunCloseCombatEffectLayer
 		extends GeoRenderLayer<BowgunRig> {
@@ -62,22 +65,22 @@ public final class BowgunCloseCombatEffectLayer
 			Map.entry("ATK_1_upper/1_3", 0.33333F),
 			Map.entry("ATK_1_upper/1_4", 0.375F),
 			// The other melee clips use the same defensive timing guard.
-			Map.entry("ATK_2/1_1", 0.41667F),
-			Map.entry("ATK_2/1_2", 0.45833F),
-			Map.entry("ATK_2/1_3", 0.5F),
-			Map.entry("ATK_2/1_4", 0.54167F),
-			Map.entry("ATK_2/2_1", 0.375F),
-			Map.entry("ATK_2/2_2", 0.41667F),
-			Map.entry("ATK_2/2_3", 0.5F),
-			Map.entry("ATK_2/2_4", 0.58333F),
-			Map.entry("ATK_4/1_1", 0.66667F),
-			Map.entry("ATK_4/1_2", 0.70833F),
-			Map.entry("ATK_4/1_3", 0.75F),
-			Map.entry("ATK_4/1_4", 0.79167F),
-			Map.entry("ATK_4/2_1", 0.375F),
-			Map.entry("ATK_4/2_2", 0.41667F),
-			Map.entry("ATK_4/2_3", 0.5F),
-			Map.entry("ATK_4/2_4", 0.58333F),
+			Map.entry("ATK_2/1_1", 0.5F),
+			Map.entry("ATK_2/1_2", 0.54167F),
+			Map.entry("ATK_2/1_3", 0.58333F),
+			Map.entry("ATK_2/1_4", 0.625F),
+			Map.entry("ATK_2/2_1", 0.25F),
+			Map.entry("ATK_2/2_2", 0.33333F),
+			Map.entry("ATK_2/2_3", 0.41667F),
+			Map.entry("ATK_2/2_4", 0.41667F),
+			Map.entry("ATK_4/1_1", 0.08333F),
+			Map.entry("ATK_4/1_2", 0.125F),
+			Map.entry("ATK_4/1_3", 0.16667F),
+			Map.entry("ATK_4/1_4", 0.20833F),
+			Map.entry("ATK_4/2_1", 0.5F),
+			Map.entry("ATK_4/2_2", 0.58333F),
+			Map.entry("ATK_4/2_3", 0.66667F),
+			Map.entry("ATK_4/2_4", 0.70833F),
 			Map.entry("ATK_hold_over/1_1", 0.70833F),
 			Map.entry("ATK_hold_over/1_2", 0.75F),
 			Map.entry("ATK_hold_over/1_3", 0.83333F),
@@ -92,22 +95,22 @@ public final class BowgunCloseCombatEffectLayer
 					entry("ATK_1", "1_2", 0.29167F, 0.33333F),
 					entry("ATK_1", "1_3", 0.33333F, 0.375F),
 					entry("ATK_1", "1_4", 0.375F, 0.41667F),
-					entry("ATK_2", "2_1", 0.375F, 0.41667F),
-					entry("ATK_2", "2_2", 0.41667F, 0.45833F),
-					entry("ATK_2", "2_3", 0.5F, 0.54167F),
-					entry("ATK_2", "2_4", 0.58333F, 0.625F),
-					entry("ATK_2", "1_1", 0.41667F, 0.45833F),
-					entry("ATK_2", "1_2", 0.45833F, 0.5F),
-					entry("ATK_2", "1_3", 0.5F, 0.54167F),
-					entry("ATK_2", "1_4", 0.54167F, 0.58333F),
-					entry("ATK_4", "1_1", 0.66667F, 0.70833F),
-					entry("ATK_4", "1_2", 0.70833F, 0.75F),
-					entry("ATK_4", "1_3", 0.75F, 0.79167F),
-					entry("ATK_4", "1_4", 0.79167F, 0.83333F),
-					entry("ATK_4", "2_1", 0.375F, 0.41667F),
-					entry("ATK_4", "2_2", 0.41667F, 0.45833F),
-					entry("ATK_4", "2_3", 0.5F, 0.54167F),
-					entry("ATK_4", "2_4", 0.58333F, 0.625F),
+					entry("ATK_2", "2_1", 0.25F, 0.29167F),
+					entry("ATK_2", "2_2", 0.33333F, 0.375F),
+					entry("ATK_2", "2_3", 0.41667F, 0.45833F),
+					entry("ATK_2", "2_4", 0.41667F, 0.45833F),
+					entry("ATK_2", "1_1", 0.5F, 0.54167F),
+					entry("ATK_2", "1_2", 0.54167F, 0.58333F),
+					entry("ATK_2", "1_3", 0.58333F, 0.625F),
+					entry("ATK_2", "1_4", 0.625F, 0.66667F),
+					entry("ATK_4", "1_1", 0.08333F, 0.125F),
+					entry("ATK_4", "1_2", 0.125F, 0.16667F),
+					entry("ATK_4", "1_3", 0.16667F, 0.20833F),
+					entry("ATK_4", "1_4", 0.20833F, 0.25F),
+					entry("ATK_4", "2_1", 0.5F, 0.54167F),
+					entry("ATK_4", "2_2", 0.58333F, 0.625F),
+					entry("ATK_4", "2_3", 0.66667F, 0.70833F),
+					entry("ATK_4", "2_4", 0.70833F, 0.75F),
 					entry("ATK_hold_over", "2_1", 0.25F, 0.29167F),
 					entry("ATK_hold_over", "2_2", 0.29167F, 0.33333F),
 					entry("ATK_hold_over", "2_3", 0.375F, 0.41667F),
@@ -127,12 +130,13 @@ public final class BowgunCloseCombatEffectLayer
 	}
 
 	/**
-	 * Applies the complete effect schedule from the authoritative client
-	 * melee clock. Hitstop pauses that clock, so the same step window resumes
-	 * instead of being skipped or cut by a controller reset.
+	 * Applies the complete effect schedule from the dedicated effect clock.
+	 * Veritas hitstop pauses the pose controller only; it must not pause or
+	 * extend any authored effect window.
 	 */
 	public static void applyScheduledVisibility(GeoBone bone, Entity entity,
-			float partialTick) {
+			float partialTick, String upperAnimation,
+			String currentAnimation) {
 		if (entity == null || !isEffectBone(bone.getName())) {
 			return;
 		}
@@ -142,8 +146,10 @@ public final class BowgunCloseCombatEffectLayer
 			hide(bone);
 			return;
 		}
-		String animation = normalizedEffectAnimation();
-		double seconds = (entry.elapsed + partialTick) / 20.0D;
+		String animation = normalizedEffectAnimation(
+				upperAnimation, currentAnimation);
+		double seconds = (GunClientState.effectElapsed(entity.getId())
+				+ partialTick) / 20.0D;
 		String boneName = bone.getName();
 		if ("effect_1".equals(boneName) || "effect_2".equals(boneName)) {
 			String prefix = "effect_1".equals(boneName) ? "1_" : "2_";
@@ -176,8 +182,10 @@ public final class BowgunCloseCombatEffectLayer
 				new EffectWindow(start, end));
 	}
 
-	private static String normalizedEffectAnimation() {
-		String active = activeEffectAnimation();
+	private static String normalizedEffectAnimation(String upperAnimation,
+			String currentAnimation) {
+		String active = activeEffectAnimation(
+				upperAnimation, currentAnimation);
 		if (active != null && active.endsWith("_upper")) {
 			return active.substring(0,
 					active.length() - "_upper".length());
@@ -205,8 +213,12 @@ public final class BowgunCloseCombatEffectLayer
 			int packedOverlay) {
 		Identifier texture = BONE_TEXTURES.get(bone.getName());
 		if (texture == null || bone.getCubes().isEmpty()
-				|| !isEffectAnimationActive()
-				|| !isAfterAuthoredStart(bone.getName(), partialTick)
+				|| !isEffectAnimationActive(
+						animatable.currentUpperAnimation(),
+						animatable.currentAnimation())
+				|| !isAfterAuthoredStart(bone.getName(), partialTick,
+						animatable.currentUpperAnimation(),
+						animatable.currentAnimation())
 				|| !isScaleVisible(bone)) {
 			return;
 		}
@@ -265,17 +277,20 @@ public final class BowgunCloseCombatEffectLayer
 				&& Math.abs(bone.getScaleZ()) > VISIBLE_EPSILON;
 	}
 
-	private static boolean isEffectAnimationActive() {
-		String upper = BowgunRig.currentUpperAnimation();
+	private static boolean isEffectAnimationActive(String upperAnimation,
+			String currentAnimation) {
+		String upper = upperAnimation;
 		if (upper != null && EFFECT_ANIMATIONS.contains(upper)) {
 			return true;
 		}
-		return EFFECT_ANIMATIONS.contains(BowgunRig.currentAnimation());
+		return EFFECT_ANIMATIONS.contains(currentAnimation);
 	}
 
 	private boolean isAfterAuthoredStart(String boneName,
-			float partialTick) {
-		String animation = activeEffectAnimation();
+			float partialTick, String upperAnimation,
+			String currentAnimation) {
+		String animation = activeEffectAnimation(
+				upperAnimation, currentAnimation);
 		Float start = EFFECT_START_SECONDS.get(animation + "/" + boneName);
 		if (start == null || !(this.renderer instanceof BowgunRigRenderer rig)) {
 			return true;
@@ -286,15 +301,17 @@ public final class BowgunCloseCombatEffectLayer
 		if (entry == null) {
 			return true;
 		}
-		double elapsedSeconds = (entry.elapsed + partialTick) / 20.0D;
+		double elapsedSeconds = (GunClientState.effectElapsed(
+				entity.getId()) + partialTick) / 20.0D;
 		return elapsedSeconds + 1.0E-4D >= start;
 	}
 
-	private static String activeEffectAnimation() {
-		String upper = BowgunRig.currentUpperAnimation();
+	private static String activeEffectAnimation(String upperAnimation,
+			String currentAnimation) {
+		String upper = upperAnimation;
 		if (upper != null && EFFECT_ANIMATIONS.contains(upper)) {
 			return upper;
 		}
-		return BowgunRig.currentAnimation();
+		return currentAnimation;
 	}
 }

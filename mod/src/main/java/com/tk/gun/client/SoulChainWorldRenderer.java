@@ -13,7 +13,7 @@ import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 
-/** Draws animated camera-facing chain ribbons between the three linked entities. */
+/** Draws animated camera-facing ribbons between all linked entities. */
 public final class SoulChainWorldRenderer {
 	private static final Identifier TEXTURE =
 			Identifier.of("mechaniciancombat", "textures/entity/connect_chain.png");
@@ -41,17 +41,16 @@ public final class SoulChainWorldRenderer {
 			for (SoulChainClientState.Effect effect :
 					SoulChainClientState.effects()) {
 				float alpha = effect.alphaAt(now);
-				Vec3d a = entityPoint(context.world(), effect.aEntityId(),
-						effect.a(), tickDelta);
-				Vec3d b = entityPoint(context.world(), effect.bEntityId(),
-						effect.b(), tickDelta);
-				Vec3d c = entityPoint(context.world(), effect.cEntityId(),
-						effect.c(), tickDelta);
-				drawEdge(matrix, entry, buffer, a, b,
-						camera, alpha);
-				if (effect.hasC()) {
-					drawEdge(matrix, entry, buffer, b, c,
-							camera, alpha * 0.9F);
+				Vec3d previous = null;
+				for (SoulChainClientState.Node node : effect.nodes()) {
+					Vec3d point = entityPoint(context.world(),
+							node.entityId(), node.fallback(), tickDelta);
+					if (previous != null) {
+						drawEdge(matrix, entry, buffer, previous, point,
+								camera, alpha);
+					}
+					previous = point;
+					alpha *= 0.9F;
 				}
 			}
 		});

@@ -23,6 +23,10 @@ public final class BackpackUpgradeData {
 	private static final String LAUNCHER_SLOT = "mechaniciancombat_backpack_launcher_slot";
 	private static final String MISSILE_BOX = "mechaniciancombat_backpack_missile_box";
 	private static final String MISSILE_BOX_SLOT = "mechaniciancombat_backpack_missile_box_slot";
+	private static final String GOLEM_CAPSULE =
+			"mechaniciancombat_backpack_golem_capsule";
+	private static final String GOLEM_CAPSULE_SLOT =
+			"mechaniciancombat_backpack_golem_capsule_slot";
 
 	public static boolean hasCore(ItemStack backpack) {
 		return isBackpack(backpack) && customData(backpack).getBoolean(CORE);
@@ -49,6 +53,17 @@ public final class BackpackUpgradeData {
 		return canUseJumpThruster(backpack) && hasMissileBox(backpack);
 	}
 
+	public static boolean hasGolemCapsule(ItemStack backpack) {
+		return isBackpack(backpack)
+				&& customData(backpack).getBoolean(GOLEM_CAPSULE);
+	}
+
+	public static boolean canSummonGolems(ItemStack backpack) {
+		return canUseLauncher(backpack)
+				&& launcherType(backpack) == LauncherType.SUMMON_ANTENNA
+				&& hasGolemCapsule(backpack);
+	}
+
 	public static LauncherType launcherType(ItemStack backpack) {
 		if (!hasLauncher(backpack)) {
 			return LauncherType.NONE;
@@ -73,6 +88,10 @@ public final class BackpackUpgradeData {
 
 	public static int missileBoxSlot(ItemStack backpack) {
 		return slotValue(backpack, MISSILE_BOX_SLOT);
+	}
+
+	public static int golemCapsuleSlot(ItemStack backpack) {
+		return slotValue(backpack, GOLEM_CAPSULE_SLOT);
 	}
 
 	public static void installCore(ItemStack backpack) {
@@ -122,6 +141,8 @@ public final class BackpackUpgradeData {
 				nbt.remove(LAUNCHER_TYPE);
 				nbt.remove(MISSILE_BOX);
 				nbt.remove(MISSILE_BOX_SLOT);
+				nbt.remove(GOLEM_CAPSULE);
+				nbt.remove(GOLEM_CAPSULE_SLOT);
 			} else {
 				nbt.putBoolean(LAUNCHER, true);
 				int encoded = switch (type) {
@@ -135,6 +156,10 @@ public final class BackpackUpgradeData {
 				if (type != LauncherType.JUMP_THRUSTER) {
 					nbt.remove(MISSILE_BOX);
 					nbt.remove(MISSILE_BOX_SLOT);
+				}
+				if (type != LauncherType.SUMMON_ANTENNA) {
+					nbt.remove(GOLEM_CAPSULE);
+					nbt.remove(GOLEM_CAPSULE_SLOT);
 				}
 			}
 		});
@@ -164,6 +189,24 @@ public final class BackpackUpgradeData {
 
 	public static void setMissileBoxSlot(ItemStack backpack, int slot) {
 		setSlotValue(backpack, MISSILE_BOX_SLOT, slot);
+	}
+
+	public static void setGolemCapsule(ItemStack backpack, boolean installed) {
+		if (!isBackpack(backpack)) {
+			return;
+		}
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, backpack, nbt -> {
+			if (installed) {
+				nbt.putBoolean(GOLEM_CAPSULE, true);
+			} else {
+				nbt.remove(GOLEM_CAPSULE);
+				nbt.remove(GOLEM_CAPSULE_SLOT);
+			}
+		});
+	}
+
+	public static void setGolemCapsuleSlot(ItemStack backpack, int slot) {
+		setSlotValue(backpack, GOLEM_CAPSULE_SLOT, slot);
 	}
 
 	private static int slotValue(ItemStack backpack, String key) {

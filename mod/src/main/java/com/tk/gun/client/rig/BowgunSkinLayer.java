@@ -75,7 +75,7 @@ public class BowgunSkinLayer extends GeoRenderLayer<BowgunRig> {
 		if (spec == null) {
 			return;
 		}
-		var definition = TkGun.definition(BowgunRig.CURRENT_PLAYER);
+		var definition = TkGun.definition(animatable.player());
 		float du = spec[0] / definition.textureWidth();
 		float dv = spec[1] / definition.textureHeight();
 		float inflate = spec[2] / 16.0F;          // 像素 → 格

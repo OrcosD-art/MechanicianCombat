@@ -192,22 +192,42 @@ foreach ($spec in $groupSpecs) {
 $geo = [IO.File]::ReadAllText($geoPath, [Text.Encoding]::UTF8) |
     ConvertFrom-Json
 $geometry = $geo.'minecraft:geometry'[0]
+$runtimeBones = @()
+foreach ($runtimeName in @("E1")) {
+    $runtimeGroup = Find-Group $model.outliner $runtimeName
+    if ($null -eq $runtimeGroup) {
+        continue
+    }
+    $runtimePivot = @($runtimeGroup.origin |
+        ForEach-Object { Number $_ })
+    $runtimePivotX = -1.0D * $runtimePivot[0]
+    $runtimeBones += [pscustomobject][ordered]@{
+        name = $runtimeName
+        pivot = @(
+            $runtimePivotX,
+            $runtimePivot[1],
+            $runtimePivot[2])
+    }
+}
 $keptBones = @($geometry.bones | Where-Object {
-    [string]$_.name -notmatch '^(effect_|1_)'
+    [string]$_.name -notmatch '^(effect_|1_|2_)' -and
+        [string]$_.name -ne "E1"
 })
-$geometry.bones = @($keptBones + @($effectBones.Values))
+$geometry.bones = @($keptBones + $runtimeBones + @($effectBones.Values))
 $geoJson = $geo | ConvertTo-Json -Depth 100 -Compress
 [IO.File]::WriteAllText(
     $geoPath, $geoJson, $utf8NoBom)
 
 $animation = [IO.File]::ReadAllText(
     $animationPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
-$importNames = @(
-    "ATK_run", "ATK_1", "ATK_1_to_idle",
-    "ATK_2", "ATK_2_to_idle",
-    "ATK_3", "ATK_3_to_idle", "ATK_3_hold",
-    "ATK_4", "ATK_4_to_idle", "ATK_hold_over", "run"
-)
+$importNames = @($model.animations | ForEach-Object {
+    [string]$_.name
+} | Where-Object {
+    # Blockbench can leave unnamed scratch clips such as "1"; they are not
+    # valid GeckoLib animation identifiers and PowerShell cannot Add-Member
+    # numeric property names through NotePropertyName.
+    $_ -match '^[A-Za-z_][A-Za-z0-9_]*$'
+})
 foreach ($name in $importNames) {
     $source = $model.animations |
         Where-Object { $_.name -eq $name } |
@@ -292,6 +312,17 @@ foreach ($name in $importNames) {
             }
         }
     }
+    if ($name -eq "ATK_3_hold") {
+        $holdParticle = $particles["0.5"]
+        if ($null -eq $holdParticle -or
+                [string]::IsNullOrWhiteSpace(
+                    [string]$holdParticle.effect)) {
+            $particles["0.5"] = [pscustomobject][ordered]@{
+                effect = "skill_spark"
+                locator = "aim"
+            }
+        }
+    }
     if ($sounds.Count -gt 0) {
         $converted.sound_effects = [pscustomobject]$sounds
     }
@@ -304,6 +335,22 @@ foreach ($name in $importNames) {
     $animation.animations |
         Add-Member -NotePropertyName $name `
             -NotePropertyValue ([pscustomobject]$converted) -Force
+}
+
+$removedStaleEffectChannels = 0
+foreach ($targetAnimation in $animation.animations.PSObject.Properties) {
+    if ($importNames -contains $targetAnimation.Name) {
+        continue
+    }
+    foreach ($targetBone in @(
+            $targetAnimation.Value.bones.PSObject.Properties)) {
+        if ($targetBone.Name -notmatch '^(effect_|1_|2_)') {
+            continue
+        }
+        $targetAnimation.Value.bones.PSObject.Properties.Remove(
+            $targetBone.Name)
+        $removedStaleEffectChannels++
+    }
 }
 
 foreach ($sourceName in @("ATK_1", "ATK_1_to_idle")) {
@@ -367,6 +414,19 @@ if (Test-Path -LiteralPath $soundSource) {
         $sourceFile = Get-ChildItem -LiteralPath $soundSource -Recurse `
             -File -Filter $entry.Key | Select-Object -First 1
         if ($null -ne $sourceFile) {
+            $header = New-Object byte[] 4
+            $stream = [IO.File]::OpenRead($sourceFile.FullName)
+            try {
+                $read = $stream.Read($header, 0, $header.Length)
+            } finally {
+                $stream.Dispose()
+            }
+            if ($read -ne 4 -or
+                    [Text.Encoding]::ASCII.GetString($header) -ne "OggS") {
+                Write-Warning ("Skipping non-Ogg audio source: {0}" -f
+                    $sourceFile.FullName)
+                continue
+            }
             Copy-Item -LiteralPath $sourceFile.FullName `
                 -Destination (Join-Path $soundTarget $entry.Value) -Force
         }
@@ -391,6 +451,7 @@ foreach ($name in $importNames) {
 [pscustomobject]@{
     EffectGroups = (@($effectBones.Keys) -join ", ")
     ImportedAnimations = ($importNames -join ", ")
+    RemovedStaleEffectChannels = $removedStaleEffectChannels
     PreservedStepKeys = $stepCount
     Geometry = $geoPath
     Animations = $animationPath

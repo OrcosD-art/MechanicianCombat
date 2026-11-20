@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " A ",
+    "BCB",
+    "DED"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:hopper"
+    },
+    "B": {
+      "item": "minecraft:repeater"
+    },
+    "C": {
+      "item": "minecraft:soul_campfire"
+    },
+    "D": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    },
+    "E": {
+      "item": "minecraft:wither_skeleton_skull"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:jump_backpack_thruster",
+    "count": 1
+  }
+}

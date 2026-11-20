@@ -1,7 +1,7 @@
 package com.tk.gun.client;
 
 import com.tk.gun.client.rig.BowgunRigRenderer;
-import com.tk.gun.client.rig.BowgunRig;
+import com.tk.gun.client.rig.BowgunRigClient;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.particle.ParticleFactory;
 import net.minecraft.client.particle.ParticleTextureSheet;
@@ -16,7 +16,7 @@ import net.minecraft.util.math.Vec3d;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Veritas close-combat skill spark, five frames at the authored 12 FPS. */
+/** Veritas close-combat skill spark, five frames at the authored 18 FPS. */
 public final class SkillSparkParticle extends SpriteBillboardParticle {
 	private static final int FRAME_COUNT = 5;
 	private static final int LIFETIME = 10;
@@ -44,16 +44,17 @@ public final class SkillSparkParticle extends SpriteBillboardParticle {
 	}
 
 	private void updateSprite() {
-		// The source flipbook is authored at 12 FPS. Use the real age so the
+		// The updated source flipbook is authored at 18 FPS. Use the real age so the
 		// last frame is selected; getSprite(frame, FRAME_COUNT) would cap at
 		// frameCount - 2.
-		int frame = Math.min(FRAME_COUNT - 1, this.age * 12 / 20);
+		int frame = Math.min(FRAME_COUNT - 1, this.age * 18 / 20);
 		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT - 1));
 	}
 
 	@Override
 	public void tick() {
-		String currentAnimation = effectiveAnimation();
+		String currentAnimation = BowgunRigClient.activeAnimation(
+				attachedEntityId);
 		if (ownerAnimation != null && !ownerAnimation.equals(currentAnimation)) {
 			markDead();
 			ACTIVE.remove(attachedEntityId, this);
@@ -105,37 +106,21 @@ public final class SkillSparkParticle extends SpriteBillboardParticle {
 	}
 
 	public static boolean spawnAttached(Entity entity, Vec3d position,
-			String locator) {
+			String locator, String ownerAnimation) {
 		MinecraftClient client = MinecraftClient.getInstance();
-		SpriteProvider provider = activeProvider;
-		if (entity == null || position == null || client.world == null
-				|| provider == null) {
+		if (entity == null || position == null || client.world == null) {
 			return false;
 		}
-		SkillSparkParticle particle = new SkillSparkParticle(client.world,
-				position.x, position.y, position.z, provider);
-		particle.attachedEntityId = entity.getId();
-		particle.attachedLocator = locator == null ? "aim" : locator;
-		particle.ownerAnimation = effectiveAnimation();
-		SkillSparkParticle previous = ACTIVE.put(
-				particle.attachedEntityId, particle);
-		if (previous != null && previous != particle) {
-			previous.markDead();
-		}
-		client.particleManager.addParticle(particle);
-		return true;
+		return SkillSparkClientState.spawn(
+				entity, position, locator, ownerAnimation);
 	}
 
 	public static void clearForEntity(int entityId) {
+		SkillSparkClientState.clearForEntity(entityId);
 		SkillSparkParticle previous = ACTIVE.remove(entityId);
 		if (previous != null) {
 			previous.markDead();
 		}
 	}
 
-	private static String effectiveAnimation() {
-		String upper = BowgunRig.currentUpperAnimation();
-		return upper != null && !upper.isBlank()
-				? upper : BowgunRig.currentAnimation();
-	}
 }

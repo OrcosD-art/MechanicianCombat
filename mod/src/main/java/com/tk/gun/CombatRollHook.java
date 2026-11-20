@@ -18,6 +18,8 @@ public final class CombatRollHook {
 	public static final int ROLL_STATE_TICKS = ROLL_DURATION + ROLL_END_MOVE_PROBE_TICKS;
 	public static final int ROLL_TO_IDLE_TICKS =
 			animationTicks("roll_to_idle", 3) + ANIMATION_END_HOLD_TICKS;
+	public static final int FOCUS_ROLL_RUN_TICKS =
+			animationTicks("focus-roll-run", 13) + ANIMATION_END_HOLD_TICKS;
 
 	private static int animationTicks(String animation, int fallback) {
 		String path = "assets/mechaniciancombat/animations/entity/bowgun_rig.animation.json";

@@ -47,7 +47,18 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 	private static final int[][] PART_SLOT_POSITIONS = {
 			{26, 11},
 			{44, 11},
-			{62, 11}
+			{62, 11},
+			{26, 29},
+			{44, 29},
+			{62, 29},
+			{26, 47},
+			{44, 47},
+			{62, 47}
+	};
+	private static final ArmorPartItem.Kind[] PART_SECTIONS = {
+			ArmorPartItem.Kind.C1,
+			ArmorPartItem.Kind.T1,
+			ArmorPartItem.Kind.F1
 	};
 
 	public static final ScreenHandlerType<ArmorModificationTableScreenHandler> TYPE =
@@ -61,7 +72,9 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 	private final PlayerEntity owner;
 	private final Inventory armorInventory = new SimpleInventory(ARMOR_SLOT_COUNT);
 	private final Inventory partInventory = new SimpleInventory(PART_SLOT_COUNT);
-	private ItemStack lastChestplate = ItemStack.EMPTY;
+	private final ItemStack[] lastPartContainers = {
+			ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY
+	};
 	private boolean syncing;
 
 	public ArmorModificationTableScreenHandler(
@@ -92,10 +105,12 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 			addSlot(new Slot(partInventory, index, position[0], position[1]) {
 				@Override
 				public boolean canInsert(ItemStack stack) {
-					return ArmorUpgradeData.isChestplate(
-							ArmorUpgradeData.equippedChestplate(owner))
-							&& stack.getItem() instanceof ArmorPartItem part
-							&& part.slotIndex() == fixedIndex;
+					if (!(stack.getItem() instanceof ArmorPartItem part)
+							|| part.slotIndex() != fixedIndex) {
+						return false;
+					}
+					return !ArmorUpgradeData.equippedPartContainer(
+							owner, part.kind()).isEmpty();
 				}
 			});
 		}
@@ -134,14 +149,30 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 							equipped.isEmpty() ? ItemStack.EMPTY : equipped.copy());
 				}
 			}
-			ItemStack chest = ArmorUpgradeData.equippedChestplate(player);
-			if (!ItemStack.areEqual(chest, lastChestplate)) {
-				loadPartSlots(chest);
+			boolean chestChanged = false;
+			var registries = player.getServerWorld().getRegistryManager();
+			for (int section = 0; section < PART_SECTIONS.length; section++) {
+				ArmorPartItem.Kind sectionKind = PART_SECTIONS[section];
+				ItemStack container = ArmorUpgradeData.equippedPartContainer(
+						player, sectionKind);
+				if (!ItemStack.areEqual(container,
+						lastPartContainers[section])) {
+					loadPartSlots(container, section, registries);
+				}
+				boolean changed = persistPartSlots(
+						container, section, registries);
+				if (changed) {
+					player.equipStack(sectionKind.equipmentSlot(),
+							container.copy());
+					if (sectionKind.group()
+							== ArmorPartItem.Kind.Group.CHEST) {
+						chestChanged = true;
+					}
+				}
+				lastPartContainers[section] =
+						container.isEmpty() ? ItemStack.EMPTY : container.copy();
 			}
-			boolean partsChanged = persistPartSlots(chest);
-			lastChestplate = chest.isEmpty() ? ItemStack.EMPTY : chest.copy();
-			if (partsChanged) {
-				player.equipStack(EquipmentSlot.CHEST, chest.copy());
+			if (chestChanged) {
 				com.tk.gun.ArmorAbilities.sendSnapshot(player);
 			}
 		} finally {
@@ -149,28 +180,52 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 		}
 	}
 
-	private void loadPartSlots(ItemStack chest) {
-		for (ArmorPartItem.Kind kind : ArmorPartItem.Kind.values()) {
-			String itemId = ArmorUpgradeData.partId(chest, kind);
-			partInventory.setStack(kind.ordinal(), stackForId(itemId, kind));
+	private void loadPartSlots(ItemStack container, int section,
+			net.minecraft.registry.RegistryWrapper.WrapperLookup registries) {
+		int start = section * 3;
+		for (int offset = 0; offset < 3; offset++) {
+			ArmorPartItem.Kind kind =
+					ArmorPartItem.Kind.values()[start + offset];
+			ItemStack stored = ArmorUpgradeData.storedPart(
+					container, kind, registries);
+			if (stored.isEmpty()) {
+				stored = stackForId(
+						ArmorUpgradeData.partId(container, kind), kind);
+			}
+			partInventory.setStack(start + offset, stored);
 		}
 	}
 
-	private boolean persistPartSlots(ItemStack chest) {
-		if (!ArmorUpgradeData.isChestplate(chest)) {
+	private boolean persistPartSlots(ItemStack container, int section,
+			net.minecraft.registry.RegistryWrapper.WrapperLookup registries) {
+		if (container.isEmpty()) {
 			return false;
 		}
 		boolean changed = false;
-		for (ArmorPartItem.Kind kind : ArmorPartItem.Kind.values()) {
-			ItemStack stack = partInventory.getStack(kind.ordinal());
-			String installedId = stack.getItem() instanceof ArmorPartItem part
-					&& part.kind() == kind
-					? Registries.ITEM.getId(stack.getItem()).toString()
-					: "";
-			if (!Objects.equals(ArmorUpgradeData.partId(chest, kind), installedId)) {
-				ArmorUpgradeData.setPartId(chest, kind, installedId);
+		int start = section * 3;
+		for (int offset = 0; offset < 3; offset++) {
+			ArmorPartItem.Kind kind =
+					ArmorPartItem.Kind.values()[start + offset];
+			ItemStack stack = partInventory.getStack(start + offset);
+			boolean valid = stack.getItem() instanceof ArmorPartItem part
+					&& part.kind() == kind;
+			ItemStack desired = valid ? stack.copyWithCount(1) : ItemStack.EMPTY;
+			String installedId = valid
+					? Registries.ITEM.getId(stack.getItem()).toString() : "";
+			ItemStack stored = ArmorUpgradeData.storedPart(
+					container, kind, registries);
+			if (stored.isEmpty()) {
+				stored = stackForId(
+						ArmorUpgradeData.partId(container, kind), kind);
+			}
+			if (!ItemStack.areEqual(stored, desired)
+					|| !Objects.equals(
+							ArmorUpgradeData.partId(container, kind),
+							installedId)) {
 				changed = true;
 			}
+			ArmorUpgradeData.setStoredPart(
+					container, kind, desired, registries);
 		}
 		return changed;
 	}
@@ -225,6 +280,15 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 	@Override
 	public ScreenHandlerType<?> getType() {
 		return TYPE;
+	}
+
+	@Override
+	public void onClosed(PlayerEntity player) {
+		// Persist modules that were inserted immediately before closing. The
+		// slot inventory is only a working copy of data embedded in armor.
+		syncTableState();
+		partInventory.clear();
+		super.onClosed(player);
 	}
 
 	@Override

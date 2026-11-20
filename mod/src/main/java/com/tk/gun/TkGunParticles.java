@@ -50,6 +50,8 @@ public final class TkGunParticles {
 	public static final SimpleParticleType ROSE_QUARTZ_TRAIL = FabricParticleTypes.simple(true);
 	/** Veritas ATK_3 authored thunder flash. */
 	public static final SimpleParticleType THUNDER = FabricParticleTypes.simple(true);
+	/** Veritas ATK_hold_over final-hit authored thunder bloom. */
+	public static final SimpleParticleType THUNDER_BIG = FabricParticleTypes.simple(true);
 	/** Veritas held-attack flash from the authored 48x288 strip. */
 	public static final SimpleParticleType FLASH = FabricParticleTypes.simple(true);
 	/** Molten golem convergence particle that follows its rendered locator bone. */
@@ -78,6 +80,7 @@ public final class TkGunParticles {
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_explo"), ROSE_QUARTZ_IMPACT);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("rose_quartz_trail"), ROSE_QUARTZ_TRAIL);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("thunder"), THUNDER);
+		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("thunder_big"), THUNDER_BIG);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("flash"), FLASH);
 		Registry.register(Registries.PARTICLE_TYPE, TkGun.id("golem_energy_converge"),
 				GOLEM_ENERGY_CONVERGE);

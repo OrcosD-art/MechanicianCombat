@@ -1,6 +1,7 @@
 package com.tk.gun.client.rig;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.api.FortressDestroyerGun;
 import com.tk.gun.client.TkGunClient;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.RenderLayer;
@@ -8,13 +9,18 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
 import software.bernie.geckolib.cache.object.GeoBone;
 import software.bernie.geckolib.cache.object.GeoCube;
+import software.bernie.geckolib.cache.object.GeoQuad;
+import software.bernie.geckolib.cache.object.GeoVertex;
 import software.bernie.geckolib.renderer.GeoRenderer;
 import software.bernie.geckolib.renderer.layer.GeoRenderLayer;
+
+import java.util.Map;
 
 /**
  * 枪那一份：同一份几何里的**枪件骨骼**，换作者的枪贴图补画一遍。
@@ -35,6 +41,16 @@ import software.bernie.geckolib.renderer.layer.GeoRenderLayer;
  * 之前那句"GeckoLib 不读 scale"是错的，加门禁反而把作者做好的特效盖掉了。
  */
 public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
+	/** Fortress shell box UVs in its 64x64 gun texture. */
+	private static final Map<Direction, float[]> FORTRESS_SHELL_UVS = Map.of(
+			Direction.NORTH, new float[]{63, 45, 64, 44},
+			Direction.EAST, new float[]{59, 45, 64, 44},
+			Direction.SOUTH, new float[]{59, 45, 60, 44},
+			Direction.WEST, new float[]{64, 45, 59, 44},
+			Direction.UP, new float[]{59, 45, 64, 44},
+			Direction.DOWN, new float[]{64, 45, 59, 44});
+	private static final float FORTRESS_TEXTURE_SIZE = 64.0F;
+
 	public BowgunGunLayer(GeoRenderer<BowgunRig> renderer) {
 		super(renderer);
 	}
@@ -43,6 +59,9 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 	public void renderForBone(MatrixStack poseStack, BowgunRig animatable, GeoBone bone, RenderLayer type,
 							  VertexConsumerProvider bufferSource, VertexConsumer buffer, float partialTick,
 							  int packedLight, int packedOverlay) {
+		if (!TkGun.holdingGun(animatable.player())) {
+			return;
+		}
 		// 待机/收起时 fire 父骨的 scaleY = 0（特效平面被压平）；一旦它变成 1，说明**没有动画在跑**
 		// （骨骼被重置回 geo 初始值）—— 也就是用户看到的"枪卡在原位、粒子特效全摊出来"。
 		//
@@ -68,31 +87,91 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 				|| BowgunCloseCombatEffectLayer.isEffectBone(bone.getName())) {
 			return;
 		}
-		// **枪口焰那一组（`fire` / `fire1..4`）不要光照阴影**（用户 2026-10-16："如果可行请去掉此组中
-		// 模型的阴影效果"）：改用**自发光（emissive）**那一层画 —— 不参与世界光照与法线明暗，
-		// 亮度恒定，夜里/背光处也是亮的，火焰不会再被"打暗"。
-		boolean flash = bone.getName().startsWith("fire")
+		// r853 fire: additive eyes layer, with emissive/full-light sampling.
+		// change5 and the abyssal case keep their non-additive emissive branch.
+		boolean muzzleFire = bone.getName().startsWith("fire");
+		boolean glowPart = muzzleFire
 				|| bone.getName().startsWith("change5");
 		// 枪换一张贴图 → 换一个 buffer；下一个骨骼 GeckoLib 会自己把缓冲刷回来
 		// （GeoRenderer.checkAndRefreshBuffer 每根骨骼都会重新取）。
-		Identifier gunTexture = TkGun.definition(BowgunRig.CURRENT_PLAYER).gunTexture();
+		boolean shellCasing = BowgunRigRenderer
+				.isShellCasingBone(bone.getName());
+		Identifier gunTexture = shellCasing
+				? FortressDestroyerGun.DEFINITION.gunTexture()
+				: TkGun.definition(animatable.player()).gunTexture();
 		boolean abyssalCase = "case".equals(bone.getName())
-				&& TkGun.definition(BowgunRig.CURRENT_PLAYER).id()
+				&& TkGun.definition(animatable.player()).id()
 						.equals(TkGun.id("abyssal_ancient_cannon"));
-		boolean emissive = abyssalCase || flash;
-		RenderLayer gunLayer = flash
-				|| abyssalCase
-				? RenderLayer.getEntityTranslucentEmissive(gunTexture, false)
-				: this.renderer.getRenderType(animatable, gunTexture, bufferSource, partialTick);
+		boolean emissive = abyssalCase || glowPart;
+		RenderLayer gunLayer = muzzleFire
+				? RenderLayer.getEyes(gunTexture)
+				: glowPart || abyssalCase
+						? RenderLayer.getEntityTranslucentEmissive(
+								gunTexture, false)
+						: this.renderer.getRenderType(animatable, gunTexture,
+								bufferSource, partialTick);
 		VertexConsumer gunBuffer = bufferSource.getBuffer(gunLayer);
 		int light = emissive
 				? net.minecraft.client.render.LightmapTextureManager.MAX_LIGHT_COORDINATE
 				: packedLight;
 		for (GeoCube cube : bone.getCubes()) {
 			poseStack.push();
-			this.renderer.renderCube(poseStack, cube, gunBuffer, light, packedOverlay, 0xFFFFFFFF);
+			this.renderer.renderCube(poseStack,
+					shellCasing ? remapFortressShellUvs(cube) : cube,
+					gunBuffer, light, packedOverlay, 0xFFFFFFFF);
 			poseStack.pop();
 		}
+	}
+
+	/**
+	 * The added guns reuse the Fortress shell geometry but inherited different
+	 * atlas coordinates. Remap each face proportionally so one shared shell
+	 * texture keeps the authored mirroring and face rotation.
+	 */
+	private static GeoCube remapFortressShellUvs(GeoCube cube) {
+		GeoQuad[] source = cube.quads();
+		GeoQuad[] remapped = new GeoQuad[source.length];
+		for (int index = 0; index < source.length; index++) {
+			GeoQuad quad = source[index];
+			if (quad == null) {
+				continue;
+			}
+			float[] target = FORTRESS_SHELL_UVS.get(quad.direction());
+			if (target == null) {
+				remapped[index] = quad;
+				continue;
+			}
+			GeoVertex[] vertices = quad.vertices();
+			float minU = Float.POSITIVE_INFINITY;
+			float maxU = Float.NEGATIVE_INFINITY;
+			float minV = Float.POSITIVE_INFINITY;
+			float maxV = Float.NEGATIVE_INFINITY;
+			for (GeoVertex vertex : vertices) {
+				minU = Math.min(minU, vertex.texU());
+				maxU = Math.max(maxU, vertex.texU());
+				minV = Math.min(minV, vertex.texV());
+				maxV = Math.max(maxV, vertex.texV());
+			}
+			float spanU = maxU - minU;
+			float spanV = maxV - minV;
+			GeoVertex[] updated = new GeoVertex[vertices.length];
+			for (int vertexIndex = 0; vertexIndex < vertices.length; vertexIndex++) {
+				GeoVertex vertex = vertices[vertexIndex];
+				float amountU = spanU <= 1.0E-8F
+						? 0.0F : (vertex.texU() - minU) / spanU;
+				float amountV = spanV <= 1.0E-8F
+						? 0.0F : (vertex.texV() - minV) / spanV;
+				float targetU = target[0] + (target[2] - target[0]) * amountU;
+				float targetV = target[1] + (target[3] - target[1]) * amountV;
+				updated[vertexIndex] = vertex.withUVs(
+						targetU / FORTRESS_TEXTURE_SIZE,
+						targetV / FORTRESS_TEXTURE_SIZE);
+			}
+			remapped[index] = new GeoQuad(updated, quad.normal(),
+					quad.direction());
+		}
+		return new GeoCube(remapped, cube.pivot(), cube.rotation(),
+				cube.size(), cube.inflate(), cube.mirror());
 	}
 
 	private static float lastFireScaleY = -1.0F;

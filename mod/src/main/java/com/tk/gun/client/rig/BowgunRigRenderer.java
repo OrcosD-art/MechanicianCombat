@@ -48,12 +48,18 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	/** 作者新增的近端定位器；它与 locator 的连线就是视觉枪管中心线。 */
 	private static final String AIM_BONE = "aim";
 	/** 当前渲染帧两个定位器的世界坐标（body 子树遍历结束后合成中心线）。 */
-	private static Vec3d lastAimPos;
-	private static Vec3d lastMuzzlePos;
+	private Vec3d lastAimPos;
+	private Vec3d lastMuzzlePos;
 	/** Recent animated locator position for each rendered player. */
 	private static final Map<Integer, LocatorSample> LOCATOR_POSITIONS = new HashMap<>();
 	/** Recent animated near-end aim locator for each rendered player. */
 	private static final Map<Integer, LocatorSample> AIM_POSITIONS = new HashMap<>();
+	/** Animated left-arm origin used as the Soul Anchor chain endpoint. */
+	private static final Map<Integer, LocatorSample> ARM_LEFT_POSITIONS =
+			new HashMap<>();
+	/** Root-level E1 marker used by the ATK3 round attack particle. */
+	private static final Map<Integer, LocatorSample> E1_POSITIONS =
+			new HashMap<>();
 	private record LocatorSample(Vec3d position, long worldTime) {
 	}
 	/** 弹匣相关骨骼：打空后整组隐藏。 */
@@ -77,6 +83,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	private static final Set<String> SHELL_BONES = Set.of(
 			SHELL_PARENT_BONE,
 			"shell", "shell2", "shell3", "shell4", "shell5", "shell6", "shell7");
+
+	public static boolean isShellCasingBone(String name) {
+		return SHELL_BONES.contains(name)
+				&& !SHELL_PARENT_BONE.equals(name);
+	}
 	private static final Set<String> SKILL_PART_BONES =
 			Set.of("skill_1", "fire_skill",
 					"step_1", "step_2", "step_3", "step_4");
@@ -97,6 +108,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			"airflow1", "airflow2", "airflow3");
 	/** 上半身那根：抬仰角就拧它（理由见 renderRecursively 里的注释）。 */
 	private static final String CHEST_BONE = "chest";
+	private static final String E1_BONE = "E1";
 	/** rig 的**根骨**（`body`，没有父骨骼）：瞄准对齐时整条模型都挂在它下面。 */
 	private static final String ROOT_BONE = "body";
 	/** 这位玩家现在是不是**正在开火**（= 枪口焰/弹壳该出现的那几帧）。 */
@@ -110,8 +122,9 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	/** 空弹夹时用它把 poseStack 缩到看不见（不能缩到 0：矩阵会退化）。 */
 	private static final float HIDDEN_SCALE = 1.0E-4F;
 
-	public BowgunRigRenderer(EntityRendererFactory.Context context) {
-		super(context, new BowgunRigModel(), BowgunRig.INSTANCE);
+	public BowgunRigRenderer(EntityRendererFactory.Context context,
+			BowgunRig animatable) {
+		super(context, new BowgunRigModel(), animatable);
 		addRenderLayer(new BowgunGunLayer(this));
 		addRenderLayer(new BowgunCloseCombatEffectLayer(this));
 		addRenderLayer(new BowgunEffectSkillLayer(this));
@@ -160,9 +173,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
 		BowgunCloseCombatEffectLayer.applyScheduledVisibility(
-				bone, renderedEntity, partialTick);
+				bone, renderedEntity, partialTick,
+				animatable.currentUpperAnimation(),
+				animatable.currentAnimation());
 		if ("body".equals(name)
-				&& "ATK_3_hold".equals(BowgunRig.currentUpperAnimation())) {
+				&& "ATK_3_hold".equals(animatable.currentUpperAnimation())) {
 			// ATK_3_hold has no body channel. Keep its inherited horizontal yaw,
 			// but remove the run animation's 27.5-degree parent-bone pitch.
 			bone.setRotX(0.0F);
@@ -293,6 +308,13 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			Vector3f d = m.transformDirection(new Vector3f(0.0F, 0.0F, -1.0F), new Vector3f());
 			lastMuzzlePos = new Vec3d(wp.x, wp.y, wp.z);
 		}
+		if (currentFrame && E1_BONE.equals(name)) {
+			org.joml.Vector3d world = bone.getWorldPosition();
+			E1_POSITIONS.put(renderedEntity.getId(),
+					new LocatorSample(new Vec3d(
+							world.x, world.y, world.z),
+							renderedEntity.getWorld().getTime()));
+		}
 		// 诊断（-Dmechaniciancombat.demo 才打）：候选点对照，定下来之后可以删
 		if (local && MUZZLE_BONE.equals(name) && VERBOSE && (probe++ % 60) == 0) {
 			Matrix4f m = poseStack.peek().getPositionMatrix();
@@ -406,6 +428,12 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 
 		super.renderRecursively(poseStack, animatable, bone, type, bufferSource, buffer, isReRender, partialTick,
 				packedLight, packedOverlay, colour);
+		if (currentFrame && "arm_left".equals(name)) {
+			org.joml.Vector3d world = bone.getWorldPosition();
+			ARM_LEFT_POSITIONS.put(renderedEntity.getId(),
+					new LocatorSample(new Vec3d(world.x, world.y, world.z),
+							renderedEntity.getWorld().getTime()));
+		}
 		if (currentFrame && POSE_BONES.contains(name)) {
 			playerPose.put(name, new BowgunPlayerAnimatorPose.BonePose(
 					bone.getPosX(), bone.getPosY() + chestBobPx, bone.getPosZ(),
@@ -418,7 +446,8 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 							? TkGun.definition(player).animationResource()
 							: TkGun.id("animations/entity/bowgun_rig.animation.json");
 			BowgunPlayerAnimatorPose.capture(
-					renderedEntity.getId(), animationResource, playerPose);
+					renderedEntity.getId(), animationResource, playerPose,
+					animatable.currentPlayerPoseAnimations());
 		}
 		if (chestBobTransform) {
 			poseStack.pop();
@@ -460,6 +489,28 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		return sample.position;
 	}
 
+	/** Latest animated {@code arm_left} origin, rejected when stale. */
+	public static Vec3d armLeftPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		LocatorSample sample = ARM_LEFT_POSITIONS.get(playerId);
+		if (client.world == null || sample == null
+				|| Math.abs(client.world.getTime() - sample.worldTime()) > 3L) {
+			return null;
+		}
+		return sample.position;
+	}
+
+	/** Latest rendered root-level E1 marker, rejected when stale. */
+	public static Vec3d e1Position(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		LocatorSample sample = E1_POSITIONS.get(playerId);
+		if (client.world == null || sample == null
+				|| Math.abs(client.world.getTime() - sample.worldTime()) > 3L) {
+			return null;
+		}
+		return sample.position;
+	}
+
 	/**
 	 * 精确复刻作者 walk_front/back/left/right 里 `chest.position.y` 的 1 秒循环：
 	 * 0→-1→+0.1→0（前半圈），0→-1→0（后半圈）。单位仍是模型像素。
@@ -492,6 +543,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		return e != null && (e.state == TkGun.State.RELOAD
 				|| e.state == TkGun.State.ROLL
 				|| e.state == TkGun.State.ROLL_TO_IDLE
+				|| e.state == TkGun.State.ROLL_TO_RUN
 				|| e.state == TkGun.State.SLIDE
 				|| e.state == TkGun.State.SLIDE_READY
 				|| e.state == TkGun.State.OVERHEAT

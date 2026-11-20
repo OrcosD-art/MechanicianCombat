@@ -38,6 +38,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 	public static final int CORE_PART_SLOT = 0;
 	public static final int LAUNCHER_PART_SLOT = 1;
 	public static final int MISSILE_BOX_PART_SLOT = 3;
+	public static final int GOLEM_CAPSULE_PART_SLOT = 3;
 
 	private static final int[][] PART_SLOT_POSITIONS = {
 			{8, 30},
@@ -91,8 +92,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				public boolean canInsert(ItemStack stack) {
 					return stack.getItem() instanceof BackpackPartItem part
 								&& acceptsPart(fixedIndex, part.kind())
-								&& (fixedIndex != MISSILE_BOX_PART_SLOT
-								|| hasJumpThrusterInstalled());
+								&& upgradeSlotAccepts(fixedIndex, part.kind());
 				}
 			});
 		}
@@ -188,6 +188,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				stowInstalledPart(lastBackpack, BackpackPartItem.Kind.CORE);
 					stowInstalledLauncher(lastBackpack);
 					stowInstalledMissileBox(lastBackpack);
+					stowInstalledGolemCapsule(lastBackpack);
 				tableInventory.markDirty();
 				sendContentUpdates();
 			}
@@ -200,6 +201,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			boolean preserveCore = false;
 			boolean preserveLauncher = false;
 				boolean preserveMissileBox = false;
+				boolean preserveGolemCapsule = false;
 			if (replaced) {
 				if (BackpackUpgradeData.hasCore(backpack)
 						&& !hasPart(BackpackPartItem.Kind.CORE)) {
@@ -227,6 +229,14 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 							preserveMissileBox = true;
 						}
 					}
+					if (BackpackUpgradeData.hasGolemCapsule(backpack)
+							&& !hasGolemCapsulePart()) {
+						if (insertPart(BackpackPartItem.Kind.GOLEM_CAPSULE)) {
+							preserveGolemCapsule = false;
+						} else {
+							preserveGolemCapsule = true;
+						}
+					}
 			}
 			int coreSlot = partSlot(BackpackPartItem.Kind.CORE);
 			ItemStack launcherPart = launcherPartStack();
@@ -240,6 +250,10 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				boolean missileBox = launcher
 						&& launcherType == BackpackUpgradeData.LauncherType.JUMP_THRUSTER
 						&& (!missileBoxPartStack().isEmpty() || preserveMissileBox);
+				boolean golemCapsule = launcher
+						&& launcherType == BackpackUpgradeData.LauncherType.SUMMON_ANTENNA
+						&& (!golemCapsulePartStack().isEmpty()
+								|| preserveGolemCapsule);
 			BackpackUpgradeData.setCore(backpack, core);
 			BackpackUpgradeData.setLauncherType(backpack,
 					launcher ? launcherType : BackpackUpgradeData.LauncherType.NONE);
@@ -254,6 +268,9 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				BackpackUpgradeData.setMissileBox(backpack, missileBox);
 				BackpackUpgradeData.setMissileBoxSlot(
 						backpack, missileBox ? MISSILE_BOX_PART_SLOT : -1);
+				BackpackUpgradeData.setGolemCapsule(backpack, golemCapsule);
+				BackpackUpgradeData.setGolemCapsuleSlot(
+						backpack, golemCapsule ? GOLEM_CAPSULE_PART_SLOT : -1);
 			lastBackpack = backpack.copy();
 			tableInventory.markDirty();
 		} finally {
@@ -285,6 +302,21 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			ItemStack stack = tableInventory.getStack(slot);
 			if (stack.getItem() instanceof BackpackPartItem part
 					&& part.kind() == BackpackPartItem.Kind.MISSILE_BOX) {
+				removeOne(tableInventory, slot, stack);
+				return;
+			}
+		}
+	}
+
+	private void stowInstalledGolemCapsule(ItemStack backpack) {
+		if (!BackpackUpgradeData.hasGolemCapsule(backpack)) {
+			return;
+		}
+		for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
+				slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
+			ItemStack stack = tableInventory.getStack(slot);
+			if (stack.getItem() instanceof BackpackPartItem part
+					&& part.kind() == BackpackPartItem.Kind.GOLEM_CAPSULE) {
 				removeOne(tableInventory, slot, stack);
 				return;
 			}
@@ -341,13 +373,42 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				? stack : ItemStack.EMPTY;
 	}
 
+	private ItemStack golemCapsulePartStack() {
+		ItemStack stack = tableInventory.getStack(
+				BackpackModificationTableBlockEntity.PART_SLOT_START
+						+ GOLEM_CAPSULE_PART_SLOT);
+		return stack.getItem() instanceof BackpackPartItem part
+				&& part.kind() == BackpackPartItem.Kind.GOLEM_CAPSULE
+				? stack : ItemStack.EMPTY;
+	}
+
 	private boolean hasMissileBoxPart() {
 		return !missileBoxPartStack().isEmpty();
+	}
+
+	private boolean hasGolemCapsulePart() {
+		return !golemCapsulePartStack().isEmpty();
 	}
 
 	private boolean hasJumpThrusterInstalled() {
 		return launcherType(launcherPartStack())
 				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+	}
+
+	private boolean hasSummonAntennaInstalled() {
+		return launcherType(launcherPartStack())
+				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+	}
+
+	private boolean upgradeSlotAccepts(int slot, BackpackPartItem.Kind kind) {
+		if (slot != MISSILE_BOX_PART_SLOT) {
+			return true;
+		}
+		return switch (kind) {
+			case MISSILE_BOX -> hasJumpThrusterInstalled();
+			case GOLEM_CAPSULE -> hasSummonAntennaInstalled();
+			default -> false;
+		};
 	}
 
 	private int partSlot(BackpackPartItem.Kind kind) {
@@ -389,6 +450,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			ItemStack core = ItemStack.EMPTY;
 			ItemStack launcher = ItemStack.EMPTY;
 				ItemStack missileBox = ItemStack.EMPTY;
+				ItemStack golemCapsule = ItemStack.EMPTY;
 			for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
 					slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
 				ItemStack stack = tableInventory.getStack(slot);
@@ -409,6 +471,9 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 					} else if (kind == BackpackPartItem.Kind.MISSILE_BOX
 							&& missileBox.isEmpty()) {
 						missileBox = stack.copy();
+					} else if (kind == BackpackPartItem.Kind.GOLEM_CAPSULE
+							&& golemCapsule.isEmpty()) {
+						golemCapsule = stack.copy();
 				} else {
 					owner.getInventory().offerOrDrop(stack.copy());
 				}
@@ -423,7 +488,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				tableInventory.setStack(
 						BackpackModificationTableBlockEntity.PART_SLOT_START
 								+ MISSILE_BOX_PART_SLOT,
-						missileBox);
+						missileBox.isEmpty() ? golemCapsule : missileBox);
 			tableInventory.markDirty();
 		} finally {
 			installing = false;
@@ -435,6 +500,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		return switch (kind) {
 			case CORE -> CORE_PART_SLOT;
 			case MISSILE_BOX -> MISSILE_BOX_PART_SLOT;
+			case GOLEM_CAPSULE -> GOLEM_CAPSULE_PART_SLOT;
 			default -> LAUNCHER_PART_SLOT;
 		};
 	}
@@ -449,7 +515,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 							|| kind == BackpackPartItem.Kind.JUMP_THRUSTER
 							|| kind == BackpackPartItem.Kind.BATTLE_BANNER;
 			case MISSILE_BOX_PART_SLOT ->
-					kind == BackpackPartItem.Kind.MISSILE_BOX;
+					kind == BackpackPartItem.Kind.MISSILE_BOX
+							|| kind == BackpackPartItem.Kind.GOLEM_CAPSULE;
 			default -> false;
 		};
 	}
@@ -477,6 +544,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			case JUMP_THRUSTER -> new ItemStack(TkGunServer.JUMP_BACKPACK_THRUSTER);
 			case MISSILE_BOX -> new ItemStack(TkGunServer.MISSILE_BOX);
 			case BATTLE_BANNER -> new ItemStack(TkGunServer.WAR_BANNER);
+			case GOLEM_CAPSULE ->
+					new ItemStack(TkGunServer.GOLEM_DISPATCH_CAPSULE);
 		};
 	}
 

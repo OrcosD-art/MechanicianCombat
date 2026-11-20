@@ -1,0 +1,37 @@
+{
+	"credit": "Made with Blockbench",
+	"textures": {
+		"0": "mechaniciancombat:item/soul_anchor_projectile",
+		"particle": "mechaniciancombat:item/soul_anchor_projectile"
+	},
+	"elements": [
+		{
+			"from": [-1, 0, -1],
+			"to": [1, 5, 1],
+			"faces": {
+				"north": {"uv": [5, 0, 0, 2], "rotation": 90, "texture": "#0"},
+				"east": {"uv": [0, 0, 5, 2], "rotation": 90, "texture": "#0"},
+				"south": {"uv": [0, 1, 5, 3], "rotation": 90, "texture": "#0"},
+				"west": {"uv": [5, 1, 0, 3], "rotation": 90, "texture": "#0"},
+				"up": {"uv": [4, 1, 6, 3], "rotation": 90, "texture": "#0"},
+				"down": {"uv": [4, 2, 6, 4], "rotation": 180, "texture": "#0"}
+			}
+		},
+		{
+			"from": [-2.5, 7, 0],
+			"to": [2.5, 9, 0],
+			"rotation": {"angle": 45, "axis": "y", "origin": [0, 9, 0]},
+			"faces": {
+				"north": {"uv": [5, 10, 7, 5], "rotation": 90, "texture": "#0"}
+			}
+		},
+		{
+			"from": [-2.5, 5, 0],
+			"to": [2.5, 9, 0],
+			"rotation": {"angle": -45, "axis": "y", "origin": [0, 9, 0]},
+			"faces": {
+				"north": {"uv": [0, 10, 4, 5], "rotation": 90, "texture": "#0"}
+			}
+		}
+	]
+}

@@ -33,6 +33,9 @@ public final class SprintDirectionCorrection {
 
 		ClientPlayerEntity player = client.player;
 		int id = player.getId();
+		if (GunClientState.slideMovementLocked(id)) {
+			return false;
+		}
 		if (GunClientState.focusish(id)) {
 			return false;
 		}
@@ -98,7 +101,7 @@ public final class SprintDirectionCorrection {
 		player.prevYaw = targetYaw;
 	}
 
-	private static float movementCameraYaw(MinecraftClient client) {
+	public static float movementCameraYaw(MinecraftClient client) {
 		if (FallbackShoulderCamera.isFallbackActive(client)) {
 			return FallbackShoulderCamera.cameraYaw();
 		}

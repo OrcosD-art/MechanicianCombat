@@ -44,7 +44,7 @@ public final class HelmetClientState {
 		if (state.expanded()) {
 			return state.durationTicks() > 0
 					? new Pose("展开", elapsedSeconds(state))
-					: new Pose("展开", 0.5F);
+					: new Pose("展开", 0.625F);
 		}
 		return state.durationTicks() > 0
 				? new Pose("收起", elapsedSeconds(state))

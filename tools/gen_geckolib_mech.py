@@ -290,6 +290,7 @@ SOUND_NAMES = {
     "散热.ogg": "vent",
     "栓声.ogg": "bolt",
     "翻滚.ogg": "roll",
+    "chain.mp3": "chain",
 }
 
 

@@ -1,0 +1,30 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "CDC",
+    "CEC"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:red_dye"
+    },
+    "B": {
+      "item": "minecraft:end_crystal"
+    },
+    "C": {
+      "item": "minecraft:string"
+    },
+    "D": {
+      "item": "minecraft:golden_chestplate"
+    },
+    "E": {
+      "item": "minecraft:totem_of_undying"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:undying_totem",
+    "count": 1
+  }
+}

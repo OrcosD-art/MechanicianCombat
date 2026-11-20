@@ -20,23 +20,23 @@ public class BowgunRigModel extends DefaultedEntityGeoModel<BowgunRig> {
 		super(Identifier.of("mechaniciancombat", "bowgun_rig"));
 	}
 
-	private static GunDefinition currentDefinition() {
-		return TkGun.definition(BowgunRig.CURRENT_PLAYER);
+	private static GunDefinition currentDefinition(BowgunRig animatable) {
+		return TkGun.definition(animatable.player());
 	}
 
 	@Override
 	public Identifier getModelResource(BowgunRig animatable, GeoRenderer<BowgunRig> renderer) {
-		return currentDefinition().modelResource();
+		return currentDefinition(animatable).modelResource();
 	}
 
 	@Override
 	public Identifier getModelResource(BowgunRig animatable) {
-		return currentDefinition().modelResource();
+		return currentDefinition(animatable).modelResource();
 	}
 
 	@Override
 	public Identifier getAnimationResource(BowgunRig animatable) {
-		return currentDefinition().animationResource();
+		return currentDefinition(animatable).animationResource();
 	}
 
 	@Override

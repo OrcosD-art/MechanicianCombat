@@ -19,7 +19,7 @@ public final class GunHud {
 				|| client.currentScreen != null) {
 			return;
 		}
-		if (!TkGun.holdingGun(client.player)) {
+		if (!TkGun.holdingGun(client.player) || TkGun.isMeleeWeapon(client.player)) {
 			return;
 		}
 		int id = client.player.getId();

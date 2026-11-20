@@ -115,7 +115,8 @@ public final class AmmoSwitchHud {
 
 	public static void tick(MinecraftClient client) {
 		if (client.player == null || client.world == null || client.currentScreen != null
-				|| !TkGun.holdingGun(client.player)) {
+				|| !TkGun.holdingGun(client.player)
+				|| TkGun.isMeleeWeapon(client.player)) {
 			reset();
 			return;
 		}
@@ -168,7 +169,8 @@ public final class AmmoSwitchHud {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (phase == Phase.HIDDEN || client.player == null || client.world == null
 				|| client.options.hudHidden || client.currentScreen != null
-				|| !TkGun.holdingGun(client.player)) {
+				|| !TkGun.holdingGun(client.player)
+				|| TkGun.isMeleeWeapon(client.player)) {
 			return;
 		}
 

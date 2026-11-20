@@ -6,7 +6,8 @@ import java.util.Map;
 public final class CombatBackpackAnimation {
 	public enum Phase {
 		AIM, CD, READY, MAINTENANCE, READY_TO_FLY, FLYING, CLOSE,
-		MISSILE_AIM, MISSILE_CD
+		MISSILE_AIM, MISSILE_CD,
+		BANNER_READY, BANNER_AIM, BANNER_CD
 	}
 
 	private static final int PREVIEW_RENDER_ID = -1;

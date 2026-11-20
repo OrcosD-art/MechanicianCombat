@@ -46,6 +46,13 @@ public abstract class OffhandPlacementGuardMixin {
 			ci.cancel();
 			return;
 		}
+		if (BackpackLauncherRules.usesAmmoStorage(player)
+				&& (clickedOffhand
+						|| (actionType == SlotActionType.SWAP && button == 40))) {
+			// Ammunition belongs to the dedicated inventory slot at 94,62.
+			ci.cancel();
+			return;
+		}
 		if (actionType == SlotActionType.QUICK_MOVE) {
 			return;
 		}
@@ -92,4 +99,5 @@ public abstract class OffhandPlacementGuardMixin {
 		}
 		return false;
 	}
+
 }

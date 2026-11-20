@@ -6,14 +6,18 @@ import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtElement;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryWrapper;
 
 import java.util.Locale;
 
 /** Persistent module and cooldown state stored on the Mechanician chestplate. */
 public final class ArmorUpgradeData {
 	public static final int MAX_SHIELD_CHARGES = 3;
-	public static final int HELMET_EXPAND_TICKS = 10;
-	public static final int HELMET_FOLD_TICKS = 13;
+	/** Both authored helmet clips are 0.75 seconds at 20 ticks per second. */
+	public static final int HELMET_EXPAND_TICKS = 15;
+	public static final int HELMET_FOLD_TICKS = 15;
 	private static final String SHIELD_COOLDOWN_UNTIL = "mechaniciancombat_shield_cooldown_until";
 	private static final String TOTEM_COOLDOWN_UNTIL = "mechaniciancombat_totem_cooldown_until";
 	private static final String SHIELD_CHARGES = "mechaniciancombat_shield_charges";
@@ -26,6 +30,7 @@ public final class ArmorUpgradeData {
 			"mechaniciancombat_helmet_transition_started";
 	private static final String HELMET_TRANSITION_DURATION =
 			"mechaniciancombat_helmet_transition_duration";
+	private static final String PART_STACKS = "mechaniciancombat_armor_part_stacks";
 
 	private ArmorUpgradeData() {
 	}
@@ -42,7 +47,7 @@ public final class ArmorUpgradeData {
 	}
 
 	public static String partId(ItemStack chest, ArmorPartItem.Kind kind) {
-		if (!isChestplate(chest)) {
+		if (!isPartContainer(chest, kind)) {
 			return "";
 		}
 		return customData(chest).getString(partKey(kind));
@@ -54,7 +59,7 @@ public final class ArmorUpgradeData {
 
 	public static void setPartId(ItemStack chest, ArmorPartItem.Kind kind,
 								 String itemId) {
-		if (!isChestplate(chest)) {
+		if (!isPartContainer(chest, kind)) {
 			return;
 		}
 		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, chest, nbt -> {
@@ -64,6 +69,81 @@ public final class ArmorUpgradeData {
 				nbt.putString(partKey(kind), itemId);
 			}
 		});
+	}
+
+	/**
+	 * Returns the currently equipped armor item that owns the requested module
+	 * group. C parts live on the chestplate, T parts on the leggings and F parts
+	 * on the boots.
+	 */
+	public static ItemStack equippedPartContainer(PlayerEntity player,
+			ArmorPartItem.Kind kind) {
+		ItemStack stack = player.getEquippedStack(kind.equipmentSlot());
+		return isPartContainer(stack, kind) ? stack : ItemStack.EMPTY;
+	}
+
+	public static boolean isPartContainer(ItemStack stack,
+			ArmorPartItem.Kind kind) {
+		if (stack == null || stack.isEmpty()
+				|| !(stack.getItem() instanceof MechanicianArmorItem armor)) {
+			return false;
+		}
+		return switch (kind.group()) {
+			case CHEST -> armor.piece() == MechanicianArmorPiece.CHESTPLATE;
+			case LEGS -> armor.piece() == MechanicianArmorPiece.LEGGINGS;
+			case FEET -> armor.piece() == MechanicianArmorPiece.BOOTS;
+		};
+	}
+
+	/**
+	 * Stores the complete module stack so item components survive equipping,
+	 * removing and re-equipping the armor piece.
+	 */
+	public static void setStoredPart(ItemStack container,
+			ArmorPartItem.Kind kind, ItemStack stack,
+			RegistryWrapper.WrapperLookup registries) {
+		if (!isPartContainer(container, kind)) {
+			return;
+		}
+		boolean valid = stack.getItem() instanceof ArmorPartItem part
+				&& part.kind() == kind;
+		String itemId = valid
+				? Registries.ITEM.getId(stack.getItem()).toString() : "";
+		NbtElement encoded = valid
+				? stack.copyWithCount(1).encode(registries) : null;
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, container, nbt -> {
+			if (valid) {
+				nbt.putString(partKey(kind), itemId);
+			} else {
+				nbt.remove(partKey(kind));
+			}
+			NbtCompound parts = nbt.getCompound(PART_STACKS);
+			if (encoded == null) {
+				parts.remove(kind.name());
+			} else {
+				parts.put(kind.name(), encoded.copy());
+			}
+			if (parts.getKeys().isEmpty()) {
+				nbt.remove(PART_STACKS);
+			} else {
+				nbt.put(PART_STACKS, parts);
+			}
+		});
+	}
+
+	public static ItemStack storedPart(ItemStack container,
+			ArmorPartItem.Kind kind, RegistryWrapper.WrapperLookup registries) {
+		if (!isPartContainer(container, kind)) {
+			return ItemStack.EMPTY;
+		}
+		NbtCompound parts = customData(container).getCompound(PART_STACKS);
+		if (!parts.contains(kind.name(), NbtElement.COMPOUND_TYPE)) {
+			return ItemStack.EMPTY;
+		}
+		ItemStack stack = ItemStack.fromNbtOrEmpty(
+				registries, parts.getCompound(kind.name()));
+		return stack.getItem() instanceof ArmorPartItem part
+				&& part.kind() == kind ? stack : ItemStack.EMPTY;
 	}
 
 	public static long shieldCooldownUntil(ItemStack chest) {

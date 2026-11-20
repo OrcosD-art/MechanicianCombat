@@ -2,6 +2,7 @@ package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
 import com.tk.gun.client.GunClientState;
+import com.tk.gun.client.SoulAnchorSkillClientState;
 import com.tk.gun.client.TkGunClient;
 import com.tk.gun.client.WarBannerSkillClientState;
 import net.minecraft.client.MinecraftClient;
@@ -24,7 +25,14 @@ public abstract class FocusMovementLockMixin {
 		boolean holdingGun = TkGun.holdingGun(client.player);
 		boolean warBannerLock =
 				WarBannerSkillClientState.usesGunAnimation(playerId);
-		if (!holdingGun && !warBannerLock) {
+		SoulAnchorSkillClientState.Entry soulAnchor =
+				SoulAnchorSkillClientState.get(playerId);
+		boolean soulAnchorGunLock =
+				SoulAnchorSkillClientState.gunAnchorLocksMovement(playerId);
+		boolean soulAnchorDragLock =
+				SoulAnchorSkillClientState.dragging(playerId);
+		if (!holdingGun && !warBannerLock && !soulAnchorGunLock
+				&& !soulAnchorDragLock) {
 			return;
 		}
 		boolean focusLock = GunClientState.focusish(playerId);
@@ -35,6 +43,10 @@ public abstract class FocusMovementLockMixin {
 				&& entry.shotIndex == 3 && !entry.meleeReturning
 				&& !entry.meleeHoldOver
 				&& entry.elapsed < TkGun.MELEE_ATK3_MAIN_END_TICK;
+		boolean kineticSwordLock = entry != null
+				&& entry.state == TkGun.State.MELEE
+				&& !entry.meleeReturning
+				&& TkGun.isMeleeWeapon(client.player);
 		boolean holdOverLock = entry != null && entry.state == TkGun.State.MELEE
 				&& entry.meleeHoldOver && !entry.meleeReturning;
 		boolean skillJumpLock = entry != null
@@ -56,9 +68,13 @@ public abstract class FocusMovementLockMixin {
 						|| entry.state == TkGun.State.FORTRESS_SKILL_GATHER);
 		boolean skillHitLock = entry != null
 				&& entry.state == TkGun.State.FORTRESS_SKILL_HIT;
-		boolean movementLock = focusLock || warBannerLock || dashMeleeHold || atk3Lock
+		boolean slideLock = GunClientState.slideMovementLocked(playerId);
+		boolean movementLock = focusLock || warBannerLock || soulAnchorGunLock
+				|| soulAnchorDragLock || dashMeleeHold || atk3Lock
+				|| kineticSwordLock
 				|| holdOverLock || skillJumpLock || fallAttackLock || skillGatherLock
-				|| skillHitLock || skillCrouchedLoadLock || slideSkillLoadLock;
+				|| skillHitLock || skillCrouchedLoadLock || slideSkillLoadLock
+				|| slideLock;
 		if (!movementLock && !skillLoadOnly) {
 			return;
 		}
@@ -68,6 +84,8 @@ public abstract class FocusMovementLockMixin {
 			self.movementSideways = 0.0F;
 		}
 		self.jumping = false;
-		self.sneaking = false;
+		if (!soulAnchorDragLock) {
+			self.sneaking = false;
+		}
 	}
 }

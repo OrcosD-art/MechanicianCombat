@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.serialization.JsonOps;
 import com.tk.gun.TkGun;
+import com.tk.gun.item.MechanicianBrewingRecipes;
 import com.tk.gun.net.RecipeEditorActionPayload;
 import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.entity.player.PlayerEntity;
@@ -37,17 +38,41 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
-/** Visual editor that writes standard crafting recipes into an enabled world data pack. */
+/** Visual crafting, furnace, and brewing recipe editor. */
 public final class RecipeEditorScreenHandler extends ScreenHandler {
+	public static final int PAGE_CRAFTING = 0;
+	public static final int PAGE_FURNACE = 1;
+	public static final int PAGE_BREWING = 2;
+	public static final int PAGE_COUNT = 3;
+
 	public static final int GRID_SIZE = 9;
-	public static final int RESULT_SLOT = GRID_SIZE;
-	public static final int PLAYER_SLOT_START = GRID_SIZE + 1;
+	public static final int CRAFTING_RESULT_SLOT = 9;
+	public static final int FURNACE_INPUT_SLOT = 10;
+	public static final int FURNACE_RESULT_SLOT = 11;
+	public static final int BREWING_INPUT_SLOT = 12;
+	public static final int BREWING_REAGENT_SLOT = 13;
+	public static final int BREWING_RESULT_SLOT = 14;
+	public static final int EDITOR_SLOT_COUNT = 15;
+	public static final int PLAYER_SLOT_START = EDITOR_SLOT_COUNT;
 	public static final int HOTBAR_SLOT_START = PLAYER_SLOT_START + 27;
-	public static final int GRID_X = 42;
-	public static final int GRID_Y = 32;
-	public static final int PLAYER_X = 19;
-	public static final int PLAYER_Y = 102;
-	public static final int HOTBAR_Y = 160;
+	/** Vanilla crafting-table slot positions. */
+	public static final int GRID_X = 30;
+	public static final int GRID_Y = 17;
+	public static final int RESULT_X = 124;
+	public static final int RESULT_Y = 35;
+	public static final int FURNACE_INPUT_X = 56;
+	public static final int FURNACE_INPUT_Y = 17;
+	public static final int FURNACE_RESULT_X = 116;
+	public static final int FURNACE_RESULT_Y = 35;
+	public static final int BREWING_INPUT_X = 79;
+	public static final int BREWING_INPUT_Y = 17;
+	public static final int BREWING_REAGENT_X = 56;
+	public static final int BREWING_REAGENT_Y = 51;
+	public static final int BREWING_RESULT_X = 102;
+	public static final int BREWING_RESULT_Y = 51;
+	public static final int PLAYER_X = 8;
+	public static final int PLAYER_Y = 84;
+	public static final int HOTBAR_Y = 142;
 
 	private static final String DATA_PACK_ID = "mechaniciancombat_live";
 	private static final String RECIPE_NAMESPACE = "mechaniciancombat_custom";
@@ -64,17 +89,35 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 	private final PlayerEntity owner;
 	private final Inventory ingredients = new SimpleInventory(GRID_SIZE);
 	private final Inventory result = new SimpleInventory(1);
+	private final Inventory furnaceInput = new SimpleInventory(1);
+	private final Inventory furnaceResult = new SimpleInventory(1);
+	private final Inventory brewingInput = new SimpleInventory(1);
+	private final Inventory brewingReagent = new SimpleInventory(1);
+	private final Inventory brewingResult = new SimpleInventory(1);
+	private int page = PAGE_CRAFTING;
 
 	public RecipeEditorScreenHandler(int syncId, PlayerInventory playerInventory) {
 		super(TYPE, syncId);
 		this.owner = playerInventory.player;
 		for (int row = 0; row < 3; row++) {
 			for (int column = 0; column < 3; column++) {
-				addSlot(new Slot(ingredients, column + row * 3,
-						GRID_X + column * 18, GRID_Y + row * 18));
+				addSlot(new PageSlot(ingredients, column + row * 3,
+						GRID_X + column * 18, GRID_Y + row * 18,
+						PAGE_CRAFTING));
 			}
 		}
-		addSlot(new Slot(result, 0, 134, 50));
+		addSlot(new PageSlot(result, 0, RESULT_X, RESULT_Y,
+				PAGE_CRAFTING));
+		addSlot(new PageSlot(furnaceInput, 0, FURNACE_INPUT_X,
+				FURNACE_INPUT_Y, PAGE_FURNACE));
+		addSlot(new PageSlot(furnaceResult, 0, FURNACE_RESULT_X,
+				FURNACE_RESULT_Y, PAGE_FURNACE));
+		addSlot(new PageSlot(brewingInput, 0, BREWING_INPUT_X,
+				BREWING_INPUT_Y, PAGE_BREWING));
+		addSlot(new PageSlot(brewingReagent, 0, BREWING_REAGENT_X,
+				BREWING_REAGENT_Y, PAGE_BREWING));
+		addSlot(new PageSlot(brewingResult, 0, BREWING_RESULT_X,
+				BREWING_RESULT_Y, PAGE_BREWING));
 		for (int row = 0; row < 3; row++) {
 			for (int column = 0; column < 9; column++) {
 				addSlot(new Slot(playerInventory,
@@ -89,8 +132,37 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 		}
 	}
 
+	public int getPage() {
+		return page;
+	}
+
+	public void setPage(int page) {
+		this.page = Math.max(PAGE_CRAFTING,
+				Math.min(PAGE_BREWING, page));
+	}
+
+	private final class PageSlot extends Slot {
+		private final int slotPage;
+
+		private PageSlot(Inventory inventory, int index, int x, int y,
+				int slotPage) {
+			super(inventory, index, x, y);
+			this.slotPage = slotPage;
+		}
+
+		@Override
+		public boolean isEnabled() {
+			return page == slotPage;
+		}
+
+		@Override
+		public boolean canBeHighlighted() {
+			return isEnabled();
+		}
+	}
+
 	public ItemStack resultTemplate() {
-		return result.getStack(0);
+		return outputForPage(page).getStack(0);
 	}
 
 	public void handleAction(ServerPlayerEntity player,
@@ -99,13 +171,19 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 				|| !player.hasPermissionLevel(2)) {
 			return;
 		}
+		setPage(action.page());
+		if (action.action() == RecipeEditorActionPayload.ACTION_SET_PAGE) {
+			return;
+		}
 		MinecraftServer server = player.getServer();
 		if (server == null) {
 			return;
 		}
 		try {
+			boolean delete =
+					action.action() == RecipeEditorActionPayload.ACTION_DELETE;
 			String recipeId = normalizeRecipeId(action.recipeId());
-			if (recipeId.isEmpty() && !action.delete()) {
+			if (recipeId.isEmpty() && !delete) {
 				recipeId = defaultRecipeId();
 			}
 			if (recipeId.isEmpty()) {
@@ -115,16 +193,18 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 			}
 			Path root = server.getSavePath(WorldSavePath.DATAPACKS)
 					.resolve(DATA_PACK_ID);
-			Path recipeDir = root.resolve("data")
-					.resolve(RECIPE_NAMESPACE).resolve("recipe");
+			Path recipeDir = recipeDirectory(root, page);
 			Files.createDirectories(recipeDir);
 			Path target = recipeDir.resolve(recipeId + ".json").normalize();
 			if (!target.startsWith(recipeDir.normalize())) {
 				throw new IllegalArgumentException("Invalid recipe path");
 			}
-			if (action.delete()) {
+			if (delete) {
 				Files.deleteIfExists(target);
 				writePackMetadata(root);
+				if (page == PAGE_BREWING) {
+					MechanicianBrewingRecipes.reload(server);
+				}
 				enableAndReload(server);
 				player.sendMessage(Text.translatable(
 						"message.mechaniciancombat.recipe_editor.deleted",
@@ -132,7 +212,10 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 				return;
 			}
 
-			JsonObject recipe = buildRecipe(action.shaped());
+			JsonObject recipe = page == PAGE_BREWING
+					? buildBrewingRecipe()
+					: buildRecipe(page, action.shaped(),
+							action.experience(), action.cookingTime());
 			if (recipe == null) {
 				player.sendMessage(Text.translatable(
 						"message.mechaniciancombat.recipe_editor.invalid_recipe"),
@@ -149,6 +232,9 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 			}
 			Files.writeString(target, GSON.toJson(recipe),
 					StandardCharsets.UTF_8);
+			if (page == PAGE_BREWING) {
+				MechanicianBrewingRecipes.reload(server);
+			}
 			enableAndReload(server);
 			player.sendMessage(Text.translatable(
 					"message.mechaniciancombat.recipe_editor.saved",
@@ -164,8 +250,9 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 		}
 	}
 
-	private JsonObject buildRecipe(boolean shaped) {
-		ItemStack output = result.getStack(0);
+	private JsonObject buildRecipe(int page, boolean shaped,
+			float experience, int cookingTime) {
+		ItemStack output = outputForPage(page).getStack(0);
 		if (output.isEmpty()) {
 			return null;
 		}
@@ -173,6 +260,21 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 		JsonObject resultJson = serializeStack(output);
 		if (resultJson == null) {
 			return null;
+		}
+		if (page == PAGE_FURNACE) {
+			ItemStack input = furnaceInput.getStack(0);
+			if (input.isEmpty()) {
+				return null;
+			}
+			recipe.addProperty("type", "minecraft:smelting");
+			recipe.addProperty("category", "misc");
+			recipe.add("ingredient", ingredient(input));
+			recipe.add("result", resultJson);
+			recipe.addProperty("experience",
+					Math.max(0.0F, experience));
+			recipe.addProperty("cookingtime",
+					Math.max(1, cookingTime));
+			return recipe;
 		}
 		recipe.addProperty("type", shaped
 				? "minecraft:crafting_shaped"
@@ -197,6 +299,34 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 		}
 		recipe.add("result", resultJson);
 		return recipe;
+	}
+
+	private JsonObject buildBrewingRecipe() {
+		ItemStack input = brewingInput.getStack(0);
+		ItemStack reagent = brewingReagent.getStack(0);
+		ItemStack output = brewingResult.getStack(0);
+		if (input.isEmpty() || reagent.isEmpty() || output.isEmpty()) {
+			return null;
+		}
+		JsonObject recipe = new JsonObject();
+		recipe.addProperty("type", "mechaniciancombat:brewing");
+		recipe.addProperty("input_item",
+				Registries.ITEM.getId(input.getItem()).toString());
+		recipe.addProperty("reagent_item",
+				Registries.ITEM.getId(reagent.getItem()).toString());
+		recipe.addProperty("output_item",
+				Registries.ITEM.getId(output.getItem()).toString());
+		recipe.addProperty("output_count", Math.max(1,
+				Math.min(output.getMaxCount(), output.getCount())));
+		return recipe;
+	}
+
+	private Inventory outputForPage(int page) {
+		return switch (page) {
+			case PAGE_FURNACE -> furnaceResult;
+			case PAGE_BREWING -> brewingResult;
+			default -> result;
+		};
 	}
 
 	private boolean buildShaped(JsonObject recipe) {
@@ -281,10 +411,15 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 	}
 
 	private String defaultRecipeId() {
-		ItemStack output = result.getStack(0);
+		ItemStack output = outputForPage(page).getStack(0);
 		String item = output.isEmpty() ? "recipe"
 				: Registries.ITEM.getId(output.getItem()).getPath();
 		return "custom_" + item + "_" + System.currentTimeMillis();
+	}
+
+	private static Path recipeDirectory(Path root, int page) {
+		return root.resolve("data").resolve(RECIPE_NAMESPACE)
+				.resolve(page == PAGE_BREWING ? "brewing" : "recipe");
 	}
 
 	private static String normalizeRecipeId(String raw) {
@@ -370,9 +505,13 @@ public final class RecipeEditorScreenHandler extends ScreenHandler {
 				player.getInventory().offerOrDrop(stack);
 			}
 		}
-		ItemStack output = result.removeStack(0);
-		if (!output.isEmpty()) {
-			player.getInventory().offerOrDrop(output);
+		for (Inventory inventory : new Inventory[]{
+				result, furnaceInput, furnaceResult, brewingInput,
+				brewingReagent, brewingResult}) {
+			ItemStack stack = inventory.removeStack(0);
+			if (!stack.isEmpty()) {
+				player.getInventory().offerOrDrop(stack);
+			}
 		}
 	}
 

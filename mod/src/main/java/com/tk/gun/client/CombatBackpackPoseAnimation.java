@@ -36,19 +36,39 @@ public final class CombatBackpackPoseAnimation {
 	}
 
 	public static String clipName(CombatBackpackAnimation.Phase phase) {
+		return clipName(phase, false);
+	}
+
+	public static String clipName(CombatBackpackAnimation.Phase phase,
+			boolean jumpThruster) {
+		if (jumpThruster && (phase == CombatBackpackAnimation.Phase.CD
+				|| phase == CombatBackpackAnimation.Phase.READY)) {
+			return "jump_cooldown";
+		}
 		return switch (phase) {
+			case AIM -> "aim";
+			case CD -> "CD";
+			case READY -> "ready";
+			case MAINTENANCE -> "Maintenance";
 			case READY_TO_FLY -> "ready_to_fly";
 			case FLYING -> "flying";
 			case CLOSE -> "close";
-			case CD, READY -> "jump_cooldown";
 			case MISSILE_AIM -> "misslie_aim";
 			case MISSILE_CD -> "misslie_CD";
+			case BANNER_READY -> "war_banner_ready";
+			case BANNER_AIM -> "war_banner_aim";
+			case BANNER_CD -> "war_banner_cd";
 			default -> null;
 		};
 	}
 
 	public static void apply(GeoBone bone, CombatBackpackAnimation.Phase phase,
 			double seconds) {
+		apply(bone, phase, seconds, false);
+	}
+
+	public static void apply(GeoBone bone, CombatBackpackAnimation.Phase phase,
+			double seconds, boolean jumpThruster) {
 		BoneSnapshot initial = bone.getInitialSnapshot();
 		if (initial != null) {
 			bone.setPosX(initial.getOffsetX());
@@ -62,7 +82,7 @@ public final class CombatBackpackPoseAnimation {
 			bone.setScaleZ(initial.getScaleZ());
 		}
 
-		String name = clipName(phase);
+		String name = clipName(phase, jumpThruster);
 		if (name == null) {
 			return;
 		}

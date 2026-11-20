@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "CDC",
+    " C "
+  ],
+  "key": {
+    "A": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    },
+    "B": {
+      "item": "mechaniciancombat:auto_portable_launcher"
+    },
+    "C": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "D": {
+      "item": "minecraft:ender_chest"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:mechanician_hunter_spear",
+    "count": 1
+  }
+}

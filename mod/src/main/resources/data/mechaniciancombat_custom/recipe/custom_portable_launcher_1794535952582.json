@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " A ",
+    "BCB",
+    "BDB"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:calibrated_sculk_sensor"
+    },
+    "B": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "C": {
+      "item": "minecraft:dispenser"
+    },
+    "D": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:portable_launcher",
+    "count": 1
+  }
+}

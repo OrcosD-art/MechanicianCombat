@@ -24,6 +24,18 @@ public final class ShoulderCouplingState {
 		if (client == null || client.player == null || client.currentScreen != null) {
 			return false;
 		}
+		if (SoulAnchorSkillClientState.cameraDecoupledDuringAnchor(
+				client.player.getId())) {
+			return false;
+		}
+		if (SoulAnchorSkillClientState.ready(client.player.getId())) {
+			return true;
+		}
+		if (TkGun.holdingGun(client.player)
+				&& SoulAnchorSkillClientState.gunSkillCameraCoupled(
+						client.player.getId())) {
+			return true;
+		}
 		if (!TkGun.holdingGun(client.player)) {
 			// ShoulderSurfing may expose vanilla THIRD_PERSON_BACK underneath
 			// its own perspective. Keep non-item shoulder use decoupled.
@@ -35,6 +47,10 @@ public final class ShoulderCouplingState {
 			// player coupled instead of inheriting the gun's decoupled mode.
 			return client.options.getPerspective()
 					== net.minecraft.client.option.Perspective.THIRD_PERSON_BACK;
+		}
+		if (TkGun.isMeleeWeapon(client.player)
+				&& client.options.useKey.isPressed()) {
+			return true;
 		}
 		if (WarBannerSkillClientState.isActive(client.player.getId())) {
 			return false;
@@ -104,6 +120,18 @@ public final class ShoulderCouplingState {
 				|| !TkGun.holdingGun(client.player)) {
 			return 0;
 		}
+		if (SoulAnchorSkillClientState.cameraDecoupledDuringAnchor(
+				client.player.getId())) {
+			return 24;
+		}
+		if (SoulAnchorSkillClientState.ready(client.player.getId())) {
+			return 0;
+		}
+		if (TkGun.holdingGun(client.player)
+				&& SoulAnchorSkillClientState.gunSkillCameraCoupled(
+						client.player.getId())) {
+			return 0;
+		}
 		if (WarBannerSkillClientState.isActive(client.player.getId())) {
 			return 23;
 		}
@@ -117,6 +145,10 @@ public final class ShoulderCouplingState {
 		}
 		if (state != null && state.state == TkGun.State.MELEE) {
 			return state.dashMeleeActive ? 20 : (state.meleeHoldOver ? 13 : 0);
+		}
+		if (TkGun.isMeleeWeapon(client.player)
+				&& client.options.useKey.isPressed()) {
+			return 0;
 		}
 		if (state != null && state.state == TkGun.State.SKILL_JUMP
 				&& state.skillJumpHovering) {
@@ -166,6 +198,25 @@ public final class ShoulderCouplingState {
 		if (client == null || client.player == null) {
 			return false;
 		}
+		if (SoulAnchorSkillClientState.active(client.player.getId())
+				&& (TkGun.holdingGun(client.player)
+						|| SoulAnchorSkillClientState
+								.cameraDecoupledDuringAnchor(
+										client.player.getId()))) {
+			return false;
+		}
+		if (SoulAnchorSkillClientState.ready(client.player.getId())) {
+			return false;
+		}
+		if (TkGun.isMeleeWeapon(client.player)
+				&& client.options.useKey.isPressed()) {
+			return false;
+		}
+		if (TkGun.holdingGun(client.player)
+				&& SoulAnchorSkillClientState.gunSkillCameraCoupled(
+						client.player.getId())) {
+			return false;
+		}
 		GunClientState.Entry state = GunClientState.get(client.player.getId());
 		return isSprintDirectionActive(client)
 				|| isNonAimingGunWalk(client, state)
@@ -213,11 +264,12 @@ public final class ShoulderCouplingState {
 				|| client.options.backKey.isPressed()
 				|| client.options.leftKey.isPressed()
 				|| client.options.rightKey.isPressed();
+		boolean vanillaSprintInput = client.options.sprintKey.isPressed()
+				&& movementKey && !TkGun.holdingGun(client.player);
 		return client.player.isSprinting()
 				|| GunClientState.dashing(client.player.getId())
 				|| GunClientState.rolling(client.player.getId())
-				|| (client.options.sprintKey.isPressed()
-						&& movementKey);
+				|| vanillaSprintInput;
 	}
 
 	private ShoulderCouplingState() {

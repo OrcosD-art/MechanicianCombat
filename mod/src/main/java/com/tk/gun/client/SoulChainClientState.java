@@ -7,11 +7,12 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-/** Short-lived world-space A -> B -> C chain visuals. */
+/** Short-lived ordered world-space soul-chain visuals. */
 public final class SoulChainClientState {
-	public record Effect(int aEntityId, int bEntityId, int cEntityId,
-						 Vec3d a, Vec3d b, Vec3d c,
-						 boolean hasC, long expiresAt, long startedAt) {
+	public record Node(int entityId, Vec3d fallback) {
+	}
+
+	public record Effect(List<Node> nodes, long expiresAt, long startedAt) {
 		public float alphaAt(long now) {
 			long elapsed = Math.max(0L, now - startedAt);
 			if (elapsed <= 10L) {
@@ -25,12 +26,12 @@ public final class SoulChainClientState {
 	private static final List<Effect> EFFECTS = new ArrayList<>();
 
 	public static void apply(SoulChainPayload payload, long now) {
-		EFFECTS.add(new Effect(
-				payload.aEntityId(), payload.bEntityId(), payload.cEntityId(),
-				new Vec3d(payload.ax(), payload.ay(), payload.az()),
-				new Vec3d(payload.bx(), payload.by(), payload.bz()),
-				new Vec3d(payload.cx(), payload.cy(), payload.cz()),
-				payload.hasC(), now + payload.durationTicks(), now));
+		List<Node> nodes = payload.nodes().stream()
+				.map(node -> new Node(node.entityId(),
+						new Vec3d(node.x(), node.y(), node.z())))
+				.toList();
+		EFFECTS.add(new Effect(nodes,
+				now + payload.durationTicks(), now));
 	}
 
 	public static void tick(long now) {

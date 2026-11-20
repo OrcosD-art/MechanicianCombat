@@ -30,6 +30,12 @@ public final class CombatBackpackItem extends AccessoryItem implements GeoItem {
 			RawAnimation.begin().thenPlayAndHold("flying");
 	private static final RawAnimation CLOSE =
 			RawAnimation.begin().thenPlayAndHold("close");
+	private static final RawAnimation WAR_BANNER_READY =
+			RawAnimation.begin().thenPlayAndHold("war_banner_ready");
+	private static final RawAnimation WAR_BANNER_AIM =
+			RawAnimation.begin().thenPlayAndHold("war_banner_aim");
+	private static final RawAnimation WAR_BANNER_CD =
+			RawAnimation.begin().thenPlayAndHold("war_banner_cd");
 	private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 	private final String textureName;
 
@@ -66,6 +72,9 @@ public final class CombatBackpackItem extends AccessoryItem implements GeoItem {
 					case READY_TO_FLY -> READY_TO_FLY;
 					case FLYING -> FLYING;
 					case CLOSE -> CLOSE;
+					case BANNER_READY -> WAR_BANNER_READY;
+					case BANNER_AIM -> WAR_BANNER_AIM;
+					case BANNER_CD -> WAR_BANNER_CD;
 					default -> AIM;
 				})));
 	}

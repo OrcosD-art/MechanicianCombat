@@ -166,6 +166,9 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
 		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
 		this.attachedMissileBox = BackpackUpgradeData.canUseMissileBox(stack);
+		// Only the jump backpack drives a full hand-sampled pose. Ordinary
+		// launchers must keep using the authored GeckoLib controller, including
+		// the B flap channels and their exact interpolation.
 		CombatBackpackAnimation.setManualJumpRendering(attachedJumpThruster);
 		this.renderPerspective = ModelTransformationMode.NONE;
 		try {
@@ -294,7 +297,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 						"[mechaniciancombat] backpack pose isolated player={} phase={} clip={} "
 								+ "pass={} geckoController=skipped manualSampler=on ageTicks={}",
 						currentEntity.getId(), phase,
-						CombatBackpackPoseAnimation.clipName(phase),
+						CombatBackpackPoseAnimation.clipName(
+								phase, attachedJumpThruster),
 						flamePass ? "flame" : "body",
 						CombatBackpackClientState.animationAgeTicks(
 								currentEntity.getId(), tickDelta));
@@ -359,12 +363,15 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				== BackpackUpgradeData.LauncherType.AUTO;
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean battleBanner = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
 		boolean jumpThruster = attachedJumpThruster;
 		if ((jumpThruster || attachedMissileBox) && currentEntity != null) {
 			double seconds = CombatBackpackClientState.animationAgeTicks(
 					currentEntity.getId(), tickDelta) / 20.0D;
 			CombatBackpackPoseAnimation.apply(bone,
-					CombatBackpackAnimation.phase(currentEntity.getId()), seconds);
+					CombatBackpackAnimation.phase(currentEntity.getId()), seconds,
+					jumpThruster);
 			CombatBackpackPoseAnimation.applyMissileOverlay(bone,
 					CombatBackpackAnimation.missilePhase(currentEntity.getId()),
 					CombatBackpackClientState.missileAnimationAgeTicks(
@@ -372,7 +379,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 		}
 		Quaternionf aimRotation = null;
 		if (currentEntity != null && launcherInstalled && !summonLauncher
-				&& !jumpThruster
+				&& !jumpThruster && !battleBanner
 				&& CombatBackpackAnimation.phase(currentEntity.getId())
 				== CombatBackpackAnimation.Phase.AIM) {
 			if (autoLauncher && "C3".equals(bone.getName())) {
@@ -392,7 +399,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 			case "core" -> bone.setHidden(!coreInstalled);
 			case "C1", "C2", "C3" ->
 					bone.setHidden(!launcherInstalled || autoLauncher
-							|| summonLauncher || jumpThruster);
+							|| summonLauncher || jumpThruster
+							|| battleBanner);
 			case "auto_C1" -> bone.setHidden(!autoLauncher);
 			case "auto_ejector", "auto_box", "auto_sight", "auto_barrel" ->
 					bone.setHidden(!autoLauncher);
@@ -449,6 +457,8 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				== BackpackUpgradeData.LauncherType.AUTO;
 		boolean summonLauncher = attachedLauncherType
 				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean battleBanner = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
 		boolean jumpThruster = attachedJumpThruster;
 		if (!attachedMissileBox && (bone.getName().startsWith("missile_")
 				|| bone.getName().startsWith("port"))) {
@@ -469,7 +479,7 @@ public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackp
 				&& !allowAutoAimCubeRender) {
 			return;
 		}
-		if ((autoLauncher || summonLauncher || jumpThruster)
+		if ((autoLauncher || summonLauncher || jumpThruster || battleBanner)
 				&& ("C1".equals(bone.getName())
 				|| "C2".equals(bone.getName())
 				|| "C3".equals(bone.getName()))) {

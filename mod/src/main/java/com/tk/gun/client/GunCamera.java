@@ -403,6 +403,7 @@ public final class GunCamera {
 			GunClientState.Entry actState = GunClientState.get(p.getId());
 			boolean action = actState != null && (actState.state == TkGun.State.ROLL
 					|| actState.state == TkGun.State.ROLL_TO_IDLE
+					|| actState.state == TkGun.State.ROLL_TO_RUN
 					|| actState.state == TkGun.State.SLIDE
 					|| actState.state == TkGun.State.SLIDE_READY);
 			// 翻滚 / 滑铲期间把渲染插值的上一帧 yaw 钉住当前值：不然战斗翻滚那边把 yaw 改一下，
@@ -690,6 +691,10 @@ public final class GunCamera {
 		if (!bannerCast && bannerFovBlend < 1.0E-3F) {
 			bannerFovBlend = 0.0F;
 		}
+		if (client.player != null && TkGun.isMeleeWeapon(client.player)) {
+			zoomBlend = 0.0F;
+			return;
+		}
 		if (!aimAllowed(client)) {
 			zoomBlend = 0.0F;
 			return;
@@ -721,7 +726,9 @@ public final class GunCamera {
 
 	/** 长按右键 = 瞄准（在界面里不算）。 */
 	public static boolean aiming(MinecraftClient client) {
-		return client.currentScreen == null && client.options.useKey.isPressed() && aimAllowed(client);
+		return client.currentScreen == null && client.options.useKey.isPressed()
+				&& client.player != null && !TkGun.isMeleeWeapon(client.player)
+				&& aimAllowed(client);
 	}
 
 	/**

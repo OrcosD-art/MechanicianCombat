@@ -15,7 +15,8 @@ public abstract class GunAmmoScrollMixin {
 	private void mechaniciancombat$switchAmmoOnScroll(long window, double xOffset, double yOffset, CallbackInfo ci) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (yOffset == 0.0D || client.player == null || client.currentScreen != null
-				|| !TkGun.holdingGun(client.player)) {
+				|| !TkGun.holdingGun(client.player)
+				|| TkGun.isMeleeWeapon(client.player)) {
 			return;
 		}
 		// 向下滚 = 环形逆时针上一颗；向上滚 = 顺时针下一颗。

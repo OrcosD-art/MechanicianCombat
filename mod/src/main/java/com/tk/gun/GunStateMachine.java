@@ -65,7 +65,8 @@ public final class GunStateMachine {
 	 */
 	public static boolean canFire(TkGun.State state) {
 		return switch (state) {
-			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY, OVERHEAT, RELOAD, OVER,
+			case ROLL, ROLL_TO_IDLE, ROLL_TO_RUN, SLIDE, SLIDE_READY,
+					AIM_SLIDE, OVERHEAT, RELOAD, OVER,
 					MELEE, SKILL_JUMP, FALL_ATTACK, FALL_ATTACK_RECOVERY,
 					FORTRESS_SKILL_LOAD,
 					FORTRESS_SKILL_READY_GATHER, FORTRESS_SKILL_GATHER,
@@ -119,7 +120,8 @@ public final class GunStateMachine {
 		//    所以：**玩家此刻在被高速推着（>0.35 格/tick，疾跑才 0.28）= 正在翻滚 → 不压速度**。
 		//    （`tickAll` 里那条"高速位移兜底"会同时把状态切成 ROLL 并打断过热/退门动画。）
 		// 冲刺加成还在（`dashUntil` 未到）也算"这是翻滚带来的速度"，同样不压。
-		if (st.state == TkGun.State.ROLL || now < st.dashUntil
+		if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_RUN
+				|| now < st.dashUntil
 				|| player.getVelocity().horizontalLength() > ROLL_DETECT_SPEED) {
 			return;
 		}
@@ -138,11 +140,13 @@ public final class GunStateMachine {
 		// dashUntil still owns dodge timing. speedBoostUntil only extends the
 		// movement modifier after a completed slide and must not revive roll,
 		// aim-lock, fast-focus, or dodge-window semantics.
-		boolean want = now < st.dashUntil || now < st.speedBoostUntil;
+		boolean want = now < st.dashUntil || now < st.speedBoostUntil
+				|| now < st.armorDodgeBoostUntil;
 		// Broadcast only the authoritative dodge window. Keeping dashSyncActive
 		// tied to speedBoostUntil would make clients retain aim locks after the
 		// actual dash expired.
-		boolean dashActive = now < st.dashUntil;
+		boolean dashActive = now < st.dashUntil
+				|| now < st.armorDodgeBoostUntil;
 		boolean syncChanged = dashActive != st.dashSyncActive;
 		st.dashSyncActive = dashActive;
 		EntityAttributeInstance attr = player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);

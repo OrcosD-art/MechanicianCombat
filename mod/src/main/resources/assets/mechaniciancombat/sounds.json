@@ -175,6 +175,14 @@
                                        }
                                    ]
                     },
+    "magic_wind_1":  {
+                         "sounds":  [
+                                        {
+                                            "name":  "mechaniciancombat:magic_wind_1",
+                                            "stream":  false
+                                        }
+                                    ]
+                     },
     "tendril_clicks_4":  {
                              "sounds":  [
                                             {
@@ -223,6 +231,14 @@
                                          }
                                      ]
                       },
+    "great_sword_slash":  {
+                               "sounds":  [
+                                              {
+                                                  "name":  "mechaniciancombat:great_sword_slash",
+                                                  "stream":  false
+                                              }
+                                          ]
+                          },
     "double_axe_swing1":  {
                               "sounds":  [
                                              {
@@ -455,5 +471,13 @@
                                             "stream":  false
                                         }
                                     ]
-                     }
+                     },
+    "chain":  {
+                  "sounds":  [
+                                 {
+                                     "name":  "mechaniciancombat:chain",
+                                     "stream":  false
+                                 }
+                             ]
+              }
 }

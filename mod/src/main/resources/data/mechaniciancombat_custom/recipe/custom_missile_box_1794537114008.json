@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "ACA",
+    "ADA"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:observer"
+    },
+    "B": {
+      "item": "minecraft:sculk_sensor"
+    },
+    "C": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    },
+    "D": {
+      "item": "minecraft:dropper"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:missile_box",
+    "count": 1
+  }
+}
