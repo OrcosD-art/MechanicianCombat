@@ -1,0 +1,9361 @@
+package com.tk.gun;
+
+import com.tk.gun.api.FortressDestroyerGun;
+import com.tk.gun.api.AbyssalAncientCannonGun;
+import com.tk.gun.api.GunDefinition;
+import com.tk.gun.api.GunRegistry;
+import com.tk.gun.api.VeritasEtJustitiaGun;
+import com.tk.gun.entity.WarBannerEntity;
+import com.tk.gun.item.BowgunItem;
+import com.tk.gun.mixin.ItemCooldownManagerAccessor;
+import com.tk.gun.net.GunFirePayload;
+import com.tk.gun.net.GunStatePayload;
+import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.SpawnGroup;
+import net.minecraft.entity.effect.StatusEffectInstance;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.entity.attribute.EntityAttribute;
+import net.minecraft.entity.attribute.EntityAttributeInstance;
+import net.minecraft.entity.attribute.EntityAttributeModifier;
+import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.passive.TameableEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.ArrowEntity;
+import net.minecraft.entity.projectile.TridentEntity;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.LightBlock;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.item.TridentItem;
+import net.minecraft.particle.ParticleTypes;
+import net.minecraft.registry.Registries;
+import net.minecraft.registry.Registry;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.ActionResult;
+import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+/** 服务端：物品注册 + 权威状态机（开火/过热/拉栓/滑铲/翻滚广播）。 */
+public class TkGunServer implements ModInitializer {
+	public static Item BOWGUN;
+	public static Item ABYSSAL_ANCIENT_CANNON;
+	public static Item VERITAS_ET_JUSTITIA;
+	public static Item KINETIC_SWORD;
+	public static Item BOLT;
+	public static Item HUNTER_SPEAR;
+	public static net.minecraft.block.Block BACKPACK_MODIFICATION_TABLE;
+	public static net.minecraft.item.BlockItem BACKPACK_MODIFICATION_TABLE_ITEM;
+	public static net.minecraft.block.entity.BlockEntityType<
+			com.tk.gun.block.BackpackModificationTableBlockEntity>
+			BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
+	public static net.minecraft.block.Block ARMOR_MODIFICATION_TABLE;
+	public static net.minecraft.item.BlockItem ARMOR_MODIFICATION_TABLE_ITEM;
+	public static net.minecraft.block.Block ARCANE_ALLOY_BLOCK;
+	public static net.minecraft.item.BlockItem ARCANE_ALLOY_BLOCK_ITEM;
+	public static com.tk.gun.item.CombatBackpackItem COMBAT_BACKPACK;
+	public static java.util.List<com.tk.gun.item.CombatBackpackItem> COMBAT_BACKPACKS;
+	public static Item BACKPACK_CORE;
+	public static Item PORTABLE_LAUNCHER;
+	public static Item AUTO_PORTABLE_LAUNCHER;
+	public static Item SUMMON_ANTENNA;
+	public static Item GOLEM_DISPATCH_CAPSULE;
+	public static Item JUMP_BACKPACK_THRUSTER;
+	public static Item MISSILE_BOX;
+	public static Item WAR_BANNER;
+	public static Item WAR_BANNER_FPA_MODEL;
+	public static Item BACKPACK_COOLDOWN_RESET;
+	public static Item MECHANICIAN_UNDERSUIT;
+	public static Item MECHANICIAN_CHESTPLATE;
+	public static Item MECHANICIAN_LEGGINGS;
+	public static Item MECHANICIAN_BOOTS;
+	public static Item PAULDRON_LEFT;
+	public static Item UNDYING_TOTEM_PART;
+	public static Item SOUL_CHAIN;
+	public static Item SOUL_ANCHOR_PART;
+	public static Item INFUSED_LEATHER;
+	public static Item ROSE_ALLOY_CYCLE_BATTERY;
+	public static Item ROSE_QUARTZ_SOLUTION;
+	public static Item ARCANE_ALLOY;
+	/** 只用来给创造模式标签当图标的物品（`视觉/创造模式标签.png`）。 */
+	public static Item TAB_ICON;
+	/** 素材 `子弹` 文件夹里的 5 种子弹（顺序：切割/幽匿/爆破/玫瑰石英/破甲）。 */
+	public static java.util.List<Item> BULLET_ITEMS;
+	/**
+	 * 翻滚结束后仍认作"快速蹲射意图"的宽限（tick）。
+	 *
+	 * <p>翻滚只有 {@link CombatRollHook#ROLL_DURATION} tick，而 Z 包要跨线程排队；
+	 * 没有这段宽限时，输入晚到一拍就会看到 ROLL 已被收成 IDLE，从而降级成普通举枪。
+	 * 这是玩法窗口，和 `roll` 动画长度无关。
+	 */
+	private static final int ROLL_FAST_FOCUS_GRACE_TICKS = 6;
+	/**
+	 * 翻滚键与专注键的组合输入缓冲：翻滚键之后这段时间内到的 Z（或带组合标记的 Z）
+	 * 先缓存，等 ROLL 真正开始再兑现成 0.38s 快速蹲射。
+	 */
+	private static final int DODGE_COMBO_BUFFER_TICKS = 10;
+	/** 翻滚 / 滑铲结束后继续屏蔽右键瞄准的时间（1 秒 = 20 tick）。 */
+	public static final int AIM_LOCK_AFTER_DODGE_TICKS = 20;
+	/** One-charge fallback cooldown used only when Combat Roll is absent. */
+	private static final int FALLBACK_ROLL_COOLDOWN_TICKS = 80;
+	/** Full-suit dodge cooldown starts only after its acceleration reward ends. */
+	public static final int ARMOR_DODGE_COOLDOWN_TICKS =
+			GunStateMachine.DODGE_LOCK_TICKS;
+	/** Backpack firework cycle: 1s CD + 3s cooldown + 1s ready. */
+	private static final int BACKPACK_FIREWORK_COOLDOWN_TICKS = 100;
+	private static final double BACKPACK_TARGET_RADIUS = 20.0D;
+	private static final int BACKPACK_TARGET_WINDOW_TICKS = 160;
+	private static final int BACKPACK_TARGET_GLOW_TICKS = BACKPACK_TARGET_WINDOW_TICKS;
+	private static final int BACKPACK_MAX_CHARGES = 3;
+	private static final int BACKPACK_CHARGE_INTERVAL_TICKS = 40;
+	private static final int AUTO_BACKPACK_MAX_CHARGES = 10;
+	private static final int AUTO_BACKPACK_ATTACK_INTERVAL_TICKS = 20;
+	private static final int AUTO_BACKPACK_CHARGE_INTERVAL_TICKS = 20;
+	private static final int AUTO_BACKPACK_COOLDOWN_TICKS = 200;
+	private static final double AUTO_BACKPACK_TARGET_RADIUS = 30.0D;
+	private static final int SUMMON_ANTENNA_READY_TICKS = 20;
+	private static final int SUMMON_ANTENNA_CAST_TICKS = 60;
+	private static final int SUMMON_ANTENNA_COOLDOWN_TICKS = 1200;
+	private static final int SUMMON_ANTENNA_ALIVE_COOLDOWN_TICKS = 300;
+	private static final double SUMMON_ANTENNA_TARGET_RADIUS = 20.0D;
+	private static final double SUMMON_ANTENNA_FALLBACK_RANGE = 8.0D;
+	private static final int MISSILE_BOX_MAX_TARGETS = 6;
+	private static final int MISSILE_BOX_MARK_INTERVAL_TICKS = 1;
+	private static final int MISSILE_BOX_SHOT_INTERVAL_TICKS = 2;
+	private static final int MISSILE_BOX_COOLDOWN_TICKS = 120;
+	private static final int MISSILE_BOX_GLOW_TICKS = 140;
+	private static final double MISSILE_BOX_TARGET_RADIUS = 32.0D;
+	private static final double MISSILE_BOX_TURN_RADIANS =
+			Math.toRadians(8.0D);
+	private static final double PORTABLE_TURRET_TURN_RADIANS =
+			Math.toRadians(3.0D);
+	private static final double MISSILE_BOX_COLD_DISTANCE = 2.0D;
+	private static final double MISSILE_BOX_COLD_SPEED = 0.09D;
+	private static final double MISSILE_BOX_IGNITED_SPEED = 1.6D;
+	private static final int MISSILE_BOX_COLD_MAX_TICKS = 40;
+	private static final int WAR_BANNER_SKILL_TICKS = 23;
+	private static final int HUNTER_SPEAR_SKILL_TICKS = 23;
+	private static final int MAX_HUNTER_TURRETS = 3;
+	private static final int[] HUNTER_SPEAR_SOUND_TICKS = {0, 1, 3, 15, 18};
+	private static final int WAR_BANNER_COOLDOWN_TICKS = 20 * 60;
+	private static final int WAR_BANNER_KNOCKBACK_TICKS = 10;
+	private static final double WAR_BANNER_KNOCKBACK_DISTANCE = 5.0D;
+	private static final double WAR_BANNER_IMPACT_RADIUS = 8.0D;
+	private static final int[] WAR_BANNER_SOUND_TICKS = {1, 3, 17, 18};
+	private static final String[] WAR_BANNER_SOUND_KEYS = {
+			"skill_spark", "double_axe_swing01",
+			"smash_air2", "double_axe_swing01"
+	};
+	private static final Map<UUID, BackpackCharge> BACKPACK_STATES = new HashMap<>();
+	private static final Map<UUID, Long> BACKPACK_PROJECTILES = new HashMap<>();
+	private static final Map<UUID, MissileTracker> MISSILE_TRACKERS = new HashMap<>();
+	private static final Map<UUID, PortableProjectileTracker>
+			PORTABLE_PROJECTILE_TRACKERS = new HashMap<>();
+	private static final Map<UUID, UUID> WAR_BANNERS = new HashMap<>();
+	private static final Map<UUID, WarBannerLight> WAR_BANNER_LIGHTS =
+			new HashMap<>();
+	private static final Map<UUID, BannerKnockback> WAR_BANNER_KNOCKBACKS =
+			new HashMap<>();
+	private static final Map<UUID, WarBannerAnchor> WAR_BANNER_ANCHORS =
+			new HashMap<>();
+	private static final Map<UUID, HunterSpearAnchor> HUNTER_SPEAR_ANCHORS =
+			new HashMap<>();
+	private static final Map<UUID, Set<UUID>> HUNTER_TURRETS =
+			new HashMap<>();
+	private static final Identifier WAR_BANNER_CAST_SLOW =
+			TkGun.id("war_banner_cast_slow");
+	private static final Identifier WAR_BANNER_CAST_NO_JUMP =
+			TkGun.id("war_banner_cast_no_jump");
+	private static final Identifier HUNTER_SPEAR_DEPLOY_SLOW =
+			TkGun.id("hunter_spear_deploy_slow");
+	private static final int BACKPACK_PROJECTILE_TRACK_TICKS = 1200;
+
+	private record WarBannerLight(ServerWorld world, BlockPos pos,
+			BlockState previous, BlockState placed) {
+	}
+
+	private record WarBannerAnchor(double x, double y, double z,
+			float cameraYaw, long updatedAt) {
+	}
+
+	private record HunterSpearAnchor(double x, double y, double z,
+			float yaw, long updatedAt) {
+	}
+
+	private static final class BannerKnockback {
+		final UUID targetUuid;
+		final Vec3d direction;
+		int remainingTicks;
+
+		private BannerKnockback(UUID targetUuid, Vec3d direction,
+				int remainingTicks) {
+			this.targetUuid = targetUuid;
+			this.direction = direction;
+			this.remainingTicks = remainingTicks;
+		}
+	}
+
+	private static final class BackpackCharge {
+		int charges;
+		long nextChargeAt;
+		int targetEntityId = -1;
+		UUID targetUuid;
+		long targetUntil;
+		long cooldownUntil;
+		long lastSyncAt = -1L;
+		com.tk.gun.item.BackpackUpgradeData.LauncherType launcherType =
+				com.tk.gun.item.BackpackUpgradeData.LauncherType.NONE;
+		boolean autoActive;
+		boolean autoHoldAim;
+		long nextAutoAttackAt;
+		int autoShotsOnTarget;
+		double frontOffsetX;
+		double frontOffsetY;
+		double frontOffsetZ;
+		float frontOffsetYaw;
+		double aimCameraX;
+		double aimCameraY;
+		double aimCameraZ;
+		double aimYaw;
+		double aimPitch;
+		long aimUpdatedAt = -1L;
+		long summonReadyUntil;
+		long summonCastUntil;
+		double summonX;
+		double summonY;
+		double summonZ;
+		long jumpStartedAt;
+		long jumpReadyUntil;
+		long jumpCloseUntil;
+		int jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		boolean jumpEnergyLocked;
+		long nextJumpEnergyUseAt;
+		long nextJumpEnergyRecoveryAt;
+		boolean specialThrustActive;
+		long specialThrustUntil;
+		double jumpOriginY;
+		double jumpStartX;
+		double jumpStartZ;
+		double jumpMaxY;
+		int jumpThrustTicksUsed;
+		long jumpLastGroundAt;
+		boolean jumpReadyChecked;
+		boolean jumpAirborne;
+		boolean jumpKeyHeld;
+		boolean jumpThrustSoundPlayed;
+		boolean missileAiming;
+		boolean missileFiring;
+		long missileNextMarkAt;
+		long missileCooldownUntil;
+		long missileNextShotAt;
+		int missileShotIndex;
+		final java.util.List<UUID> missileTargets = new java.util.ArrayList<>();
+		final double[] missilePorts = new double[18];
+		double missileHalfHorizontalTan;
+		double missileHalfVerticalTan;
+	}
+
+	private static final class MissileTracker {
+		final ServerWorld world;
+		final UUID projectileUuid;
+		final int targetEntityId;
+		final long expiresAt;
+		final Vec3d coldOrigin;
+		final Vec3d coldDirection;
+		final long launchedAt;
+		boolean tracking;
+
+		private MissileTracker(ServerWorld world, UUID projectileUuid,
+							   int targetEntityId, long expiresAt,
+							   Vec3d coldOrigin, Vec3d coldDirection,
+							   long launchedAt) {
+			this.world = world;
+			this.projectileUuid = projectileUuid;
+			this.targetEntityId = targetEntityId;
+			this.expiresAt = expiresAt;
+			this.coldOrigin = coldOrigin;
+			this.coldDirection = coldDirection;
+			this.launchedAt = launchedAt;
+		}
+	}
+
+	private static final class PortableProjectileTracker {
+		final ServerWorld world;
+		final UUID projectileUuid;
+		final int targetEntityId;
+		final long expiresAt;
+
+		private PortableProjectileTracker(ServerWorld world,
+				UUID projectileUuid, int targetEntityId, long expiresAt) {
+			this.world = world;
+			this.projectileUuid = projectileUuid;
+			this.targetEntityId = targetEntityId;
+			this.expiresAt = expiresAt;
+		}
+	}
+
+	/** 每玩家运行时状态 */
+	public static final class PState {
+		public float heat;
+		public long overheatUntil;   // 世界 tick
+		public long boltAt;          // 该 tick 播拉栓音
+		public long lastFireTick = -1;
+		public long stateUntil;
+		public long stateStarted;
+		public TkGun.State state = TkGun.State.IDLE;
+		/** The current airborne session must not trigger idle/landing roll. */
+		public boolean airborneDisqualified;
+		/** Authoritative normal-airborne animation override (fall distance greater than one block). */
+		public boolean airborneIdle;
+		/** The landing has met the vanilla raw fall-damage condition. */
+		public boolean landingRollArmed;
+		/** War Banner deployment animation and sound synchronization. */
+		public long battleBannerCastStarted;
+		public long battleBannerCastUntil;
+		/** Whether this cast uses the movement-locking gun-held variant. */
+		public boolean battleBannerGunHeld;
+		/** Player body yaw captured when deployment starts, independent of the camera. */
+		public float battleBannerCastYaw;
+		public int battleBannerSoundMask;
+		public String lastKeyframeSound;
+		public long lastKeyframeSoundTick = Long.MIN_VALUE;
+		/** Hunter spear turret deployment synchronization. */
+		public long hunterSpearDeployStarted;
+		public long hunterSpearDeployUntil;
+		public float hunterSpearDeployYaw;
+		public int hunterSpearSoundMask;
+		/** Silent Storm skill launch bookkeeping. */
+		public long skillJumpStartedAt;
+		public boolean skillJumpAirborne;
+		public boolean skillJumpFalling;
+		public boolean skillJumpResumeSprint;
+		public boolean skillJumpHovering;
+		public boolean skillJumpHoverConsumed;
+		public boolean skillJumpThrusterFlight;
+		public long skillJumpHoverUntil;
+		/** One queued Z input consumed at the jump apex. */
+		public boolean skillFallAttackQueued;
+		public boolean skillFallDiveStarted;
+		public boolean skillFallImpactDone;
+		public boolean skillFallHeatEffectStarted;
+		public boolean skillFallExtendedDetection;
+		public boolean skillFallTailPose;
+		public long skillFallSlowUntil;
+		public UUID skillFallTargetUuid;
+		/**
+		 * **翻滚后的快速蹲射宽限窗**（截止 tick）。
+		 *
+		 * <p>这是玩法意图，不是动画状态：翻滚刚结束的那一两拍里，服务端可能已经把
+		 * {@link TkGun.State#ROLL} 收成 IDLE，随后才处理到 Z 包。若只看
+		 * `state == ROLL`，这次快速蹲射就会被当成普通举枪甚至直接丢掉。
+		 * 因此在每次翻滚开始时开一个短窗，窗口内按 Z 仍进入
+		 * {@link TkGun.State#AIM_ROLL}（播 `rolling_fast_ready`）。宽限长度
+		 * 基于资源 `roll` 换算出的 {@link CombatRollHook#ROLL_DURATION}。
+		 */
+		public long rollFocusUntil;
+		/** 翻滚期间已经预输入 Z，等 {@link #rollFocusAt} 到点再执行快速蹲射。 */
+		public boolean rollFocusRequested;
+		/** 本次翻滚允许快速蹲射的绝对 tick（翻滚开始 + 0.38s 对应的 tick）。 */
+		public long rollFocusAt;
+		/** The current roll was accepted while the player was already in focus. */
+		public boolean rollStartedFromFocus;
+		/** Quick focus may consume the current roll only when it began in focus. */
+		public boolean rollQuickFocusEligible;
+		/** GunRollPayload 已结算闪避，短暂等待 Combat Roll 的物理翻滚事件。 */
+		public boolean rollFallbackPending;
+		public long rollFallbackAt;
+		/** A focus-state roll was accepted by the key packet before the Combat Roll event arrived. */
+		public boolean rollInputAccepted;
+		/** 快速专注刚进入时吸收同一按 Z 产生的迟到重复包。 */
+		public long quickFocusGuardUntil;
+		/** 已经收到组合专注意图，但 ROLL 状态还没开始：等 broadcastRoll 再转成 rollFocusRequested。 */
+		public boolean dodgeFocusQueued;
+		public long dodgeFocusQueuedAt;
+		/** 最近一次由滑铲进入 fast ready 的 tick，用于屏蔽同一个 Z 输入的重复包。 */
+		public long lastSlideFastFocusAt;
+		/** Sticky movement intent observed at any point during the active roll. */
+		public boolean rollMoveIntent;
+		/** Decaying forward drift carried through the sliding_fast_ready transition. */
+		public long slideFastFocusStart;
+		public long slideFastFocusUntil;
+		public double slideFastFocusDirX;
+		public double slideFastFocusDirZ;
+		public double slideFastFocusStartSpeed;
+		public int slideFastFocusFadeTicks;
+		public double slideFastFocusTraveled;
+		public double slideFastFocusLastX;
+		public double slideFastFocusLastZ;
+		public long slideUntil;
+		public long slideCooldownUntil;
+		public double slideCurrentSpeed;
+		/**
+		 * 翻滚 / 滑铲结束后继续屏蔽**右键瞄准输入**的截止 tick。
+		 *
+		 * <p>只影响右键举枪：不会复用 `dodgeBlockUntil`（那一条是 Alt 闪避冷却），
+		 * 也不会阻止 Z 技能进入专注。行动状态本身由 {@link #aimInputLocked} 一并覆盖。
+		 */
+		public long aimLockUntil;
+		/** 这段时间内右键 = 快速部署（滑铲/收势后短时间内有效） */
+		public long fastAimUntil;
+		/** 专注模式标记。按 Z 切换；开火后用于恢复架枪姿势，退出时播放 Focus_over。 */
+		public boolean deployed;
+		/** 滑铲方向（起铲时定下来） */
+		public double slideDirX;
+		public double slideDirZ;
+		public long slideStart;
+		public boolean slideMeasuring;
+		public double slideFromX;
+		public double slideFromZ;
+		public double slideDistanceMultiplier = 1.0D;
+		public int slideDurationTicks = TkGun.SLIDE_TICKS;
+		public int slideElapsedTicks;
+		public long slideLastProcessedTick = -1L;
+		/** 开火已经起手、弹药还没出膛（等动画攻击帧） */
+		public boolean pendingShot;
+		public long shootAt;
+		public long shootStartTick;
+		public boolean probeShot;
+		public ItemStack pendingAmmo;
+		/** 等待播放和出膛的射击队列；每项记录对应的弹匣发次与弹药。 */
+		public final java.util.ArrayDeque<Pending> shotQueue = new java.util.ArrayDeque<>();
+		public boolean shotAnimating;
+		public long shotReleaseAt;
+		public long shotCycleAt;
+		public int shotSeq;
+		/** 上一 tick 的水平位置快照。 */
+		public double lastX = Double.NaN;
+		public double lastZ;
+		/** 连射计数与窗口截止；用于状态诊断，不决定过热时机。 */
+		public int combo;
+		public long comboWindowUntil;
+		/** 腰射弹匣已经打出去的子弹数；容量固定为 6 发。 */
+		public int mag;
+		/** 当前蹲射会话已经发射的数量；与腰射弹匣完全分离。 */
+		public int focusShots;
+		/** 当前/最近这一发是弹夹里第几发（1..10）：广播给客户端挑动画。 */
+		public int shotIndex = 1;
+		/** 最近一次扣扳机的 tick，用于射击节流和诊断。 */
+		public long lastShotAt;
+		/**
+		 * **专注里的"越打越快/越打越疼"计数**（2026-10-15 用户："进入架枪状态之后连续射击，
+		 * 射速会越来越快、伤害也会越来越高，然后就会过热"）。
+		 *
+		 * <p>连着打（间隔 ≤ {@link TkGun#COMBO_WINDOW}）就 +1；射出后每发按它算射速/伤害：
+		 * 射速 = {@code SHOT_CYCLE_TICKS - ramp}（下限 {@link TkGun#FOCUS_CYCLE_MIN}），
+		 * 伤害 = {@link TkGun#FOCUS_DAMAGE_START} + (ramp-1) × {@link TkGun#FOCUS_DAMAGE_STEP}
+		 * （封顶 {@link TkGun#FOCUS_DAMAGE_MAX}）。专注弹匣最后一发触发过热。
+		 * **腰射不参与**（腰射不涨热、不过热）。
+		 */
+		public int focusRamp;
+		public long focusWindowUntil;
+		/** 下一发隔几 tick（专注里随 {@link #focusRamp} 变快）。 */
+		public int shotCycle = TkGun.SHOT_CYCLE_TICKS;
+		/** 装填窗口的截止 tick（这一段时间里不能开火，HUD 显示"装填"）。 */
+		public long reloadUntil;
+		/** 换弹第二声（弹夹到位）的 tick —— v4 素材 `换弹2.ogg`，动画里埋在 0.833s 处。 */
+		public long reloadClickAt;
+		// —— 闪避/冲刺（`GunStateMachine` 用；规则表也在那边）——
+		/** 上次闪避（翻滚/滑铲）开始的 tick：判"连锁闪避"。 */
+		public long lastDodgeAt;
+		/** 连锁闪避之后闪避键失效的截止 tick。 */
+		public long dodgeLockUntil;
+		/** 加速冲刺的截止 tick（每次闪避给 3 秒）。 */
+		public long dashUntil;
+		/** Speed-only tail after a completed slide; never controls dodge inputs or aim locks. */
+		public long speedBoostUntil;
+		/** A single slide may extend the speed modifier only once. */
+		public boolean slideBoostApplied;
+		/** Last dash-active value sent to clients; used to broadcast the expiry. */
+		public boolean dashSyncActive;
+		/** Native fallback roll cooldown used only without Combat Roll. */
+		public long fallbackRollReadyAt;
+		/** Full-suit, non-gun dodge cooldown; starts after the acceleration reward. */
+		public long armorDodgeBoostUntil;
+		public long armorDodgeCooldownUntil;
+		public boolean armorDodgeCooldownPending;
+		public long lastArmorDodgeAt;
+		/** Client-provided horizontal roll direction captured on the Alt press frame. */
+		public double rollRequestX;
+		public double rollRequestZ;
+		// —— 客户端量出来的枪口/朝向（GunFirePayload 带过来，出伤帧用；用完即清） ——
+		public double fireMx;
+		public double fireMy;
+		public double fireMz;
+		public double fireDx;
+		public double fireDy;
+		public double fireDz;
+		public boolean fireMuzzleOk;
+		/** 上一 tick 是否持枪：重新持枪时广播一次权威弹匣状态。 */
+		public boolean heldGunLastTick;
+		// —— 动画音效关键帧（GunSoundPayload 报过来、服务端广播给附近所有人）的每 tick 额度桶 ——
+		public long soundTick;
+		public int soundCount;
+		/** Server-authored deploy cue tick (0 = none). */
+		public long aimSoundAt;
+		/** Added reload cue at 0.17s (0 = none). */
+		public long reloadAuxSoundAt;
+		/**
+		 * **翻滚 / 滑铲交替循环**里上一次是哪个：0 = 都没做过、1 = 刚翻滚、2 = 刚滑铲
+		 * （用户 2026-10-17："翻滚后下一次翻滚再按 Alt 设为滑铲，翻滚与滑铲循环进行"）。
+		 */
+		public int lastDodgeKind;
+		/** 循环一次（翻滚 + 滑铲）之后**两个都不许用**的截止 tick（1 秒）。 */
+		public long dodgeBlockUntil;
+		/** Ammo type loaded by the last hip-fire reload. */
+		public boolean magExplosive;
+		public String magAmmo = "";
+		/** 腰射弹夹里那一发的模板（保留附魔；三叉戟式弹药发射时用）。 */
+		public ItemStack magAmmoStack = ItemStack.EMPTY;
+		/** 已写回枪械 NBT 的弹匣状态，避免每 tick 重复写入。 */
+		public int lastSavedMag = -1;
+		public String lastSavedAmmo = null;
+		/** Last ammo type fired or prepared while deployed; restored after leaving focus. */
+		public String lastFocusAmmo = "";
+		/** 最近一次手持的枪械栈，切走后仍可把未开火/弹匣状态写回。 */
+		public ItemStack lastHeldGun = ItemStack.EMPTY;
+		/** 当前手持枪械的弹匣是否已经从未 NBT 载入（防止默认 0/空覆盖存档）。 */
+		public boolean magLoaded;
+		/** Current Veritas close-combat step (1..4). */
+		public int meleeCombo;
+		public boolean meleeHitDone;
+		public boolean meleeQueued;
+		public boolean meleeInputHeld;
+		public long meleeInputPressedAt;
+		/** Fortress Destroyer active skill state. */
+		public long fortressSkillReadyAt;
+		public int fortressSkillLevel;
+		public double fortressSkillHitDirX;
+		public double fortressSkillHitDirZ;
+		public boolean fortressSkillFromFocus;
+		public boolean fortressSkillFromSlide;
+		public double fortressSkillSlideDirX;
+		public double fortressSkillSlideDirZ;
+		public double fortressSkillSlideSpeed;
+		public int fortressSkillSoundMask;
+		public boolean meleeAtk3MainEnded;
+		public boolean meleeAtk4Empowered;
+		public boolean meleeHoldOver;
+		public int meleeHoldOverHits;
+		public final Set<String> meleePlayedSoundCues = new HashSet<>();
+		public double meleeHoldOverDirX;
+		public double meleeHoldOverDirZ;
+		public boolean meleeDashAttack;
+		public boolean meleeDashMoving;
+		public boolean meleeReturning;
+		/** This recovery follows a dash attack and must start from ATK_2_end. */
+		public boolean meleeDashReturn;
+		/** Dash recovery should hand off to run instead of the idle upper pose. */
+		public boolean meleeReturnToRun;
+		public boolean meleeDashResumeSprint;
+		public double meleeDashDirX;
+		public double meleeDashDirZ;
+		public float meleeDashAimYaw;
+		public double meleeDashFromX;
+		public double meleeDashFromZ;
+		/** Actual forward speed captured when the dash transitions to hard-stop. */
+		public double meleeDashStunSpeed;
+		/** Last sampled player position used for the hard-stop swept hitbox. */
+		public double meleeDashStunFromX;
+		public double meleeDashStunFromZ;
+		/** One hard-stop collision per entity, even when the swept box contains it for several ticks. */
+		public final Set<UUID> meleeDashStunHits = new HashSet<>();
+		/** Kinetic Sword authored attack state separate from Veritas close combat. */
+		public boolean kineticSwordAttack;
+		public boolean kineticSwordReturn;
+		public boolean kineticSwordQueued;
+		public int kineticSwordHitIndex;
+		public double kineticSwordMoveDirX;
+		public double kineticSwordMoveDirZ;
+		public double kineticSwordMoveDistance;
+		public int kineticSwordMoveStartTick;
+		public int kineticSwordMoveEndTick;
+		public double kineticSwordMoveLastX;
+		public double kineticSwordMoveLastZ;
+		public double kineticSwordMoveTraveled;
+		public long lastMeleeAt;
+		public boolean betterCombatAttackDisabled;
+		/** Last gun family; switching to a different registered definition resets focus-only state. */
+		public Identifier gunDefinitionId;
+	}
+
+	/**
+	 * 连发队列中的一发子弹（{@code shotIndex} = 当前弹匣中的第几发）。
+	 */
+	public static final class Pending {
+		public final int shotIndex;
+		public final String ammo;
+		public final ItemStack ammoStack;
+		public final boolean focus;
+
+		private Pending(int shotIndex, String ammo, ItemStack ammoStack, boolean focus) {
+			this.shotIndex = shotIndex;
+			this.ammo = ammo == null ? "" : ammo;
+			this.ammoStack = ammoStack == null ? ItemStack.EMPTY : ammoStack;
+			this.focus = focus;
+		}
+
+		public static Pending shot(int shotIndex, String ammo) {
+			return new Pending(shotIndex, ammo, ItemStack.EMPTY, false);
+		}
+
+		public static Pending shot(int shotIndex, String ammo, ItemStack ammoStack) {
+			return new Pending(shotIndex, ammo, ammoStack, false);
+		}
+
+		public static Pending shot(int shotIndex, String ammo, ItemStack ammoStack, boolean focus) {
+			return new Pending(shotIndex, ammo, ammoStack, focus);
+		}
+	}
+
+	private static final Map<UUID, PState> STATES = new HashMap<>();
+
+	public static PState state(ServerPlayerEntity player) {
+		return STATES.computeIfAbsent(player.getUuid(), k -> new PState());
+	}
+
+	/**
+	 * 右键瞄准输入现在是否被权威锁定。
+	 *
+	 * <p>覆盖范围：整段翻滚 / 翻滚过渡 / 滑铲 / 滑铲收势，以及它们结束后
+	 * {@link #AIM_LOCK_AFTER_DODGE_TICKS} tick。锁定期间 {@code BowgunItem#use} 直接失败，
+	 * 服务端也会主动停止已经开始的“使用物品”，因此不会再进入举枪减速、镜头缩放或准星状态。
+	 */
+	public static boolean aimInputLocked(ServerPlayerEntity player) {
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		return st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+				|| st.state == TkGun.State.ROLL_TO_RUN
+				|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
+				|| st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER
+				|| st.state == TkGun.State.INSPECT || st.state == TkGun.State.MELEE
+				|| st.state == TkGun.State.SKILL_JUMP
+				|| st.state == TkGun.State.FALL_ATTACK
+				|| st.state == TkGun.State.FALL_ATTACK_RECOVERY
+				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
+				|| now < st.aimLockUntil || now < st.dashUntil
+				|| now < st.overheatUntil;
+	}
+
+	// ---------------------------------------------------------------- 曳光弹
+	/**
+	 * 在飞的弹丸 + **出膛时定下的速度**。
+	 *
+	 * <p>为什么要存速度：MC 的箭类弹丸（{@code PersistentProjectileEntity}）在自己 tick 里
+	 * **无条件**加 `getGravity()`、还会乘空气阻力 `0.99` —— `setNoGravity(true)` 对它不管用。
+	 * 用户要的是"打个直线、弹速快、一道曳光飞过去"，所以这里每 tick 把速度**掰回出膛值**
+	 * （阻力也没了 → 全程 5 格/tick 直线；伤害 = 速度×damage 也保持恒定）。
+	 */
+	private record Bolt(net.minecraft.entity.projectile.PersistentProjectileEntity projectile, Vec3d velocity) {
+	}
+
+	private static final List<Bolt> BOLTS = new ArrayList<>();
+
+	/**
+	 * 弩矢弹丸的**实体类型**：mechaniciancombat:bolt_projectile。
+	 * ⚠️ 用户 2026-10-12 反复强调："不要用弓箭当弹药" —— 之前复用 minecraft:arrow，
+	 * 实体类型/死亡信息/掉落全是箭；现在用自己的类型（见 BoltProjectileEntity）。
+	 */
+	public static EntityType<com.tk.gun.entity.BoltProjectileEntity> BOLT_ENTITY;
+	/**
+	 * **子弹**（`mechaniciancombat:bullet`）的实体类型：只是画面上飞出去的那颗（贴图 = 素材 `粒子/bullet.png`）。
+	 * 伤害不走它 —— 见 {@link #fireOnce} 与 {@link com.tk.gun.entity.BulletEntity}。
+	 */
+	public static EntityType<com.tk.gun.entity.BulletEntity> BULLET_ENTITY;
+	/** 熔铁矢专用三叉戟实体（资源模型渲染，独立于原版 minecraft:trident）。 */
+	public static EntityType<com.tk.gun.entity.MoltenTridentEntity> MOLTEN_TRIDENT_ENTITY;
+	public static EntityType<com.tk.gun.entity.HunterTurretEntity>
+			HUNTER_TURRET_ENTITY;
+	public static EntityType<com.tk.gun.entity.HunterSpearReturnEntity>
+			HUNTER_SPEAR_RETURN_ENTITY;
+	public static EntityType<com.tk.gun.entity.SteelArrowImpactEntity>
+			STEEL_ARROW_IMPACT_ENTITY;
+	public static EntityType<com.tk.gun.entity.MoltenGolemEntity> MOLTEN_GOLEM;
+	public static EntityType<com.tk.gun.entity.WarBannerEntity> WAR_BANNER_ENTITY;
+	public static EntityType<com.tk.gun.entity.SoulAnchorEntity>
+			SOUL_ANCHOR_ENTITY;
+	public static Item ENTITY_REMOVAL_TOOL;
+	public static Item SOUL_ANCHOR_FPA_MODEL;
+	public static Item SOUL_ANCHOR_PROJECTILE_MODEL;
+	public static Item HUNTER_ANCHOR_FPA_MODEL;
+	public static Item PORTABLE_TURRET_FPA_MODEL;
+	public static Item AUTO_TURRET_FPA_MODEL;
+	/** 下一次开火时把弹丸位置反解成"枪口偏移"打进日志（`/mechaniciancombat probe`，自检用）。 */
+	public static boolean PROBE_NEXT_SHOT = false;
+
+	/**
+	 * 枪口位置 = 模型里作者放的 `locator` 骨骼（parent = gun，pivot 模型坐标 0,10,-37）在
+	 * **出伤帧**的位置。三个偏移常数（{@link TkGun#MUZZLE_FORWARD} 等）由
+	 * `python tools\muzzle_offset_new.py` 从 geo + 动画按 GeckoLib 的变换链算出来，
+	 * 七段射击动画在出伤帧完全一致。
+	 *
+	 * <p>朝向用**视角 yaw**：GeckoLib 的 GeoReplacedEntityRenderer 拿到的是渲染器传进来的
+	 * entity yaw（= 玩家的视角 yaw，不像原版 PlayerEntityRenderer 那样换成 bodyYaw），
+	 * 所以屏幕上整个 rig 就是按这个 yaw 摆的 —— 弹道用它才和"画面上那把枪"对得上。
+	 */
+	private static Vec3d muzzlePos(ServerPlayerEntity player) {
+		double yaw = Math.toRadians(player.getYaw());
+		double fx = -Math.sin(yaw);
+		double fz = Math.cos(yaw);
+		double xx = -Math.cos(yaw);
+		double xz = -Math.sin(yaw);
+		return new Vec3d(
+				player.getX() + fx * TkGun.MUZZLE_FORWARD + xx * TkGun.MUZZLE_SIDE,
+				player.getY() + TkGun.MUZZLE_HEIGHT,
+				player.getZ() + fz * TkGun.MUZZLE_FORWARD + xz * TkGun.MUZZLE_SIDE);
+	}
+
+	/**
+	 * 子弹方向 = **枪管轴向**（水平的面朝方向），不看玩家视角俯仰。
+	 * 用户 2026-10-13 原话："子弹射出点是 locator，沿着枪管方向射出，不必看玩家视角"。
+	 * （模型里枪管方向在出伤帧 ≈ 水平正前，俯仰只有 -2.6°，当 0 处理。）
+	 */
+	private static Vec3d muzzleDir(ServerPlayerEntity player) {
+		double yaw = Math.toRadians(player.getYaw());
+		return new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+	}
+
+	private static double round3(double v) {
+		return Math.round(v * 1000.0) / 1000.0;
+	}
+
+	private static void tickBolts() {
+		if (BOLTS.isEmpty()) {
+			return;
+		}
+		Iterator<Bolt> it = BOLTS.iterator();
+		while (it.hasNext()) {
+			Bolt bolt = it.next();
+			net.minecraft.entity.projectile.PersistentProjectileEntity arrow = bolt.projectile();
+			if (arrow.isAlive()) {
+				// 每 tick 把速度掰回出膛值：箭类弹丸自己会加 getGravity() 并乘 0.99 阻力，
+				// setNoGravity(true) 对它无效 —— 掰回去才是"弹速快 + 一直直线"。
+				arrow.setVelocity(bolt.velocity().x, bolt.velocity().y, bolt.velocity().z);
+				arrow.velocityModified = true;
+			}
+			if (!(arrow.getWorld() instanceof ServerWorld world)) {
+				it.remove();
+				continue;
+			}
+			// 命中判定：死了（打中实体 / 打中方块后自毁）**或者**速度被弹丸自己清零了
+			// （箭类弹丸打中方块会"插住"并把速度置 0；我们每 tick 掰速度是在这之后，
+			//  所以这里看到速度≈0 就说明它刚插进方块里 → 一样算命中）。
+			boolean stuck = arrow.getVelocity().lengthSquared() < 0.02D;
+			if (!arrow.isAlive() || stuck) {
+				double hx = arrow.getX(), hy = arrow.getY(), hz = arrow.getZ();
+				// **命中特效**（用户："打中方块/敌人都有粒子特效"）：
+				// 素材 粒子.zip 的 energy_xplo（6 帧翻页）+ 一簇火焰/烟/火花
+				world.spawnParticles(TkGunParticles.ENERGY_XPLO, hx, hy, hz, 1, 0.0, 0.0, 0.0, 0.0);
+				// ⚠️ 2026-10-17 用户："删除弹头击中后的 minecraft 原版爆炸特效及其音效" —— 原版
+				// `ParticleTypes.EXPLOSION` 那团灰白爆炸云已删；素材自己的 `energy_xplo` + 火/烟/火花留着。
+				world.spawnParticles(ParticleTypes.FLAME, hx, hy, hz, 14, 0.16, 0.16, 0.16, 0.08);
+				world.spawnParticles(ParticleTypes.SMALL_FLAME, hx, hy, hz, 12, 0.2, 0.2, 0.2, 0.06);
+				world.spawnParticles(ParticleTypes.CRIT, hx, hy, hz, 16, 0.2, 0.2, 0.2, 0.25);
+				world.spawnParticles(ParticleTypes.ELECTRIC_SPARK, hx, hy, hz, 12, 0.18, 0.18, 0.18, 0.15);
+				world.spawnParticles(ParticleTypes.SMOKE, hx, hy, hz, 10, 0.18, 0.18, 0.18, 0.05);
+				// 命中声不在这里放：`fireOnce` 已经在命中点放了素材 `imp1`（服务端），这里再放就是两声。
+				TkGun.LOGGER.info("[mechaniciancombat] 命中爆裂粒子已放（energy_xplo+FLAME+SMALL_FLAME+CRIT+"
+						+ "ELECTRIC_SPARK+SMOKE，{} 个）位置=({}, {}, {})",
+						1 + 14 + 12 + 16 + 12 + 10, round3(hx), round3(hy), round3(hz));
+				if (stuck && arrow.isAlive()) {
+					arrow.discard();          // 插住的弹丸实体清掉，别留一地看不见的箭
+				}
+				it.remove();
+				continue;
+			}
+			Vec3d v = arrow.getVelocity();
+			Vec3d pos = arrow.getPos();
+			double len = v.length();
+			if (len < 0.08D) {
+				it.remove();     // 停了/卡住了，别在原地拖尾
+				continue;
+			}
+			Vec3d back = pos.subtract(v);
+			int steps = Math.max(1, (int) Math.ceil(len / 0.45D));
+			for (int i = 0; i < steps; i++) {
+				double f = i / (double) steps;
+				double x = back.x + (pos.x - back.x) * f;
+				double y = back.y + (pos.y - back.y) * f;
+				double z = back.z + (pos.z - back.z) * f;
+				world.spawnParticles(ParticleTypes.FLAME, x, y, z, 1, 0.01, 0.01, 0.01, 0.0);
+				if ((i & 1) == 0) {
+					world.spawnParticles(ParticleTypes.SMOKE, x, y, z, 1, 0.01, 0.01, 0.01, 0.0);
+				}
+			}
+		}
+	}
+
+	/**
+	 * 所有背包变体共用同一个物品类、模型、动画和能力状态；只有贴图资源名不同。
+	 */
+	private static com.tk.gun.item.CombatBackpackItem registerCombatBackpack(
+			String id, String textureName) {
+		com.tk.gun.item.CombatBackpackItem item =
+				com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM, TkGun.id(id),
+						new com.tk.gun.item.CombatBackpackItem(
+								new Item.Settings().maxCount(1), textureName));
+		io.wispforest.accessories.api.AccessoriesAPI.registerAccessory(item, item);
+		COMBAT_BACKPACKS.add(item);
+		return item;
+	}
+
+	private static void registerArmorItems() {
+		MECHANICIAN_UNDERSUIT = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("mechanician_undersuit"),
+				new com.tk.gun.item.MechanicianUndersuitItem(
+						new Item.Settings().maxCount(1)));
+		io.wispforest.accessories.api.AccessoriesAPI.registerAccessory(
+				MECHANICIAN_UNDERSUIT,
+				(io.wispforest.accessories.api.Accessory)
+						MECHANICIAN_UNDERSUIT);
+		MECHANICIAN_CHESTPLATE = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("mechanician_chestplate"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.CHESTPLATE,
+						net.minecraft.item.ArmorItem.Type.CHESTPLATE,
+						new Item.Settings()));
+		MECHANICIAN_LEGGINGS = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("mechanician_leggings"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.LEGGINGS,
+						net.minecraft.item.ArmorItem.Type.LEGGINGS,
+						new Item.Settings()));
+		MECHANICIAN_BOOTS = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("mechanician_boots"),
+				new com.tk.gun.item.MechanicianArmorItem(
+						com.tk.gun.item.MechanicianArmorPiece.BOOTS,
+						net.minecraft.item.ArmorItem.Type.BOOTS,
+						new Item.Settings()));
+			UNDYING_TOTEM_PART = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM, TkGun.id("undying_totem"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C1,
+							new Item.Settings()));
+			PAULDRON_LEFT = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM, TkGun.id("pauldorn_left"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C2,
+							new Item.Settings()));
+			SOUL_CHAIN = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM, TkGun.id("soul_chain"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.C3,
+							new Item.Settings()));
+			SOUL_ANCHOR_PART = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM, TkGun.id("soul_anchor"),
+					new com.tk.gun.item.ArmorPartItem(
+							com.tk.gun.item.ArmorPartItem.Kind.T1,
+							new Item.Settings()));
+	}
+
+	/**
+	 * Vanilla armor slots and commands can bypass {@link Item#use}. Enforce the
+	 * dependency authoritatively on the server, including removing the outer
+	 * pieces if the undersuit is removed by any other mod.
+	 */
+	private static void enforceArmorRequirement(MinecraftServer server) {
+		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+			if (com.tk.gun.item.MechanicianUndersuitItem.isEquipped(player)) {
+				continue;
+			}
+			for (net.minecraft.entity.EquipmentSlot slot :
+					new net.minecraft.entity.EquipmentSlot[]{
+							net.minecraft.entity.EquipmentSlot.CHEST,
+							net.minecraft.entity.EquipmentSlot.LEGS,
+							net.minecraft.entity.EquipmentSlot.FEET}) {
+				ItemStack equipped = player.getEquippedStack(slot);
+				if (!(equipped.getItem()
+						instanceof com.tk.gun.item.MechanicianArmorItem)) {
+					continue;
+				}
+				ItemStack removed = equipped.copy();
+				player.equipStack(slot, ItemStack.EMPTY);
+				if (!player.getInventory().insertStack(removed)) {
+					player.dropItem(removed, false);
+				}
+				player.sendMessage(net.minecraft.text.Text.translatable(
+						"message.mechaniciancombat.requires_undersuit"), true);
+			}
+		}
+	}
+
+	@Override
+	public void onInitialize() {
+		registerArmorItems();
+		ArmorAbilities.register();
+		SoulAnchorSkillService.register();
+		SoulAnchorMarks.register();
+		ArmorHelmetController.register();
+		SoulChainAbility.register();
+		ServerTickEvents.END_SERVER_TICK.register(
+				server -> enforceArmorRequirement(server));
+		ServerLifecycleEvents.SERVER_STARTED.register(
+				com.tk.gun.item.MechanicianBrewingRecipes::reload);
+		ServerLifecycleEvents.SERVER_STOPPING.register(
+				server -> removeAllWarBannerLights());
+		ServerPlayConnectionEvents.DISCONNECT.register(
+				(handler, server) -> {
+					cleanupWarBannerForPlayer(handler.getPlayer());
+					cleanupHunterSpearForPlayer(handler.getPlayer());
+				});
+		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
+		PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
+				!TkGun.holdingGun(player));
+		AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) ->
+				TkGun.holdingGun(player)
+						|| (HUNTER_SPEAR != null
+						&& player.getStackInHand(hand).isOf(HUNTER_SPEAR))
+						? ActionResult.FAIL : ActionResult.PASS);
+		TkGunParticles.register();
+		com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.SCREEN_HANDLER,
+				TkGun.id("backpack_modification_table"),
+				com.tk.gun.screen.BackpackModificationTableScreenHandler.TYPE);
+		com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.SCREEN_HANDLER,
+				TkGun.id("armor_modification_table"),
+				com.tk.gun.screen.ArmorModificationTableScreenHandler.TYPE);
+		BACKPACK_MODIFICATION_TABLE = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.BLOCK,
+				TkGun.id("backpack_modification_table"),
+				new com.tk.gun.block.BackpackModificationTableBlock(
+						net.minecraft.block.AbstractBlock.Settings.create()
+								.mapColor(net.minecraft.block.MapColor.STONE_GRAY)
+								.strength(3.5F)
+								.requiresTool()
+								.sounds(net.minecraft.sound.BlockSoundGroup.STONE)));
+		BACKPACK_MODIFICATION_TABLE_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("backpack_modification_table"),
+				new net.minecraft.item.BlockItem(
+						BACKPACK_MODIFICATION_TABLE,
+						new Item.Settings()));
+		BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.BLOCK_ENTITY_TYPE,
+				TkGun.id("backpack_modification_table"),
+				net.fabricmc.fabric.api.object.builder.v1.block.entity
+						.FabricBlockEntityTypeBuilder.create(
+								com.tk.gun.block.BackpackModificationTableBlockEntity::new,
+								BACKPACK_MODIFICATION_TABLE)
+						.build());
+		com.tk.gun.block.BackpackModificationTableBlockEntity.TYPE =
+				BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
+		ARMOR_MODIFICATION_TABLE = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.BLOCK,
+				TkGun.id("armor_modification_table"),
+				new com.tk.gun.block.ArmorModificationTableBlock(
+						net.minecraft.block.AbstractBlock.Settings.create()
+								.mapColor(net.minecraft.block.MapColor.STONE_GRAY)
+								.strength(3.5F)
+								.requiresTool()
+								.sounds(net.minecraft.sound.BlockSoundGroup.STONE)));
+		ARMOR_MODIFICATION_TABLE_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("armor_modification_table"),
+				new net.minecraft.item.BlockItem(
+						ARMOR_MODIFICATION_TABLE,
+						new Item.Settings()));
+		ARCANE_ALLOY_BLOCK = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.BLOCK,
+				TkGun.id("arcane_alloy_block"),
+				new net.minecraft.block.Block(
+						net.minecraft.block.AbstractBlock.Settings.create()
+								.mapColor(net.minecraft.block.MapColor.BLACK)
+								.strength(50.0F, 1200.0F)
+								.requiresTool()
+								.sounds(net.minecraft.sound.BlockSoundGroup.NETHERITE)));
+		ARCANE_ALLOY_BLOCK_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("arcane_alloy_block"),
+				new net.minecraft.item.BlockItem(
+						ARCANE_ALLOY_BLOCK,
+						new Item.Settings().fireproof()));
+		BACKPACK_CORE = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("backpack_core"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.CORE,
+						new Item.Settings().maxCount(1)));
+		PORTABLE_LAUNCHER = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("portable_launcher"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.LAUNCHER,
+						new Item.Settings().maxCount(1)));
+		AUTO_PORTABLE_LAUNCHER = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("auto_portable_launcher"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.AUTO_LAUNCHER,
+						new Item.Settings().maxCount(1)));
+		SUMMON_ANTENNA = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("summon_antenna"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.SUMMON_ANTENNA,
+						new Item.Settings().maxCount(1)));
+		GOLEM_DISPATCH_CAPSULE = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("golem_dispatch_capsule"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.GOLEM_CAPSULE,
+						new Item.Settings().maxCount(1)));
+		JUMP_BACKPACK_THRUSTER = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("jump_backpack_thruster"),
+				new com.tk.gun.item.BackpackPartItem(
+						com.tk.gun.item.BackpackPartItem.Kind.JUMP_THRUSTER,
+						new Item.Settings().maxCount(1)));
+			MISSILE_BOX = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM,
+					TkGun.id("missile_box"),
+					new com.tk.gun.item.BackpackPartItem(
+							com.tk.gun.item.BackpackPartItem.Kind.MISSILE_BOX,
+							new Item.Settings().maxCount(1)));
+			WAR_BANNER = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM,
+					TkGun.id("war_banner"),
+					new com.tk.gun.item.BackpackPartItem(
+							com.tk.gun.item.BackpackPartItem.Kind.BATTLE_BANNER,
+							new Item.Settings().maxCount(1)));
+			WAR_BANNER_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
+					Registries.ITEM,
+					TkGun.id("war_banner_fpa_model"),
+					new com.tk.gun.item.WarBannerFpaItem(
+							new Item.Settings().maxCount(1)));
+		BACKPACK_COOLDOWN_RESET = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM,
+				TkGun.id("backpack_cooldown_reset"),
+				new com.tk.gun.item.BackpackCooldownResetItem(new Item.Settings()
+						.maxCount(1)
+						.component(net.minecraft.component.DataComponentTypes
+								.ENCHANTMENT_GLINT_OVERRIDE, true)));
+		BOWGUN = GunRegistry.register(
+				FortressDestroyerGun.DEFINITION,
+				new Item.Settings().maxCount(1));
+		ABYSSAL_ANCIENT_CANNON = GunRegistry.register(
+				AbyssalAncientCannonGun.DEFINITION,
+				new Item.Settings().maxCount(1));
+		VERITAS_ET_JUSTITIA = GunRegistry.register(
+				VeritasEtJustitiaGun.DEFINITION,
+				new Item.Settings().maxCount(1));
+		KINETIC_SWORD = GunRegistry.register(
+				com.tk.gun.api.KineticSwordGun.DEFINITION,
+				new Item.Settings().maxCount(1));
+		BOLT = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM, TkGun.id("bolt"),
+				new com.tk.gun.item.MoltenTridentItem(new Item.Settings().maxCount(64)
+						.attributeModifiers(net.minecraft.component.type.AttributeModifiersComponent.builder()
+								.add(EntityAttributes.GENERIC_ATTACK_DAMAGE,
+										new net.minecraft.entity.attribute.EntityAttributeModifier(
+												Item.BASE_ATTACK_DAMAGE_MODIFIER_ID, 9.6D,
+												net.minecraft.entity.attribute.EntityAttributeModifier.Operation.ADD_VALUE),
+										net.minecraft.component.type.AttributeModifierSlot.MAINHAND)
+								.add(EntityAttributes.GENERIC_ATTACK_SPEED,
+										new net.minecraft.entity.attribute.EntityAttributeModifier(
+												Item.BASE_ATTACK_SPEED_MODIFIER_ID, -2.9D,
+												net.minecraft.entity.attribute.EntityAttributeModifier.Operation.ADD_VALUE),
+										net.minecraft.component.type.AttributeModifierSlot.MAINHAND)
+								.build())
+						.component(net.minecraft.component.DataComponentTypes.TOOL,
+								net.minecraft.item.TridentItem.createToolComponent())));
+		HUNTER_SPEAR = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("mechanician_hunter_spear"),
+				new com.tk.gun.item.MechanicianHunterSpearItem(
+						new Item.Settings().maxCount(3)));
+		COMBAT_BACKPACKS = new java.util.ArrayList<>();
+		COMBAT_BACKPACK = registerCombatBackpack("combat_backpack", "combat_backpack");
+		for (String color : new String[]{
+				"black", "blue", "brown", "cyan", "gray", "green",
+				"light_blue", "light_gray", "lime", "magenta", "orange",
+				"pink", "purple", "red", "shulker_box", "white", "yellow"
+		}) {
+			registerCombatBackpack("combat_backpack_" + color,
+					"combat_backpack_" + color);
+		}
+		// **创造模式标签「机械师」的图标**（用户 2026-10-17）：图标只能用 ItemStack 渲染，所以拿
+		// `视觉/创造模式标签.png` 做成一个只用来当图标的物品（不进标签本身）。
+		TAB_ICON = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM, TkGun.id("tab_icon"),
+				new Item(new Item.Settings()));
+		MOLTEN_GOLEM = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE, TkGun.id("molten_golem"),
+				EntityType.Builder.<com.tk.gun.entity.MoltenGolemEntity>create(
+								com.tk.gun.entity.MoltenGolemEntity::new, SpawnGroup.MISC)
+						.dimensions(1.4F, 2.7F)
+						.eyeHeight(2.35F)
+						.build("molten_golem"));
+		net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRegistry
+				.register(MOLTEN_GOLEM,
+						() -> net.minecraft.entity.passive.IronGolemEntity
+								.createIronGolemAttributes()
+								.add(EntityAttributes.GENERIC_MAX_HEALTH, 400.0D)
+								.build());
+		ENTITY_REMOVAL_TOOL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("entity_removal_tool"),
+				new com.tk.gun.item.EntityRemovalToolItem(new Item.Settings()
+						.maxCount(1)
+						.component(net.minecraft.component.DataComponentTypes
+								.ENCHANTMENT_GLINT_OVERRIDE, true)));
+		SOUL_ANCHOR_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("soul_anchor_fpa_model"),
+				new com.tk.gun.item.SoulAnchorFpaItem(
+						new Item.Settings().maxCount(1)));
+		HUNTER_ANCHOR_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("hunter_anchor_fpa_model"),
+				new com.tk.gun.item.CombatPropFpaItem(
+						new Item.Settings().maxCount(1)));
+		PORTABLE_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("portable_turret_fpa_model"),
+				new com.tk.gun.item.CombatPropFpaItem(
+						new Item.Settings().maxCount(1)));
+		AUTO_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ITEM, TkGun.id("auto_turret_fpa_model"),
+				new com.tk.gun.item.CombatPropFpaItem(
+						new Item.Settings().maxCount(1)));
+		SOUL_ANCHOR_PROJECTILE_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("soul_anchor_projectile_model"),
+				new Item(new Item.Settings()));
+		SOUL_ANCHOR_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE,
+				TkGun.id("soul_anchor_projectile"),
+				EntityType.Builder
+						.<com.tk.gun.entity.SoulAnchorEntity>create(
+								com.tk.gun.entity.SoulAnchorEntity::new,
+								SpawnGroup.MISC)
+						.dimensions(1.5F, 1.5F)
+						.disableSaving()
+						.build("soul_anchor_projectile"));
+		INFUSED_LEATHER = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("infused_leather"), new Item(new Item.Settings()));
+		ROSE_ALLOY_CYCLE_BATTERY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("rose_alloy_cycle_battery"),
+				new Item(new Item.Settings().maxCount(16)));
+		ROSE_QUARTZ_SOLUTION = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("rose_quartz_solution"),
+				new Item(new Item.Settings().maxCount(16)));
+		ARCANE_ALLOY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("arcane_alloy"), new Item(new Item.Settings()));
+		// **素材 `子弹` 文件夹里的 5 种子弹**（用户 2026-10-17："将…子弹文件夹中的子弹进行注册"）：
+		// 共用一张 16×16 图集（`textures/item/bullets.png`），各自一个 Java 方块模型
+		// （`models/item/<id>.json`，UV 用像素坐标）。原本的 `mechaniciancombat:bolt`（红头）模型已改成**爆破弹**。
+		BULLET_ITEMS = new java.util.ArrayList<>();
+		for (String id : new String[]{"cutting_bolt", "sculk_bolt", "explosive_bolt",
+				"rose_quartz_bolt", "armor_piercing_bolt"}) {
+			BULLET_ITEMS.add(com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM, TkGun.id(id),
+					new com.tk.gun.item.BoltItem(new Item.Settings())));
+		}
+		// **创造模式标签「机械师」**：枪 + 子弹放进去（用户 2026-10-17）。
+		com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM_GROUP, TkGun.id("main"),
+				net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup.builder()
+						.displayName(net.minecraft.text.Text.translatable("itemGroup.mechaniciancombat"))
+						.icon(() -> new ItemStack(TAB_ICON))
+						.entries((context, entries) -> {
+							entries.add(BACKPACK_MODIFICATION_TABLE_ITEM);
+								entries.add(ARMOR_MODIFICATION_TABLE_ITEM);
+							entries.add(ARCANE_ALLOY_BLOCK_ITEM);
+							for (Item gun : GunRegistry.items()) {
+								entries.add(gun);
+							}
+							entries.add(BOLT);
+							entries.add(HUNTER_SPEAR);
+							entries.add(COMBAT_BACKPACK);
+							entries.add(BACKPACK_CORE);
+							entries.add(PORTABLE_LAUNCHER);
+							entries.add(AUTO_PORTABLE_LAUNCHER);
+							entries.add(SUMMON_ANTENNA);
+							entries.add(GOLEM_DISPATCH_CAPSULE);
+							entries.add(JUMP_BACKPACK_THRUSTER);
+								entries.add(MISSILE_BOX);
+								entries.add(WAR_BANNER);
+							entries.add(BACKPACK_COOLDOWN_RESET);
+							entries.add(MECHANICIAN_UNDERSUIT);
+							entries.add(MECHANICIAN_CHESTPLATE);
+							entries.add(MECHANICIAN_LEGGINGS);
+							entries.add(MECHANICIAN_BOOTS);
+								entries.add(UNDYING_TOTEM_PART);
+								entries.add(PAULDRON_LEFT);
+								entries.add(SOUL_CHAIN);
+								entries.add(SOUL_ANCHOR_PART);
+							entries.add(ENTITY_REMOVAL_TOOL);
+							entries.add(INFUSED_LEATHER);
+							entries.add(ROSE_ALLOY_CYCLE_BATTERY);
+							entries.add(ROSE_QUARTZ_SOLUTION);
+							entries.add(ARCANE_ALLOY);
+							for (Item bullet : BULLET_ITEMS) {
+								entries.add(bullet);
+							}
+						})
+						.build());
+		com.tk.gun.neoforge.RegistryBridge.register(Registries.SCREEN_HANDLER, TkGun.id("ammo_storage"),
+				com.tk.gun.screen.AmmoStorageScreenHandler.TYPE);
+		com.tk.gun.neoforge.RegistryBridge.register(Registries.SCREEN_HANDLER, TkGun.id("recipe_editor"),
+				com.tk.gun.screen.RecipeEditorScreenHandler.TYPE);
+		BOLT_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE, TkGun.id("bolt_projectile"),
+				EntityType.Builder.<com.tk.gun.entity.BoltProjectileEntity>create(
+								com.tk.gun.entity.BoltProjectileEntity::new, SpawnGroup.MISC)
+						.dimensions(0.25F, 0.25F)
+						.build("bolt_projectile"));
+		BULLET_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE, TkGun.id("bullet"),
+				EntityType.Builder.<com.tk.gun.entity.BulletEntity>create(
+								com.tk.gun.entity.BulletEntity::new, SpawnGroup.MISC)
+						.dimensions(0.25F, 0.25F)
+						.build("bullet"));
+		MOLTEN_TRIDENT_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE, TkGun.id("molten_trident"),
+				EntityType.Builder.<com.tk.gun.entity.MoltenTridentEntity>create(
+								com.tk.gun.entity.MoltenTridentEntity::new, SpawnGroup.MISC)
+						.dimensions(0.5F, 0.5F)
+						.build("molten_trident"));
+		WAR_BANNER_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE,
+				TkGun.id("war_banner"),
+				EntityType.Builder.<com.tk.gun.entity.WarBannerEntity>create(
+								com.tk.gun.entity.WarBannerEntity::new, SpawnGroup.MISC)
+						.dimensions(1.0F, 3.0F)
+						.eyeHeight(2.0F)
+						.disableSaving()
+						.build("war_banner"));
+		HUNTER_TURRET_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(Registries.ENTITY_TYPE,
+				TkGun.id("hunter_turret"),
+				EntityType.Builder.<com.tk.gun.entity.HunterTurretEntity>create(
+								com.tk.gun.entity.HunterTurretEntity::new,
+								SpawnGroup.MISC)
+						.dimensions(1.5F, 1.8F)
+						.eyeHeight(1.0F)
+						.build("hunter_turret"));
+		HUNTER_SPEAR_RETURN_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ENTITY_TYPE, TkGun.id("hunter_spear_return"),
+				EntityType.Builder
+						.<com.tk.gun.entity.HunterSpearReturnEntity>create(
+								com.tk.gun.entity.HunterSpearReturnEntity::new,
+								SpawnGroup.MISC)
+						.dimensions(0.5F, 0.5F)
+						.build("hunter_spear_return"));
+		STEEL_ARROW_IMPACT_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(
+				Registries.ENTITY_TYPE, TkGun.id("steel_arrow_impact"),
+				EntityType.Builder
+						.<com.tk.gun.entity.SteelArrowImpactEntity>create(
+								com.tk.gun.entity.SteelArrowImpactEntity::new,
+								SpawnGroup.MISC)
+						.dimensions(2.0F, 2.0F)
+						.disableSaving()
+						.build("steel_arrow_impact"));
+		PayloadTypeRegistry.playS2C().register(GunStatePayload.ID, GunStatePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.FortressSkillCooldownPayload.ID,
+				com.tk.gun.net.FortressSkillCooldownPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.ArmorAbilityPayload.ID,
+				com.tk.gun.net.ArmorAbilityPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.SoulChainPayload.ID,
+				com.tk.gun.net.SoulChainPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.SoulAnchorSkillPayload.ID,
+				com.tk.gun.net.SoulAnchorSkillPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.SoulAnchorStatusPayload.ID,
+				com.tk.gun.net.SoulAnchorStatusPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.MeleeImpactPayload.ID,
+				com.tk.gun.net.MeleeImpactPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.CameraShakePayload.ID,
+				com.tk.gun.net.CameraShakePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(com.tk.gun.net.GunHitMarkerPayload.ID,
+				com.tk.gun.net.GunHitMarkerPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(com.tk.gun.net.GunDemoPayload.ID,
+				com.tk.gun.net.GunDemoPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.CombatBackpackFireResultPayload.ID,
+				com.tk.gun.net.CombatBackpackFireResultPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.CombatBackpackStatusPayload.ID,
+				com.tk.gun.net.CombatBackpackStatusPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.CombatBackpackParticlePayload.ID,
+				com.tk.gun.net.CombatBackpackParticlePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.GunLocatorVentPayload.ID,
+				com.tk.gun.net.GunLocatorVentPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.WarBannerSkillPayload.ID,
+				com.tk.gun.net.WarBannerSkillPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.HunterSpearSkillPayload.ID,
+				com.tk.gun.net.HunterSpearSkillPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(GunFirePayload.ID, GunFirePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
+				com.tk.gun.net.GunJumpPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.JumpBackpackPayload.ID,
+				com.tk.gun.net.JumpBackpackPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.GunFallAttackPayload.ID,
+				com.tk.gun.net.GunFallAttackPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(GunFirePayload.ID, (payload, context) ->
+				context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					if (TkGun.holdingGun(p)) {
+						// 客户端量的枪口/朝向（渲染 locator 骨骼拿到的那个点）：合理性校验一次再用
+						PState st = state(p);
+						Vec3d dir = new Vec3d(payload.dx(), payload.dy(), payload.dz());
+						if (handleFortressSkillAttack(p, dir)) {
+							return;
+						}
+						Vec3d pos = new Vec3d(payload.x(), payload.y(), payload.z());
+						double dist = pos.distanceTo(p.getPos());
+						if (dir.lengthSquared() > 1.0E-6D && dist <= 6.0D) {
+							st.fireMx = pos.x;
+							st.fireMy = pos.y;
+							st.fireMz = pos.z;
+							st.fireDx = dir.x;
+							st.fireDy = dir.y;
+							st.fireDz = dir.z;
+							st.fireMuzzleOk = true;
+						} else {
+							st.fireMuzzleOk = false;
+							TkGun.LOGGER.warn("[mechaniciancombat] 客户端报的枪口不合理（离玩家 {} 格），这一发退回服务端计算",
+									round3(dist));
+						}
+						tryFire(p, false);
+					}
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunJumpPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						startGunJumpAction(context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.JumpBackpackPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleJumpBackpackInput(context.player(), payload.pressed())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.GunFallAttackPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleSilentStormFallInput(context.player())));
+		// —— Z 键（按住 = 专注）/ F 键（装填）（2026-10-17 改）——
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunFocusPayload.ID,
+				com.tk.gun.net.GunFocusPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunReloadPayload.ID,
+				com.tk.gun.net.GunReloadPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunMeleePayload.ID,
+				com.tk.gun.net.GunMeleePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.SoulAnchorInputPayload.ID,
+				com.tk.gun.net.SoulAnchorInputPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunMeleePayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleMeleeInput(context.player(), payload.pressed(),
+								payload.movingForward())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.SoulAnchorInputPayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					if (payload.cancel()) {
+						SoulAnchorSkillService.cancel(context.player());
+					} else if (payload.held()) {
+						SoulAnchorSkillService.press(context.player(),
+								payload.sprinting());
+					} else {
+						SoulAnchorSkillService.release(context.player());
+					}
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunFocusPayload.ID, (payload, context) ->
+				context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
+						return;
+					}
+					if (SoulAnchorSkillService.isActive(p)) {
+						return;
+					}
+					PState st = state(p);
+					long now = p.getWorld().getTime();
+					// **闪避键 + Z 同时按**：翻滚与滑铲共用同一个“组合专注”缓冲。
+				// 如果 Z 先到，直接 startFocus 会先进普通 Focus_ready，随后翻滚/滑铲键又因为
+				// “蹲射准备中”被拒。带组合标记 / 刚收到闪避键时先缓存，等真正的 ROLL 或 SLIDE 开始再兑现。
+					if (holdingSilentStorm(p)
+							&& st.state == TkGun.State.SKILL_JUMP) {
+						handleSilentStormFallInput(p);
+						return;
+					}
+					boolean comboIntent = payload.dodgeCombo()
+							|| st.state == TkGun.State.ROLL
+							|| st.state == TkGun.State.SLIDE
+							|| st.state == TkGun.State.SLIDE_READY;
+					// 同一次组合输入可能已经在这一 tick 由 rollFocusRequested 兑现了；
+					// 晚到的重复 Z 包不要再排队，否则缓冲过期会把已经开始的快速专注又 toggle 掉。
+					if ((st.state == TkGun.State.AIM_ROLL || st.state == TkGun.State.AIM_SLIDE)
+							&& (comboIntent || now < st.quickFocusGuardUntil)) {
+						return;
+					}
+					// 动作已经真正开始：直接走 startFocus 已有的 ROLL/SLIDE 分支。
+					if (comboIntent && (st.state == TkGun.State.ROLL
+							|| st.state == TkGun.State.SLIDE
+							|| st.state == TkGun.State.SLIDE_READY)) {
+						st.dodgeFocusQueued = false;
+						st.dodgeFocusQueuedAt = 0;
+						startFocus(p);
+						return;
+					}
+					// 动作还没开始（包顺序不定）：先存一个通用闪避专注意图，
+					// 由第一个真正开始的 ROLL / SLIDE 消费，避免两种组合互相冲突。
+					if (comboIntent) {
+						st.dodgeFocusQueued = true;
+						st.dodgeFocusQueuedAt = now;
+						TkGun.LOGGER.info("[mechaniciancombat] Z+闪避组合输入先缓存（当前 {}，等 ROLL/SLIDE 开始）玩家={}",
+								st.state, p.getName().getString());
+						return;
+					}
+					// **Z = 切换专注**（用户 2026-10-17："将 z 的长按专注回调为切换"）：
+					// 已专注 → 解除（播 `Focus_over`）；否则 → 进入（播 `Focus_ready`）。
+					// `startFocus` 内部就是这两个分支（部署中会转成 stopFocus）。
+					boolean entering = !st.deployed;
+					startFocus(p);
+					TkGun.LOGGER.info("[mechaniciancombat] Z -> {} 玩家={}",
+							entering ? "进入专注" : "解除专注（Focus_over）", p.getName().getString());
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunReloadPayload.ID, (payload, context) ->
+				context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
+						return;
+					}
+					PState st = state(p);
+					long now = p.getWorld().getTime();
+					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+							|| st.state == TkGun.State.ROLL_TO_RUN
+							|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
+							|| st.state == TkGun.State.MELEE
+							|| st.state == TkGun.State.SKILL_JUMP
+							|| st.state == TkGun.State.FALL_ATTACK
+							|| st.state == TkGun.State.FALL_ATTACK_RECOVERY
+							|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+						return;
+					}
+					if (now < st.reloadUntil) {
+						return;                       // 正在装填
+					}
+					// **过热期间屏蔽装填**（用户 2026-10-17）：这里拦的是**整个散热窗口**
+					// （`overheatUntil` 到期前，含过热动画播完之后还在散热的那段）——客户端只看得见
+					// `OVERHEAT` 状态那一段，所以权威判定放在服务端。
+					// **过热里"翻滚后冲刺窗口"内允许立刻装弹**（用户 2026-10-17："过热状态翻滚后的加速期间
+					// 允许无视过热立即装弹"）：`now < st.dashUntil` 就放行；其它时间照旧拦。
+					if (now < st.overheatUntil && now >= st.dashUntil) {
+						playSound(p, TkGun.SND_VENT, 0.7F, 1.1F);
+						TkGunTexts.say(p, TkGunTexts.OVERHEAT_NO_RELOAD, true);
+						TkGun.LOGGER.info("[mechaniciancombat] F 被拒（过热中，还剩 {} tick）玩家={}",
+								st.overheatUntil - now, p.getName().getString());
+						return;
+					}
+					TkGun.LOGGER.info("[mechaniciancombat] F -> 手动装填（当前弹夹 {}/{}）玩家={}",
+							activeMag(st), TkGun.magazineCapacity(p, st.deployed),
+							p.getName().getString());
+					reload(p);
+				}));
+		// —— 翻滚键（combat_roll 的）：见 GunRollPayload 的注释 ——
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunRollPayload.ID,
+				com.tk.gun.net.GunRollPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunRollPayload.ID, (payload, context) ->
+				context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					PState st = state(p);
+					if (SoulAnchorSkillService.isActive(p)) {
+						return;
+					}
+					if (!TkGun.holdingGun(p)) {
+						if (com.tk.gun.item.MechanicianUndersuitItem
+								.canUseArmorDodge(p)) {
+							handleArmorDodgeRequest(p, st,
+									payload.directionX(), payload.directionZ());
+						}
+						return;
+					}
+					st.rollRequestX = payload.directionX();
+					st.rollRequestZ = payload.directionZ();
+					boolean startingFromFocus = st.deployed;
+					long rollNow = p.getWorld().getTime();
+					if (st.rollFallbackPending) {
+						return;
+					}
+					if (st.state == TkGun.State.SKILL_JUMP) {
+						TkGun.LOGGER.info("[mechaniciancombat] skill jump active, this Alt press ignored player={}",
+								p.getName().getString());
+						return;
+					}
+					if (st.state == TkGun.State.FALL_ATTACK
+							|| st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
+						TkGun.LOGGER.info("[mechaniciancombat] fall attack active, this Alt press ignored player={}",
+								p.getName().getString());
+						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+							|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+							|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
+						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_HIT
+							&& rollNow - st.stateStarted
+									< TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
+						return;
+					}
+					if (st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+						st.overheatUntil = 0;
+						st.heat = 0.0F;
+					}
+					if (st.dodgeFocusQueued
+							&& rollNow > st.dodgeFocusQueuedAt + DODGE_COMBO_BUFFER_TICKS) {
+						st.dodgeFocusQueued = false;
+						st.dodgeFocusQueuedAt = 0;
+					}
+					// 滑铲/收势期间 Alt 不参与翻滚；等这一段结束后由状态机决定。
+					if (st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY) {
+						TkGun.LOGGER.info("[mechaniciancombat] 滑铲/收势中，这次 Alt 忽略 玩家={}", p.getName().getString());
+						return;
+					}
+					// 任何仍在翻滚/翻滚过渡中的 Alt 都不能再次启动翻滚。
+					if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+							|| st.state == TkGun.State.ROLL_TO_RUN) {
+						TkGun.LOGGER.info("[mechaniciancombat] 翻滚/过渡中，这次 Alt 忽略 玩家={}", p.getName().getString());
+						return;
+					}
+					boolean dashMeleeRecovery = st.state == TkGun.State.MELEE
+							&& st.meleeReturning && st.meleeDashReturn;
+					if (st.state == TkGun.State.MELEE && !dashMeleeRecovery) {
+						TkGun.LOGGER.info("[mechaniciancombat] 近战动画尚未完成硬直，这次 Alt 忽略 玩家={}",
+								p.getName().getString());
+						return;
+					}
+					// **蹲射准备期间（AIM/AIM_FAST/AIM_SLIDE 过门）屏蔽闪避键**（用户 2026-10-17）；
+					// **蹲射保持（AIM_HOLD）里闪避一定是翻滚**（把 kind 归 0，跳过下面的滑铲分支）。
+					if (st.state == TkGun.State.AIM || st.state == TkGun.State.AIM_FAST
+							|| st.state == TkGun.State.AIM_ROLL
+							|| st.state == TkGun.State.AIM_SLIDE) {
+						TkGun.LOGGER.info("[mechaniciancombat] 翻滚键：蹲射准备中，忽略 玩家={}", p.getName().getString());
+						return;
+					}
+					if (st.state == TkGun.State.AIM_HOLD) {
+						st.lastDodgeKind = 0;
+					}
+					// **蹲射准备期间不能翻滚**（用户 2026-10-17）：AIM / AIM_FAST / AIM_SLIDE 是"架枪过门"，
+					// 这段里按 Alt 一律忽略（不翻滚、不滑铲，动画不被打断）。
+					if (st.state == TkGun.State.AIM || st.state == TkGun.State.AIM_FAST
+							|| st.state == TkGun.State.AIM_ROLL
+							|| st.state == TkGun.State.AIM_SLIDE) {
+						TkGun.LOGGER.info("[mechaniciancombat] 蹲射准备中（{}），这次 Alt 忽略 玩家={}",
+								st.state, p.getName().getString());
+						return;
+					}
+					// **蹲射时闪避必定是翻滚**（用户 2026-10-17）：`deployed`（架枪/蹲射）里不走滑铲分支，
+					// 一律交给下面的翻滚流程。
+					boolean forceRoll = st.deployed;
+					// **2026-10-17 用户**："翻滚后下一次翻滚再按 Alt 设为滑铲，翻滚与滑铲循环进行，
+					// 循环一次后屏蔽 1 秒，翻滚与滑铲皆不可进行"。
+					//   lastDodgeKind = 1（刚翻滚）→ 这次 Alt = **强制位移滑铲**（`sliding` 动画）；
+					//                      滑完把 kind 归 0，并屏蔽 20 tick（1 秒，两个都不能用）；
+					//   lastDodgeKind = 0/2     → 这次 Alt 走**翻滚**（下面原来的流程，含 combat_roll 的物理翻滚）。
+					if (rollNow < st.dodgeBlockUntil) {
+						return;
+					}
+					if (st.lastDodgeKind == 1 && !forceRoll && rollNow < st.dashUntil) {
+						// **只有翻滚播完才能滑铲**（用户 2026-10-17）：翻滚途中按 Alt 直接忽略（不打断动画）。
+						if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+								|| st.state == TkGun.State.ROLL_TO_RUN) {
+							TkGun.LOGGER.info("[mechaniciancombat] 翻滚还没播完（剩 {} tick），这次 Alt 不滑铲 玩家={}",
+									st.stateUntil - rollNow, p.getName().getString());
+							return;
+						}
+						startModSlide(p, st, rollNow);
+						st.lastDodgeKind = 0;
+						return;
+					}
+					if (st.lastDodgeKind == 1) {
+						st.lastDodgeKind = 0;
+						TkGun.LOGGER.info("[mechaniciancombat] roll dash window expired -> reset dodge cycle, this Alt starts a new roll player={}",
+								p.getName().getString());
+					}
+					// The native roll cooldown gates a new roll, not the slide that belongs
+					// to the previous roll's dash window.
+					if (!CombatRollHook.isInstalled()
+							&& rollNow < st.fallbackRollReadyAt
+							&& !dashMeleeRecovery) {
+						TkGun.LOGGER.info("[mechaniciancombat] 内置翻滚冷却中，拒绝 Alt（剩余 {} tick）玩家={}",
+								st.fallbackRollReadyAt - rollNow, p.getName().getString());
+						rebroadcast(p);
+						return;
+					}
+					// 只有"过热 / 退出过门（Focus_over）"这两段需要我们插手：
+					// **回到 idle 并立刻让翻滚接管** = 打断动画 + 清掉缓慢（缓慢会把移速属性压小，
+					// combat_roll 判定 `GENERIC_MOVEMENT_SPEED > 0` 才允许翻滚）+ 状态切成 ROLL。
+					if (st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER) {
+						st.rollStartedFromFocus = startingFromFocus;
+						interruptForRoll(p, st, "翻滚按键");
+					}
+					// **和普通翻滚同一套奖励**（用户 2026-10-17："专注状态下进行翻滚…给予相同效果"）：
+					// 3 秒 +30% 加速冲刺。走这条路的多半是"combat_roll 因为移速被压住而没滚成"的情况，
+					// 以前只补了冲刺位移、没有这份加成。连锁闪避冷却里 `onDodgeStarted` 会拒绝（返回 true）。
+					if (GunStateMachine.onDodgeStarted(p, st, p.getWorld().getTime(), true)) {
+						st.rollStartedFromFocus = false;
+						return;
+					}
+					st.rollInputAccepted = true;
+					st.rollStartedFromFocus = startingFromFocus;
+					clearPendingShots(p, st, "翻滚离开专注");
+					// 翻滚 = 离开专注（和翻滚事件那条路一致）：不然人会带着"专注里被屏蔽的输入"原地晃，
+					// 而且模型还停在 Focus 循环上、看不到翻滚动作。
+					st.deployed = false;
+					st.focusShots = 0;
+					st.focusRamp = 0;
+					if (!CombatRollHook.isInstalled()) {
+						startFallbackRoll(p, st, rollNow);
+						return;
+					}
+					// Combat Roll 事件可能比 GunRollPayload 晚 1～2 tick 到达。先等待事件；
+					// 只有确认玩家仍未被物理翻滚带走时才执行兜底，避免双重初速和方向覆盖。
+					if (p.getVelocity().horizontalLength() < 0.15D) {
+						st.rollFallbackPending = true;
+						st.rollFallbackAt = rollNow + 2;
+					}
+				}));
+		// —— 动画音效关键帧：客户端"到点了"，服务端**放给附近所有人** ——
+		// 用户 2026-10-17："将音频文件加入 mod 中使旁观者也能听见"。这件事两边各出一半：关键帧的**时间**
+		// 只有客户端知道（GeckoLib 按动画时间回调，倍速也会自动跟着缩放），而**让附近所有人都听见**只有
+		// 服务端做得到（`ServerWorld#playSound` 广播给范围内所有玩家，连发的人自己也会收到那一份）。
+		// ⚠️ 这个 id 只能注册一次（第二十六轮那次启动崩溃就是同一个 id 注册了两遍）。
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunSoundPayload.ID,
+				com.tk.gun.net.GunSoundPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.CombatBackpackFirePayload.ID,
+				com.tk.gun.net.CombatBackpackFirePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.MissileBoxPayload.ID,
+				com.tk.gun.net.MissileBoxPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.CombatBackpackViewPayload.ID,
+				com.tk.gun.net.CombatBackpackViewPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.WarBannerAnchorPayload.ID,
+				com.tk.gun.net.WarBannerAnchorPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.HunterSpearAnchorPayload.ID,
+				com.tk.gun.net.HunterSpearAnchorPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunSoundPayload.ID, (payload, context) ->
+				context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					TkGun.KeyframeSound kf = TkGun.KEYFRAME_SOUNDS.get(payload.sound());
+					if (kf == null || !TkGun.holdingGun(p)) {
+						return;             // 不认识的名字 / 手里不是破垒重炮：忽略（别让改包的拿它当点唱机）
+					}
+					long now = p.getWorld().getTime();
+					PState st = state(p);
+					// GeckoLib may dispatch the same authored Focus_ready cue from
+					// more than one render/controller pass. Only de-duplicate the
+					// deploy bolt here; other identical cues may be intentional.
+					if ("bolt".equals(payload.sound())
+							&& payload.sound().equals(st.lastKeyframeSound)
+							&& now - st.lastKeyframeSoundTick <= 2L) {
+						return;
+					}
+					st.lastKeyframeSound = payload.sound();
+					st.lastKeyframeSoundTick = now;
+					if (st.state == TkGun.State.MELEE
+							&& switch (payload.sound()) {
+								case "glaive_slash02", "double_axe_swing01",
+										"anchor_slam01", "imp1", "1",
+										"claymore_swing", "slash",
+										"skill_spark", "magic_wind_1.mp3",
+										"great_sword_slash", "smash_ground2" -> true;
+								default -> false;
+							}) {
+						return;
+					}
+					if (st.soundTick != now) {           // 每 tick 限制关键帧音效数量，避免重复触发刷屏
+						st.soundTick = now;
+						st.soundCount = 0;
+					}
+					if (++st.soundCount > TkGun.KEYFRAME_SOUNDS_PER_TICK) {
+						return;
+					}
+					if ("vent".equals(payload.sound())) {
+						Identifier gunId = TkGun.definition(p).id();
+						if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
+							p.getServerWorld().playSound(null, p.getBlockPos(),
+									net.minecraft.sound.SoundEvents.BLOCK_SCULK_SHRIEKER_SHRIEK,
+									net.minecraft.sound.SoundCategory.BLOCKS, 2.0F,
+									0.6F + p.getRandom().nextFloat() * 0.4F);
+							return;
+						}
+						if (gunId.equals(TkGun.id("veritas_et_justitia"))) {
+							playSound(p, TkGun.SND_SWORD_HEAT, kf.volume(), kf.pitch());
+							return;
+						}
+					}
+					Identifier soundId = "empty".equals(payload.sound())
+							&& isQuietStorm(p) ? TkGun.SND_HEARTBEAT2 : kf.id();
+					playSound(p, soundId, kf.volume(), kf.pitch());
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.CombatBackpackFirePayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleBackpackAction(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.MissileBoxPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleMissileBoxAction(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.CombatBackpackViewPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleBackpackView(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.WarBannerAnchorPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleWarBannerAnchor(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.HunterSpearAnchorPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						handleHunterSpearAnchor(context.player(), payload)));
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.OpenAmmoStoragePayload.ID,
+				com.tk.gun.net.OpenAmmoStoragePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.SwitchAmmoPayload.ID,
+				com.tk.gun.net.SwitchAmmoPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.RecipeEditorActionPayload.ID,
+				com.tk.gun.net.RecipeEditorActionPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.RecipeEditorActionPayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					if (context.player().currentScreenHandler
+							instanceof com.tk.gun.screen.RecipeEditorScreenHandler editor) {
+						editor.handleAction(context.player(), payload);
+					}
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.OpenAmmoStoragePayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
+						return;
+					}
+					com.tk.gun.neoforge.NeoMenuOpening.openByte(
+							p,
+							com.tk.gun.screen.AmmoStorageScreenHandler.createFactory(),
+							(byte) 0);
+				}));
+		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.SwitchAmmoPayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					ServerPlayerEntity p = context.player();
+					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
+						return;
+					}
+					ItemStack gun = com.tk.gun.item.GunAmmoData.heldGun(p);
+					int before = gun.isEmpty() ? -1 : com.tk.gun.item.GunAmmoData.selected(gun);
+					com.tk.gun.item.GunAmmoData.cycle(p, payload.direction());
+					int after = gun.isEmpty() ? -1 : com.tk.gun.item.GunAmmoData.selected(gun);
+					PState st = state(p);
+					if (before != after
+							&& (!st.shotQueue.isEmpty() || st.shotAnimating || st.boltAt > 0)) {
+						clearPendingShots(p, st, "切换弹种");
+					}
+				}));
+		TkGun.LOGGER.info("[mechaniciancombat] 数据包注册完成：C2S = fire / focus_held / reload_key / roll_key / sound_key（都在服务端执行）");
+		ServerTickEvents.END_SERVER_TICK.register(TkGunServer::tickAll);
+		TkGunCommand.register();
+		if (CombatRollHook.isInstalled()) {
+			CombatRollHook.register();
+		}
+		// 动画段数**从资源里数**（别再写死：v1 是 15 段、v2 是 38 段、v3/v4 都是 22 段 —— 硬编码的数字
+		// 每次换素材都会过期，2026-10-16 就是这么发现上一行还写着 38 的）。
+		TkGun.LOGGER.info("[mechaniciancombat] 服务端就绪: 物品={} 玩家/枪动画={}（GeckoLib rig，{} 段）构建={}",
+				TkGun.id("bowgun"), "mechaniciancombat:animations/entity/bowgun_rig.animation.json",
+				animationCount(), TkGun.BUILD);
+		TkGun.LOGGER.info("[mechaniciancombat] 声音资源自检: {}（sounds.json 每条都要有对应 ogg；"
+				+ "分发出去之后所有声音才生效）", soundAssetCheck());
+	}
+
+	/**
+	 * **声音资源自检**：`sounds.json` 里每一条的 `name` 都要能在包里找到对应的 `sounds/<path>.ogg`。
+	 *
+	 * <p>用户 2026-10-17："要求此 mod 在分发后所有声音都生效" —— 声音全在 mod 自己的 jar 里
+	 * （`assets/mechaniciancombat/sounds/*.ogg` + `sounds.json`），**而且全部由服务端播**
+	 * （`TkGunServer.playSound` / 命中声 / 动画关键帧那条 `GunSoundPayload`），所以打包分发后
+	 * 单机、局域网、专用服、整合包里的旁观者都听得见。这里只是启动时把"有没有漏文件"打出来。
+	 */
+	private static String soundAssetCheck() {
+		String base = "assets/mechaniciancombat/";
+		java.util.List<String> missing = new java.util.ArrayList<>();
+		java.util.List<String> invalid = new java.util.ArrayList<>();
+		int total = 0;
+		try (java.io.InputStream in = TkGunServer.class.getClassLoader()
+				.getResourceAsStream(base + "sounds.json")) {
+			if (in == null) {
+				return "sounds.json 缺失";
+			}
+			String text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+			com.google.gson.JsonObject doc = com.google.gson.JsonParser.parseString(text).getAsJsonObject();
+			for (String event : doc.keySet()) {
+				com.google.gson.JsonObject entry = doc.getAsJsonObject(event);
+				for (com.google.gson.JsonElement el : entry.getAsJsonArray("sounds")) {
+					String name = el.getAsJsonObject().get("name").getAsString();
+					String path = base + "sounds/" + name.substring(name.indexOf(':') + 1) + ".ogg";
+					total++;
+					java.net.URL resource =
+							TkGunServer.class.getClassLoader().getResource(path);
+					if (resource == null) {
+						missing.add(event + " -> " + path);
+						continue;
+					}
+					try (java.io.InputStream audio = resource.openStream()) {
+						byte[] header = audio.readNBytes(4);
+						if (header.length != 4 || header[0] != 'O'
+								|| header[1] != 'g' || header[2] != 'g'
+								|| header[3] != 'S') {
+							invalid.add(event + " -> " + path);
+						}
+					}
+				}
+			}
+		} catch (Throwable t) {
+			return "自检失败: " + t;
+		}
+		if (!missing.isEmpty() || !invalid.isEmpty()) {
+			return "异常 缺=" + missing + " 非Ogg=" + invalid;
+		}
+		return total + "/" + total + " OK（OggS 文件头有效）";
+	}
+
+	/** 数一遍 rig 动画文件里有几段（读不到就返回 "?"，不影响启动）。 */
+	private static String animationCount() {
+		String path = "assets/mechaniciancombat/animations/entity/bowgun_rig.animation.json";
+		try (java.io.InputStream in = TkGunServer.class.getClassLoader().getResourceAsStream(path)) {
+			if (in == null) {
+				return "?";
+			}
+			String text = new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+			com.google.gson.JsonObject doc = com.google.gson.JsonParser
+					.parseString(text).getAsJsonObject().getAsJsonObject("animations");
+			return String.valueOf(doc.size());
+		} catch (Throwable t) {
+			TkGun.LOGGER.warn("[mechaniciancombat] 数动画段数失败: {}", t.toString());
+			return "?";
+		}
+	}
+
+	// ---------------------------------------------------------------- 广播
+	private static void removeGunFromOffhand(ServerPlayerEntity player) {
+		// Server-side final guard for commands, legacy saves and other mods.
+		net.minecraft.entity.player.PlayerInventory inventory = player.getInventory();
+		ItemStack offhand = inventory.getStack(net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT);
+		if (!TkGun.isGun(offhand)) {
+			return;
+		}
+
+		ItemStack gun = inventory.removeStack(net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT);
+		if (inventory.getMainHandStack().isEmpty()) {
+			inventory.setStack(inventory.selectedSlot, gun);
+		} else {
+			inventory.offerOrDrop(gun);
+		}
+		inventory.markDirty();
+		player.playerScreenHandler.syncState();
+		if (player.currentScreenHandler != player.playerScreenHandler) {
+			player.currentScreenHandler.syncState();
+		}
+		TkGun.LOGGER.warn("[mechaniciancombat] blocked gun in offhand; moved to main hand or inventory, player={}",
+				player.getName().getString());
+	}
+
+	private static void broadcast(MinecraftServer server, ServerPlayerEntity actor, TkGun.State state,
+								  int ticks, float heat) {
+		broadcast(server, actor, state, ticks, heat, state(actor).shotIndex);
+	}
+
+	private static void broadcast(MinecraftServer server, ServerPlayerEntity actor, TkGun.State state,
+								  int ticks, float heat, int shotIndex) {
+		PState st = state(actor);
+		long now = actor.getWorld().getTime();
+		int aimLockTicks = (int) Math.max(0, st.aimLockUntil - now);
+		long dashEnd = Math.max(st.dashUntil, st.armorDodgeBoostUntil);
+		int dashTicks = (int) Math.max(0, dashEnd - now);
+		int heatLockTicks = (int) Math.max(0, st.overheatUntil - now);
+		int armorCooldownTicks = (int) Math.max(0,
+				st.armorDodgeCooldownUntil - now);
+		int rollCooldownTicks = !TkGun.holdingGun(actor)
+				&& armorCooldownTicks > 0
+				? armorCooldownTicks
+				: CombatRollHook.isInstalled()
+						? 0 : (int) Math.max(0, st.fallbackRollReadyAt - now);
+		// "在装填窗口里吗" 跟着状态一起发：HUD 靠它显示"装填"，模型那边靠它知道弹夹正在插回去
+		GunStatePayload payload = new GunStatePayload(actor.getId(), state.id, ticks, (int) heat, shotIndex,
+				activeMag(st), now < st.reloadUntil,
+				st.deployed && TkGun.holdingGun(actor), st.shotSeq,
+				now < dashEnd, dashTicks, aimLockTicks, heatLockTicks, st.magAmmo,
+				rollCooldownTicks,
+				TkGun.magazineCapacity(actor, false),
+				TkGun.magazineCapacity(actor, true),
+				TkGun.definition(actor).maxShotIndex(),
+				st.airborneIdle, st.meleeDashAttack, st.meleeReturning,
+				st.meleeDashReturn, st.meleeReturnToRun, st.meleeHoldOver,
+				(state == TkGun.State.FORTRESS_SKILL_LOAD
+						|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+						|| state == TkGun.State.FORTRESS_SKILL_HIT)
+						&& st.fortressSkillFromFocus,
+				state == TkGun.State.FORTRESS_SKILL_LOAD
+						&& st.fortressSkillFromSlide,
+				st.skillJumpHovering, st.skillFallTailPose);
+		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
+			ServerPlayNetworking.send(p, payload);
+		}
+	}
+
+	public static int activeMag(PState st) {
+		return st.deployed ? st.focusShots : st.mag;
+	}
+
+	public static int applyAirborneLandingDamageReduction(ServerPlayerEntity player, int rawDamage) {
+		PState st = state(player);
+		if (rawDamage <= 0 || st.airborneDisqualified || !player.isAlive()
+				|| !TkGun.holdingGun(player) || isAirborneActionState(st.state)) {
+			return rawDamage;
+		}
+		st.landingRollArmed = true;
+		return Math.max(0, rawDamage / 2);
+	}
+
+	private static void setState(MinecraftServer server, ServerPlayerEntity player, TkGun.State state, int ticks) {
+		PState st = state(player);
+		long stateNow = player.getWorld().getTime();
+		// **翻滚期间不许别的状态顶掉它**（用户 2026-10-17："解决翻滚状态时会被其他动作打断并影响该动画的问题"）。
+		// 之前按 Z（进专注）或 F（装填）会直接把 ROLL 换成 AIM_FAST / RELOAD，rig 当场切走，翻滚动画只播一半。
+		// 只放行两种：① 又是 ROLL（再滚一次刷新时长）；② ROLL 已经到点（`stateUntil` 过了）——
+		// 状态机自己的收尾（IDLE / 翻滚后接快速架枪）都走这一条。
+		// 2026-10-17 用户："滑铲会打断翻滚动画，调整为只有完成翻滚后才能够进行滑铲" ——
+		// 恢复成"翻滚没播完不许换状态"（SLIDE 也不再放行）；滑铲的入口在下面自己判"翻滚已结束"。
+		if (st.state == TkGun.State.ROLL && state != TkGun.State.ROLL && stateNow < st.stateUntil) {
+			TkGun.LOGGER.info("[mechaniciancombat] 翻滚中 -> 忽略状态切换 {}（翻滚还剩 {} tick，先让动画播完）玩家={}",
+					state, st.stateUntil - stateNow, player.getName().getString());
+			return;
+		}
+		// 状态机每一次切换都打一行：自动化验证时不用猜——直接从服务端日志就能读出
+		// "何时进了 Focus_ready / Focus_shooting / Focus_over_shooting / sliding / sliding_ready"。
+		if (st.state != state) {
+			TkGun.LOGGER.info("[mechaniciancombat] 状态 {} -> {} ({} ticks) 玩家={}",
+					st.state, state, ticks, player.getName().getString());
+		}
+		final boolean entering = st.state != state;
+		st.state = state;
+		st.stateStarted = player.getWorld().getTime();
+		st.stateUntil = ticks <= 0 ? 0 : st.stateStarted + ticks;
+		if (entering && (state == TkGun.State.AIM || state == TkGun.State.AIM_FAST
+				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE)) {
+			st.aimSoundAt = st.stateStarted + (state == TkGun.State.AIM ? 6
+					: (state == TkGun.State.AIM_FAST ? 2 : 1));
+		}
+		if (isFortressSkillState(state)) {
+			st.fortressSkillSoundMask = 0;
+			playFortressSkillSounds(player, st, 0L);
+		}
+		broadcast(server, player, state, ticks, st.heat);
+	}
+
+	/**
+	 * 把**当前状态原样再播一包**（动画不会重头播：客户端用的是同一份 RawAnimation 实例）。
+	 *
+	 * <p>用途：包里的字段变了、但状态没变的时候 —— 比如强化状态到点/中途收枪，
+	 * `over` 位要立刻告诉客户端（否则得等 5 秒心跳，那期间扣扳机客户端还会按"连射"发包）。
+	 */
+	public static void rebroadcast(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		PState st = state(player);
+		int left = st.stateUntil > 0
+				? (int) Math.max(0, st.stateUntil - player.getWorld().getTime()) : 0;
+		broadcast(server, player, st.state, left, st.heat, st.shotIndex);
+	}
+
+	public static void playSound(ServerPlayerEntity player, Identifier id, float volume, float pitch) {
+		player.getServerWorld().playSound(null, player.getBlockPos(),
+				SoundEvent.of(id), SoundCategory.PLAYERS, volume, pitch);
+	}
+
+	private static boolean isQuietStorm(ServerPlayerEntity player) {
+		return TkGun.definition(player).id()
+				.equals(TkGun.id("abyssal_ancient_cannon"));
+	}
+
+	private static Identifier emptySound(ServerPlayerEntity player) {
+		return isQuietStorm(player) ? TkGun.SND_HEARTBEAT2 : TkGun.SND_DRY;
+	}
+
+	private static void handleBackpackAction(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackFirePayload payload) {
+		long now = player.getWorld().getTime();
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseLauncher(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			clearBackpackState(player);
+			sendBackpackFireResult(player);
+			return;
+		}
+		BackpackCharge state = backpackState(player, now);
+		updateBackpackAim(player, state,
+				payload.cameraX(), payload.cameraY(), payload.cameraZ(),
+				payload.cameraYaw(), payload.cameraPitch(), now);
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			handleWarBannerAction(player, state, now);
+			return;
+		}
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			syncBackpackStatus(player, state, now);
+			sendBackpackFireResult(player);
+			return;
+		}
+		if (now < state.cooldownUntil) {
+			syncBackpackStatus(player, state, now);
+			sendBackpackFireResult(player);
+			return;
+		}
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
+			handleSummonAntennaAction(player, state, payload, now);
+			return;
+		}
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.AUTO) {
+			toggleAutoBackpack(player, state, payload, now);
+			return;
+		}
+		if (com.tk.gun.item.BackpackLauncherRules.isTridentLike(
+				com.tk.gun.item.BackpackAmmoData.stored(player))) {
+			if (state.charges <= 0) {
+				syncBackpackStatus(player, state, now);
+				sendBackpackFireResult(player);
+			} else {
+				clearBackpackMarker(player, state, now);
+				launchBackpackProjectile(player, payload, null, state);
+			}
+			return;
+		}
+		LivingEntity target = activeBackpackTarget(player, state, now);
+		if (target == null) {
+			markBackpackTarget(player, state, payload);
+		} else if (state.charges <= 0) {
+			syncBackpackStatus(player, state, now);
+			sendBackpackFireResult(player);
+		} else {
+			launchBackpackProjectile(player, payload, target, state);
+		}
+	}
+
+	private static void handleWarBannerAction(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		PState skillState = state(player);
+		boolean castStateAllowed = !TkGun.holdingGun(player)
+				|| (skillState.state == TkGun.State.IDLE
+						&& !skillState.deployed
+						&& !skillState.airborneIdle
+						&& !player.isUsingItem()
+						&& !player.isSneaking());
+		if (!player.isOnGround() || !castStateAllowed
+				|| SoulAnchorSkillService.isActive(player)
+				|| now < skillState.battleBannerCastUntil
+				|| player.getItemCooldownManager().isCoolingDown(WAR_BANNER)
+				|| hasActiveWarBanner(player)) {
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		skillState.battleBannerCastStarted = now;
+		skillState.battleBannerCastUntil = now + WAR_BANNER_SKILL_TICKS;
+		skillState.battleBannerGunHeld = TkGun.holdingGun(player);
+		skillState.battleBannerCastYaw = player.getYaw();
+		skillState.battleBannerSoundMask = 0;
+		WAR_BANNER_ANCHORS.remove(player.getUuid());
+		if (skillState.battleBannerGunHeld) {
+			GunStateMachine.clearDash(player);
+			skillState.dashUntil = 0L;
+			skillState.speedBoostUntil = 0L;
+			skillState.dashSyncActive = false;
+			player.setSprinting(false);
+			applyWarBannerCastMovement(player, true);
+		}
+		com.tk.gun.net.WarBannerSkillPayload payload =
+				new com.tk.gun.net.WarBannerSkillPayload(
+						player.getId(), now, WAR_BANNER_SKILL_TICKS,
+						TkGun.holdingGun(player));
+		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
+		}
+		syncBackpackStatus(player, state, now);
+	}
+
+	public static boolean deployHunterTurret(ServerPlayerEntity player,
+			ItemStack stack) {
+		if (player == null || stack == null || stack.isEmpty()
+				|| HUNTER_SPEAR == null || !stack.isOf(HUNTER_SPEAR)
+				|| !player.isAlive() || player.isSpectator()
+				|| !player.isOnGround()) {
+			return false;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		if (now < st.hunterSpearDeployUntil
+				|| now < st.battleBannerCastUntil
+				|| activeHunterTurretCount(player)
+						>= MAX_HUNTER_TURRETS) {
+			return false;
+		}
+		st.hunterSpearDeployStarted = now;
+		st.hunterSpearDeployUntil = now + HUNTER_SPEAR_SKILL_TICKS;
+		st.hunterSpearDeployYaw = player.getYaw();
+		st.hunterSpearSoundMask = 0;
+		HUNTER_SPEAR_ANCHORS.remove(player.getUuid());
+		applyHunterSpearDeploySlow(player, true);
+		playHunterSpearDeploySound(player, 0);
+		st.hunterSpearSoundMask |= 1;
+		com.tk.gun.net.HunterSpearSkillPayload payload =
+				new com.tk.gun.net.HunterSpearSkillPayload(
+						player.getId(), now, HUNTER_SPEAR_SKILL_TICKS);
+		for (ServerPlayerEntity viewer :
+				player.getServerWorld().getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
+		}
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] hunter spear deployment started player={} yaw={}",
+				player.getName().getString(), player.getYaw());
+		return true;
+	}
+
+	private static void tickHunterSpearDeploy(ServerPlayerEntity player,
+			PState st, long now) {
+		if (st.hunterSpearDeployStarted <= 0L) {
+			return;
+		}
+		applyHunterSpearDeploySlow(player, true);
+		int elapsed = (int) (now - st.hunterSpearDeployStarted);
+		for (int i = 0; i < HUNTER_SPEAR_SOUND_TICKS.length; i++) {
+			int bit = 1 << i;
+			if ((st.hunterSpearSoundMask & bit) == 0
+					&& elapsed >= HUNTER_SPEAR_SOUND_TICKS[i]) {
+				st.hunterSpearSoundMask |= bit;
+				playHunterSpearDeploySound(player, i);
+			}
+		}
+		if (now < st.hunterSpearDeployUntil) {
+			return;
+		}
+		float yaw = st.hunterSpearDeployYaw;
+		st.hunterSpearDeployStarted = 0L;
+		st.hunterSpearDeployUntil = 0L;
+		st.hunterSpearDeployYaw = 0.0F;
+		st.hunterSpearSoundMask = 0;
+		applyHunterSpearDeploySlow(player, false);
+		if (!(player.getWorld() instanceof ServerWorld world)) {
+			return;
+		}
+		HunterSpearAnchor anchor =
+				HUNTER_SPEAR_ANCHORS.remove(player.getUuid());
+		boolean anchorValid = anchor != null
+				&& now - anchor.updatedAt() <= 5L;
+		Vec3d requested = anchorValid
+				? new Vec3d(anchor.x(), anchor.y(), anchor.z())
+				: player.getPos().add(
+						player.getRotationVec(1.0F).multiply(2.0D));
+		Vec3d ground = projectWarBannerLocatorToGround(
+				player, world, requested);
+		com.tk.gun.entity.HunterTurretEntity turret =
+				new com.tk.gun.entity.HunterTurretEntity(
+						HUNTER_TURRET_ENTITY, world);
+		turret.setOwnerUuid(player.getUuid());
+		turret.refreshPositionAndAngles(
+				ground.x, ground.y, ground.z, 0.0F, 0.0F);
+		if (world.spawnEntity(turret)) {
+			hunterTurretIds(player.getUuid()).add(turret.getUuid());
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] hunter turret spawned at {} owner={}",
+					ground, player.getName().getString());
+		} else {
+			giveOrDropHunterSpear(player, ground);
+		}
+	}
+
+	private static void handleHunterSpearAnchor(ServerPlayerEntity player,
+			com.tk.gun.net.HunterSpearAnchorPayload payload) {
+		long now = player.getWorld().getTime();
+		PState st = state(player);
+		if (st.hunterSpearDeployStarted <= 0L
+				|| now >= st.hunterSpearDeployUntil
+				|| !Double.isFinite(payload.x())
+				|| !Double.isFinite(payload.y())
+				|| !Double.isFinite(payload.z())
+				|| !Float.isFinite(payload.yaw())) {
+			return;
+		}
+		Vec3d marker = new Vec3d(payload.x(), payload.y(), payload.z());
+		if (marker.squaredDistanceTo(player.getPos()) > 36.0D) {
+			return;
+		}
+		HUNTER_SPEAR_ANCHORS.put(player.getUuid(),
+				new HunterSpearAnchor(marker.x, marker.y, marker.z,
+						payload.yaw(), now));
+	}
+
+	private static Set<UUID> hunterTurretIds(UUID ownerUuid) {
+		return HUNTER_TURRETS.computeIfAbsent(
+				ownerUuid, ignored -> new HashSet<>());
+	}
+
+	private static int activeHunterTurretCount(
+			ServerPlayerEntity player) {
+		Set<UUID> ids = hunterTurretIds(player.getUuid());
+		for (UUID entityId : new ArrayList<>(ids)) {
+			Entity entity = player.getServerWorld().getEntity(entityId);
+			if (!(entity
+					instanceof com.tk.gun.entity.HunterTurretEntity turret)
+					|| !turret.isAlive()) {
+				ids.remove(entityId);
+				continue;
+			}
+			if (player.squaredDistanceTo(turret) > 225.0D) {
+				ids.remove(entityId);
+				turret.finishAndReturn("owner left range");
+			}
+		}
+		for (Entity entity : player.getServerWorld().iterateEntities()) {
+			if (entity instanceof com.tk.gun.entity.HunterTurretEntity turret
+					&& player.getUuid().equals(turret.getOwnerUuid())
+					&& turret.isAlive()) {
+				ids.add(turret.getUuid());
+			}
+		}
+		if (ids.isEmpty()) {
+			HUNTER_TURRETS.remove(player.getUuid());
+		}
+		return ids.size();
+	}
+
+	public static void onHunterTurretFinished(
+			com.tk.gun.entity.HunterTurretEntity turret) {
+		if (!(turret.getWorld() instanceof ServerWorld world)
+				|| turret.getOwnerUuid() == null) {
+			return;
+		}
+		Set<UUID> ownerTurrets =
+				HUNTER_TURRETS.get(turret.getOwnerUuid());
+		if (ownerTurrets != null) {
+			ownerTurrets.remove(turret.getUuid());
+			if (ownerTurrets.isEmpty()) {
+				HUNTER_TURRETS.remove(turret.getOwnerUuid());
+			}
+		}
+		ServerPlayerEntity owner = world.getServer().getPlayerManager()
+				.getPlayer(turret.getOwnerUuid());
+		Vec3d origin = turret.getPos().add(0.0D, 1.0D, 0.0D);
+		if (owner == null) {
+			if (HUNTER_SPEAR != null) {
+				world.spawnEntity(new ItemEntity(
+						world, origin.x, origin.y, origin.z,
+						new ItemStack(HUNTER_SPEAR)));
+			}
+			return;
+		}
+		ItemStack spear = new ItemStack(HUNTER_SPEAR);
+		com.tk.gun.entity.HunterSpearReturnEntity returning =
+				new com.tk.gun.entity.HunterSpearReturnEntity(
+						HUNTER_SPEAR_RETURN_ENTITY, world, owner, spear);
+		returning.refreshPositionAndAngles(
+				origin.x, origin.y, origin.z, 0.0F, 0.0F);
+		Vec3d direction = owner.getEyePos().subtract(origin);
+		if (direction.lengthSquared() > 1.0E-6D) {
+			returning.setVelocity(direction.normalize().multiply(1.5D));
+		}
+		world.spawnEntity(returning);
+		world.playSound(null, turret.getBlockPos(),
+				SoundEvents.ITEM_TRIDENT_RETURN, SoundCategory.PLAYERS,
+				1.0F, 1.0F);
+	}
+
+	private static void cleanupHunterSpearForPlayer(
+			ServerPlayerEntity player) {
+		HUNTER_SPEAR_ANCHORS.remove(player.getUuid());
+		applyHunterSpearDeploySlow(player, false);
+		PState st = STATES.get(player.getUuid());
+		if (st != null) {
+			if (st.hunterSpearDeployStarted > 0L && HUNTER_SPEAR != null) {
+				player.dropItem(new ItemStack(HUNTER_SPEAR), false);
+			}
+			st.hunterSpearDeployStarted = 0L;
+			st.hunterSpearDeployUntil = 0L;
+			st.hunterSpearDeployYaw = 0.0F;
+			st.hunterSpearSoundMask = 0;
+		}
+		// Leave an already deployed turret in the saved world. Its owner UUID is
+		// stored on the entity, and HUNTER_TURRETS is only an in-memory lookup.
+		// Removing it here caused the turret to be discarded before the world
+		// could save it when the player quit and rejoined.
+	}
+
+	private static void playHunterSpearDeploySound(
+			ServerPlayerEntity player, int index) {
+		switch (index) {
+			case 0, 4 -> playMeleeSound(
+					player, "double_axe_swing01", 1.0F, 1.0F);
+			case 1 -> playSound(player, TkGun.SND_SKILL_SPARK, 1.0F, 1.0F);
+			case 2 -> playSound(player, TkGun.SND_HUNTER_MECH3, 1.0F, 1.0F);
+			case 3 -> playSound(
+					player, TkGun.SND_VERITAS_FOCUS_EMPTY, 0.7F, 1.0F);
+			default -> {
+			}
+		}
+	}
+
+	private static void giveOrDropHunterSpear(ServerPlayerEntity player,
+			Vec3d position) {
+		if (HUNTER_SPEAR == null) {
+			return;
+		}
+		ItemStack spear = new ItemStack(HUNTER_SPEAR);
+		if (!player.getInventory().insertStack(spear)) {
+			player.dropItem(spear, false);
+		}
+	}
+
+	private static void applyHunterSpearDeploySlow(
+			ServerPlayerEntity player, boolean active) {
+		EntityAttributeInstance speed =
+				player.getAttributeInstance(
+						EntityAttributes.GENERIC_MOVEMENT_SPEED);
+		if (speed == null) {
+			return;
+		}
+		boolean present =
+				speed.getModifier(HUNTER_SPEAR_DEPLOY_SLOW) != null;
+		if (active && !present) {
+			speed.addTemporaryModifier(new EntityAttributeModifier(
+					HUNTER_SPEAR_DEPLOY_SLOW, -0.5D,
+					EntityAttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+		} else if (!active && present) {
+			speed.removeModifier(HUNTER_SPEAR_DEPLOY_SLOW);
+		}
+	}
+
+	private static void tickWarBannerCast(ServerPlayerEntity player,
+			PState st, long now) {
+		if (st.battleBannerCastStarted <= 0L) {
+			return;
+		}
+		int elapsed = (int) (now - st.battleBannerCastStarted);
+		if (st.battleBannerGunHeld) {
+			applyWarBannerCastMovement(player, true);
+			player.setSprinting(false);
+		}
+		for (int index = 0; index < WAR_BANNER_SOUND_TICKS.length; index++) {
+			int bit = 1 << index;
+			if ((st.battleBannerSoundMask & bit) != 0
+					|| elapsed < WAR_BANNER_SOUND_TICKS[index]) {
+				continue;
+			}
+			st.battleBannerSoundMask |= bit;
+			String key = WAR_BANNER_SOUND_KEYS[index];
+			if (playMeleeSound(player, key, 1.0F, 1.0F)) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] War Banner cast sound {} at {} tick player={}",
+						key, elapsed, player.getName().getString());
+			}
+		}
+		if (now < st.battleBannerCastUntil) {
+			return;
+		}
+		st.battleBannerCastStarted = 0L;
+		st.battleBannerCastUntil = 0L;
+		st.battleBannerGunHeld = false;
+		st.battleBannerSoundMask = 0;
+		float bannerFacingYaw = st.battleBannerCastYaw;
+		st.battleBannerCastYaw = 0.0F;
+		applyWarBannerCastMovement(player, false);
+		if (!(player.getWorld() instanceof ServerWorld world)) {
+			return;
+		}
+		BackpackCharge backpack = backpackState(player, now);
+		WarBannerAnchor anchor = WAR_BANNER_ANCHORS.remove(player.getUuid());
+		boolean anchorValid = anchor != null
+				&& now - anchor.updatedAt() <= 5L;
+		float cameraYaw = anchorValid
+				? anchor.cameraYaw()
+				: backpack.aimUpdatedAt >= 0L
+						&& now - backpack.aimUpdatedAt <= 4L
+						? (float) backpack.aimYaw : player.getYaw();
+		Vec3d locator = anchorValid
+				? projectWarBannerLocatorToGround(player, world,
+						new Vec3d(anchor.x(), anchor.y(), anchor.z()))
+				: warBannerGroundLocatorPosition(player, world, cameraYaw);
+		WarBannerEntity banner = new WarBannerEntity(WAR_BANNER_ENTITY, world);
+		banner.setOwnerUuid(player.getUuid());
+		Vec3d spawn = locator.subtract(
+				0.0D, WarBannerEntity.LOCATOR_HEIGHT, 0.0D);
+		float bannerYaw = yawFacingFromNorthSide(
+				Vec3d.fromPolar(0.0F, bannerFacingYaw));
+		banner.refreshPositionAndAngles(spawn.x, spawn.y, spawn.z,
+				bannerYaw, 0.0F);
+		banner.setVisualYaw(bannerYaw);
+		if (world.spawnEntity(banner)) {
+			WAR_BANNERS.put(player.getUuid(), banner.getUuid());
+			placeWarBannerLight(world, banner.getUuid(), locator);
+			damageWarBannerArrival(player, world, locator);
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] War Banner spawned at {} locator={} yaw={} player={}",
+					spawn, locator, bannerYaw,
+					player.getName().getString());
+		}
+	}
+
+	private static float yawFacingFromNorthSide(Vec3d desiredNorth) {
+		// 战旗模型 P2: locator=(0,0,0), N_side=(0,0,-8). The renderer's
+		// standard 180-degree entity transform maps that local -Z to world forward.
+		return (float) Math.toDegrees(Math.atan2(
+				-desiredNorth.x, desiredNorth.z));
+	}
+
+	private static void applyWarBannerCastMovement(
+			ServerPlayerEntity player, boolean active) {
+		EntityAttributeInstance speed =
+				player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
+		if (speed != null
+				&& speed.getModifier(WAR_BANNER_CAST_SLOW) != null) {
+			// Remove the previous movement-slow implementation. Stopping the
+			// player is handled below; movement speed must keep driving vanilla
+			// FOV normally so the explicit banner pull-out is the only zoom.
+			speed.removeModifier(WAR_BANNER_CAST_SLOW);
+		}
+		EntityAttributeInstance jump =
+				player.getAttributeInstance(EntityAttributes.GENERIC_JUMP_STRENGTH);
+		if (jump != null) {
+			boolean has = jump.getModifier(WAR_BANNER_CAST_NO_JUMP) != null;
+			if (active && !has) {
+				jump.addTemporaryModifier(new EntityAttributeModifier(
+						WAR_BANNER_CAST_NO_JUMP, -1.0D,
+						EntityAttributeModifier.Operation.ADD_MULTIPLIED_TOTAL));
+			} else if (!active && has) {
+				jump.removeModifier(WAR_BANNER_CAST_NO_JUMP);
+			}
+		}
+		if (active) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+		}
+	}
+
+	private static void damageWarBannerArrival(ServerPlayerEntity owner,
+			ServerWorld world, Vec3d center) {
+		for (LivingEntity target : world.getEntitiesByClass(
+				LivingEntity.class,
+				new net.minecraft.util.math.Box(
+						center.x - WAR_BANNER_IMPACT_RADIUS,
+						center.y - WAR_BANNER_IMPACT_RADIUS,
+						center.z - WAR_BANNER_IMPACT_RADIUS,
+						center.x + WAR_BANNER_IMPACT_RADIUS,
+						center.y + WAR_BANNER_IMPACT_RADIUS,
+						center.z + WAR_BANNER_IMPACT_RADIUS),
+				thisTarget -> thisTarget.isAlive() && !thisTarget.isSpectator())) {
+			if (target == owner || isWarBannerFriendly(target, owner)
+					|| target.getBoundingBox().getCenter().squaredDistanceTo(center)
+							> WAR_BANNER_IMPACT_RADIUS * WAR_BANNER_IMPACT_RADIUS) {
+				continue;
+			}
+			target.damage(owner.getDamageSources().playerAttack(owner), 5.0F);
+			Vec3d away = target.getPos().subtract(center);
+			Vec3d horizontal = new Vec3d(away.x, 0.0D, away.z);
+			if (horizontal.lengthSquared() < 1.0E-6D) {
+				horizontal = Vec3d.fromPolar(0.0F, owner.getYaw());
+			}
+			Vec3d direction = horizontal.normalize();
+			double perTick = WAR_BANNER_KNOCKBACK_DISTANCE
+					/ WAR_BANNER_KNOCKBACK_TICKS;
+			target.setVelocity(
+					direction.x * perTick, 0.0D, direction.z * perTick);
+			target.velocityModified = true;
+			WAR_BANNER_KNOCKBACKS.put(target.getUuid(),
+					new BannerKnockback(target.getUuid(), direction,
+							WAR_BANNER_KNOCKBACK_TICKS - 1));
+		}
+	}
+
+	private static boolean isWarBannerFriendly(
+			LivingEntity target, ServerPlayerEntity owner) {
+		if (target instanceof PlayerEntity) {
+			return true;
+		}
+		if (target.isTeammate(owner)) {
+			return true;
+		}
+		if (target instanceof TameableEntity pet
+				&& owner.getUuid().equals(pet.getOwnerUuid())) {
+			return true;
+		}
+		return target instanceof com.tk.gun.entity.MoltenGolemEntity golem
+				&& golem.isOwner(owner);
+	}
+
+	private static void tickWarBannerKnockbacks(MinecraftServer server) {
+		Iterator<Map.Entry<UUID, BannerKnockback>> iterator =
+				WAR_BANNER_KNOCKBACKS.entrySet().iterator();
+		while (iterator.hasNext()) {
+			BannerKnockback knockback = iterator.next().getValue();
+			Entity entity = null;
+			for (ServerWorld world : server.getWorlds()) {
+				entity = world.getEntity(knockback.targetUuid);
+				if (entity != null) {
+					break;
+				}
+			}
+			if (!(entity instanceof LivingEntity living)
+					|| !living.isAlive() || knockback.remainingTicks <= 0) {
+				iterator.remove();
+				continue;
+			}
+			double perTick = WAR_BANNER_KNOCKBACK_DISTANCE
+					/ WAR_BANNER_KNOCKBACK_TICKS;
+			living.setVelocity(knockback.direction.x * perTick, 0.0D,
+					knockback.direction.z * perTick);
+			living.velocityModified = true;
+			knockback.remainingTicks--;
+		}
+	}
+
+	private static Vec3d warBannerGroundLocatorPosition(
+			ServerPlayerEntity player, ServerWorld world, float cameraYaw) {
+		double yaw = Math.toRadians(cameraYaw);
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		Vec3d right = new Vec3d(-Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		// Tail-frame locator from the updated body -> flag hierarchy:
+		// right=0.278125, forward=0.993125, height=0.893125 blocks.
+		Vec3d handLocator = player.getPos()
+				.add(right.multiply(0.278125D))
+				.add(forward.multiply(0.993125D))
+				.add(0.0D, 0.893125D, 0.0D);
+		return projectWarBannerLocatorToGround(player, world, handLocator);
+	}
+
+	private static Vec3d projectWarBannerLocatorToGround(
+			ServerPlayerEntity player, ServerWorld world, Vec3d locator) {
+		int blockX = net.minecraft.util.math.MathHelper.floor(locator.x);
+		int blockZ = net.minecraft.util.math.MathHelper.floor(locator.z);
+		int startY = net.minecraft.util.math.MathHelper.floor(
+				player.getY() + 1.0D);
+		int endY = net.minecraft.util.math.MathHelper.floor(Math.min(
+				player.getY(), locator.y) - 6.0D);
+		double groundY = player.getY();
+		for (int blockY = startY; blockY >= endY; blockY--) {
+			BlockPos pos = new BlockPos(blockX, blockY, blockZ);
+			BlockState state = world.getBlockState(pos);
+			var shape = state.getCollisionShape(world, pos);
+			if (shape.isEmpty()) {
+				continue;
+			}
+			groundY = pos.getY()
+					+ shape.getMax(net.minecraft.util.math.Direction.Axis.Y);
+			break;
+		}
+		return new Vec3d(locator.x, groundY, locator.z);
+	}
+
+	private static void handleWarBannerAnchor(ServerPlayerEntity player,
+			com.tk.gun.net.WarBannerAnchorPayload payload) {
+		long now = player.getWorld().getTime();
+		PState st = state(player);
+		if (st.battleBannerCastStarted <= 0L
+				|| now >= st.battleBannerCastUntil
+				|| !Double.isFinite(payload.x())
+				|| !Double.isFinite(payload.y())
+				|| !Double.isFinite(payload.z())
+				|| !Float.isFinite(payload.cameraYaw())) {
+			return;
+		}
+		Vec3d locator = new Vec3d(payload.x(), payload.y(), payload.z());
+		if (locator.squaredDistanceTo(player.getPos()) > 16.0D) {
+			return;
+		}
+		WAR_BANNER_ANCHORS.put(player.getUuid(),
+				new WarBannerAnchor(payload.x(), payload.y(), payload.z(),
+						payload.cameraYaw(), now));
+	}
+
+	private static boolean hasActiveWarBanner(ServerPlayerEntity player) {
+		UUID entityUuid = WAR_BANNERS.get(player.getUuid());
+		if (entityUuid == null) {
+			return false;
+		}
+		Entity banner = player.getServerWorld().getEntity(entityUuid);
+		if (banner instanceof WarBannerEntity && banner.isAlive()) {
+			return true;
+		}
+		WAR_BANNERS.remove(player.getUuid());
+		return false;
+	}
+
+	public static void onWarBannerExpired(WarBannerEntity banner) {
+		UUID ownerUuid = banner.getOwnerUuid();
+		if (ownerUuid == null || !(banner.getWorld() instanceof ServerWorld world)) {
+			return;
+		}
+		removeWarBannerLight(banner.getUuid());
+		UUID current = WAR_BANNERS.get(ownerUuid);
+		if (current != null && current.equals(banner.getUuid())) {
+			WAR_BANNERS.remove(ownerUuid);
+		}
+		ServerPlayerEntity owner = world.getServer().getPlayerManager()
+				.getPlayer(ownerUuid);
+		if (owner != null) {
+			owner.getItemCooldownManager().set(
+					WAR_BANNER, WAR_BANNER_COOLDOWN_TICKS);
+			long now = owner.getWorld().getTime();
+			syncBackpackStatus(owner, backpackState(owner, now), now);
+		}
+	}
+
+	private static void cleanupWarBannerForPlayer(ServerPlayerEntity player) {
+		UUID bannerUuid = WAR_BANNERS.remove(player.getUuid());
+		if (bannerUuid != null
+				&& player.getServerWorld().getEntity(bannerUuid)
+				instanceof WarBannerEntity banner) {
+			removeWarBannerLight(banner.getUuid());
+			banner.discard();
+		}
+		WAR_BANNER_ANCHORS.remove(player.getUuid());
+		PState st = STATES.get(player.getUuid());
+		if (st != null) {
+			st.battleBannerCastStarted = 0L;
+			st.battleBannerCastUntil = 0L;
+			st.battleBannerGunHeld = false;
+			st.battleBannerCastYaw = 0.0F;
+			st.battleBannerSoundMask = 0;
+		}
+		applyWarBannerCastMovement(player, false);
+	}
+
+	private static void placeWarBannerLight(ServerWorld world, UUID bannerUuid,
+			Vec3d locator) {
+		BlockPos origin = BlockPos.ofFloored(
+				locator.x, locator.y + 0.5D, locator.z);
+		for (int offset = 0; offset < 3; offset++) {
+			BlockPos pos = origin.up(offset);
+			BlockState previous = world.getBlockState(pos);
+			if (!previous.isAir() && !previous.isReplaceable()) {
+				continue;
+			}
+			BlockState light = Blocks.LIGHT.getDefaultState()
+					.with(LightBlock.LEVEL_15, 15);
+			if (world.setBlockState(pos, light, Block.NOTIFY_ALL)) {
+				WAR_BANNER_LIGHTS.put(bannerUuid,
+						new WarBannerLight(world, pos, previous, light));
+			}
+			return;
+		}
+	}
+
+	private static void tickWarBannerLights(MinecraftServer server) {
+		Iterator<Map.Entry<UUID, WarBannerLight>> iterator =
+				WAR_BANNER_LIGHTS.entrySet().iterator();
+		while (iterator.hasNext()) {
+			Map.Entry<UUID, WarBannerLight> entry = iterator.next();
+			WarBannerLight light = entry.getValue();
+			if (light.world().getEntity(entry.getKey())
+					instanceof WarBannerEntity banner
+					&& banner.isAlive()) {
+				continue;
+			}
+			restoreWarBannerLight(light);
+			iterator.remove();
+		}
+	}
+
+	private static void removeWarBannerLight(UUID bannerUuid) {
+		WarBannerLight light = WAR_BANNER_LIGHTS.remove(bannerUuid);
+		if (light != null) {
+			restoreWarBannerLight(light);
+		}
+	}
+
+	private static void restoreWarBannerLight(WarBannerLight light) {
+		if (light.world().getBlockState(light.pos()).equals(light.placed())) {
+			light.world().setBlockState(
+					light.pos(), light.previous(), Block.NOTIFY_ALL);
+		}
+	}
+
+	private static void removeAllWarBannerLights() {
+		for (WarBannerLight light : WAR_BANNER_LIGHTS.values()) {
+			restoreWarBannerLight(light);
+		}
+		WAR_BANNER_LIGHTS.clear();
+	}
+
+	private static void handleMissileBoxAction(ServerPlayerEntity player,
+			com.tk.gun.net.MissileBoxPayload payload) {
+		ItemStack backpack = com.tk.gun.item.CombatBackpackItem.equippedStack(player);
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(backpack)) {
+			clearMissileState(player);
+			return;
+		}
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		if (now < state.missileCooldownUntil) {
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		updateMissileAim(state, payload, now);
+		if (!payload.release()) {
+			if (!state.missileAiming && !state.missileFiring) {
+				if (!com.tk.gun.item.BackpackAmmoData.stored(player)
+						.isOf(Items.FIREWORK_ROCKET)) {
+					return;
+				}
+				clearMissileTargets(player, state);
+				state.missileAiming = true;
+				state.missileNextMarkAt = now;
+			}
+			syncBackpackStatus(player, state, now);
+			return;
+		}
+		if (!state.missileAiming) {
+			return;
+		}
+		state.missileAiming = false;
+		copyMissilePorts(state, payload.ports());
+		state.missileFiring = !state.missileTargets.isEmpty();
+		state.missileNextShotAt = now;
+		state.missileShotIndex = 0;
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void updateMissileAim(BackpackCharge state,
+			com.tk.gun.net.MissileBoxPayload payload, long now) {
+		if (!Double.isFinite(payload.cameraX()) || !Double.isFinite(payload.cameraY())
+				|| !Double.isFinite(payload.cameraZ())
+				|| !Double.isFinite(payload.cameraYaw())
+				|| !Double.isFinite(payload.cameraPitch())) {
+			return;
+		}
+		state.aimCameraX = payload.cameraX();
+		state.aimCameraY = payload.cameraY();
+		state.aimCameraZ = payload.cameraZ();
+		state.aimYaw = payload.cameraYaw();
+		state.aimPitch = payload.cameraPitch();
+		state.missileHalfHorizontalTan = Math.max(0.02D,
+				Math.min(4.0D, payload.halfHorizontalTan()));
+		state.missileHalfVerticalTan = Math.max(0.02D,
+				Math.min(4.0D, payload.halfVerticalTan()));
+		state.aimUpdatedAt = now;
+	}
+
+	private static void copyMissilePorts(BackpackCharge state, double[] ports) {
+		if (ports == null || ports.length < state.missilePorts.length) {
+			return;
+		}
+		System.arraycopy(ports, 0, state.missilePorts, 0,
+				state.missilePorts.length);
+	}
+
+	private static void tickMissileBox(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		ItemStack backpack = com.tk.gun.item.CombatBackpackItem.equippedStack(player);
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseMissileBox(backpack)) {
+			clearMissileState(player);
+			return;
+		}
+		if (state.missileCooldownUntil > 0 && now >= state.missileCooldownUntil) {
+			state.missileCooldownUntil = 0;
+		}
+		if (state.missileAiming) {
+			ItemStack ammo = com.tk.gun.item.BackpackAmmoData.stored(player);
+			if (!ammo.isOf(Items.FIREWORK_ROCKET)) {
+				clearMissileTargets(player, state);
+				state.missileAiming = false;
+				return;
+			}
+			int limit = Math.min(MISSILE_BOX_MAX_TARGETS, ammo.getCount());
+			if (now >= state.missileNextMarkAt
+					&& state.missileTargets.size() < limit) {
+				LivingEntity target = nextMissileTarget(player, state);
+				if (target != null) {
+					state.missileTargets.add(target.getUuid());
+					target.addStatusEffect(new StatusEffectInstance(
+							StatusEffects.GLOWING, MISSILE_BOX_GLOW_TICKS,
+							0, false, false, true), player);
+					player.getServerWorld().playSound(null, player.getBlockPos(),
+							SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
+							SoundCategory.PLAYERS,
+							TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+				}
+				state.missileNextMarkAt = now
+						+ MISSILE_BOX_MARK_INTERVAL_TICKS;
+			}
+			return;
+		}
+		if (!state.missileFiring || now < state.missileNextShotAt) {
+			return;
+		}
+		if (state.missileShotIndex >= state.missileTargets.size()) {
+			finishMissileVolley(player, state, now);
+			return;
+		}
+		UUID targetId = state.missileTargets.get(state.missileShotIndex);
+		int sequence = state.missileShotIndex++;
+		Entity targetEntity = player.getServerWorld().getEntity(targetId);
+		if (!(targetEntity instanceof LivingEntity target)
+				|| !target.isAlive()) {
+			state.missileNextShotAt = now;
+			return;
+		}
+		if (!fireMissileAt(player, state, target, sequence, now)) {
+			finishMissileVolley(player, state, now);
+			return;
+		}
+		if (state.missileShotIndex >= state.missileTargets.size()) {
+			finishMissileVolley(player, state, now);
+		} else {
+			state.missileNextShotAt = now + MISSILE_BOX_SHOT_INTERVAL_TICKS;
+		}
+	}
+
+	private static LivingEntity nextMissileTarget(ServerPlayerEntity player,
+			BackpackCharge state) {
+		ServerWorld world = player.getServerWorld();
+		Vec3d camera = new Vec3d(
+				state.aimCameraX, state.aimCameraY, state.aimCameraZ);
+		Vec3d forward = Vec3d.fromPolar(
+				(float) state.aimPitch, (float) state.aimYaw).normalize();
+		double yaw = Math.toRadians(state.aimYaw);
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		Vec3d up = right.crossProduct(forward).normalize();
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		for (LivingEntity candidate : world.getEntitiesByClass(
+				LivingEntity.class,
+				player.getBoundingBox().expand(MISSILE_BOX_TARGET_RADIUS),
+				entity -> entity != player && entity.isAlive()
+						&& !entity.isSpectator() && entity.canHit()
+						&& !CombatTargeting.isGolem(entity)
+						&& !state.missileTargets.contains(entity.getUuid()))) {
+			Vec3d center = candidate.getBoundingBox().getCenter();
+			if (player.squaredDistanceTo(center)
+					> MISSILE_BOX_TARGET_RADIUS * MISSILE_BOX_TARGET_RADIUS) {
+				continue;
+			}
+			Vec3d offset = center.subtract(camera);
+			double depth = offset.dotProduct(forward);
+			if (depth <= 0.0D
+					|| Math.abs(offset.dotProduct(right))
+							> depth * state.missileHalfHorizontalTan
+					|| Math.abs(offset.dotProduct(up))
+							> depth * state.missileHalfVerticalTan
+					|| !hasBlockLineOfSight(player, camera, center)) {
+				continue;
+			}
+			double distance = offset.lengthSquared();
+			if (distance < nearestDistance) {
+				nearest = candidate;
+				nearestDistance = distance;
+			}
+		}
+		return nearest;
+	}
+
+	private static boolean fireMissileAt(ServerPlayerEntity player,
+			BackpackCharge state, LivingEntity target, int sequence, long now) {
+		ItemStack stored = com.tk.gun.item.BackpackAmmoData.stored(player);
+		if (!stored.isOf(Items.FIREWORK_ROCKET)) {
+			return false;
+		}
+		double yaw = Math.toRadians(player.getBodyYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		Vec3d right = new Vec3d(-Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		double side = (sequence & 1) == 0 ? 1.0D : -1.0D;
+		Vec3d spawn = player.getBoundingBox().getCenter()
+				.add(right.multiply(side * 0.60D))
+				.subtract(forward.multiply(0.80D))
+				.add(0.0D, 0.15D, 0.0D);
+		Vec3d coldDirection = right.multiply(side * 0.72D)
+				.subtract(forward.multiply(0.62D))
+				.add(0.0D, 0.14D, 0.0D)
+				.normalize();
+		ItemStack launched = stored.copyWithCount(1);
+		com.tk.gun.item.BackpackFireworkData.markNoSelfDamage(launched);
+		com.tk.gun.item.BackpackFireworkData.markMissileVisual(launched);
+		Entity projectile = createBackpackProjectile(
+				player, launched, spawn, coldDirection);
+		if (projectile == null || !player.getServerWorld().spawnEntity(projectile)) {
+			return false;
+		}
+		projectile.setSilent(true);
+		projectile.setNoGravity(true);
+		if (projectile instanceof net.minecraft.entity.projectile.FireworkRocketEntity rocket) {
+			((com.tk.gun.mixin.FireworkRocketEntityAccessor) rocket)
+					.mechaniciancombat$setLifeTime(MISSILE_BOX_COLD_MAX_TICKS
+							+ BACKPACK_PROJECTILE_TRACK_TICKS);
+		}
+		projectile.setVelocity(coldDirection.multiply(MISSILE_BOX_COLD_SPEED));
+		projectile.velocityModified = true;
+		player.getServerWorld().playSound(null, spawn.x, spawn.y, spawn.z,
+				SoundEvent.of(TkGun.SND_MISSILE_COLD_LAUNCH), SoundCategory.PLAYERS,
+				0.8F, 1.0F);
+		projectile.addCommandTag(CombatTargeting.BACKPACK_PROJECTILE_TAG);
+		BACKPACK_PROJECTILES.put(projectile.getUuid(),
+				now + BACKPACK_PROJECTILE_TRACK_TICKS);
+		MISSILE_TRACKERS.put(projectile.getUuid(),
+				new MissileTracker(player.getServerWorld(), projectile.getUuid(),
+						target.getId(), now + BACKPACK_PROJECTILE_TRACK_TICKS,
+						spawn, coldDirection, now));
+		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
+		target.removeStatusEffect(StatusEffects.GLOWING);
+		return true;
+	}
+
+	private static void finishMissileVolley(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		state.missileFiring = false;
+		state.missileNextShotAt = 0;
+		state.missileShotIndex = 0;
+		state.missileCooldownUntil = now + MISSILE_BOX_COOLDOWN_TICKS;
+		clearMissileTargets(player, state);
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void clearMissileTargets(ServerPlayerEntity player,
+			BackpackCharge state) {
+		for (UUID targetId : state.missileTargets) {
+			if (player.getServerWorld().getEntity(targetId)
+					instanceof LivingEntity living) {
+				living.removeStatusEffect(StatusEffects.GLOWING);
+			}
+		}
+		state.missileTargets.clear();
+	}
+
+	private static void clearMissileState(ServerPlayerEntity player) {
+		BackpackCharge state = BACKPACK_STATES.get(player.getUuid());
+		if (state == null) {
+			return;
+		}
+		clearMissileTargets(player, state);
+		state.missileAiming = false;
+		state.missileFiring = false;
+		state.missileNextMarkAt = 0;
+		state.missileNextShotAt = 0;
+		state.missileCooldownUntil = 0;
+		state.missileShotIndex = 0;
+	}
+
+	private static void handleBackpackView(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackViewPayload payload) {
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseLauncher(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		updateBackpackAim(player, state, payload.cameraX(), payload.cameraY(), payload.cameraZ(),
+				payload.cameraYaw(), payload.cameraPitch(), now);
+	}
+
+	private static void updateBackpackAim(ServerPlayerEntity player, BackpackCharge state,
+			double cameraX, double cameraY, double cameraZ,
+			double cameraYaw, double cameraPitch, long now) {
+		if (!Double.isFinite(cameraX) || !Double.isFinite(cameraY)
+				|| !Double.isFinite(cameraZ) || !Double.isFinite(cameraYaw)
+				|| !Double.isFinite(cameraPitch)) {
+			return;
+		}
+		Vec3d camera = new Vec3d(cameraX, cameraY, cameraZ);
+		if (camera.squaredDistanceTo(player.getBoundingBox().getCenter()) > 64.0D) {
+			return;
+		}
+		state.aimCameraX = cameraX;
+		state.aimCameraY = cameraY;
+		state.aimCameraZ = cameraZ;
+		state.aimYaw = cameraYaw;
+		state.aimPitch = cameraPitch;
+		state.aimUpdatedAt = now;
+	}
+
+	private static void handleSummonAntennaAction(ServerPlayerEntity player,
+			BackpackCharge state, com.tk.gun.net.CombatBackpackFirePayload payload,
+			long now) {
+		int phase = summonAntennaPhase(state, now);
+		boolean canSummon = com.tk.gun.item.BackpackUpgradeData.canSummonGolems(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player));
+		if (phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_DORMANT) {
+			clearBackpackTarget(state, now);
+			state.summonReadyUntil = now + SUMMON_ANTENNA_READY_TICKS;
+			state.summonCastUntil = 0;
+		} else if (phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_ARMED) {
+			LivingEntity target = findSummonAntennaTarget(player, payload);
+			if (target == null) {
+				if (canSummon) {
+					beginSummonAntennaCast(player, state, payload, now, null);
+				}
+			} else {
+				markSummonAntennaTarget(player, state, target, now);
+			}
+		} else if (phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_MARKED) {
+			LivingEntity target = activeBackpackTarget(player, state, now);
+			if (canSummon) {
+				beginSummonAntennaCast(player, state, payload, now, target);
+			} else {
+				LivingEntity refreshed = findSummonAntennaTarget(player, payload);
+				if (refreshed == null) {
+					clearBackpackTarget(state, now);
+					state.summonReadyUntil = now + 1;
+				} else {
+					markSummonAntennaTarget(player, state, refreshed, now);
+				}
+			}
+		}
+		syncBackpackStatus(player, state, now);
+		sendBackpackFireResult(player);
+	}
+
+	private static void markSummonAntennaTarget(ServerPlayerEntity player,
+			BackpackCharge state, LivingEntity target, long now) {
+		if (state.targetEntityId >= 0
+				&& state.targetEntityId != target.getId()
+				&& player.getServerWorld().getEntityById(
+						state.targetEntityId) instanceof LivingEntity previous) {
+			previous.removeStatusEffect(StatusEffects.GLOWING);
+		}
+		state.targetEntityId = target.getId();
+		state.targetUuid = target.getUuid();
+		state.targetUntil = now + SUMMON_ANTENNA_COOLDOWN_TICKS;
+		target.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
+				SUMMON_ANTENNA_COOLDOWN_TICKS, 0, false, false, true), player);
+		player.getServerWorld().playSound(null, player.getBlockPos(),
+				SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
+				SoundCategory.PLAYERS, TkGun.BACKPACK_SOUND_VOLUME, 1.2F);
+	}
+
+	private static void tickSummonAntenna(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (state.summonCastUntil > 0
+				&& !com.tk.gun.item.BackpackUpgradeData.canSummonGolems(
+						com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			state.summonCastUntil = 0;
+			state.summonReadyUntil = now + 1;
+			return;
+		}
+		if (state.summonCastUntil > 0 && now >= state.summonCastUntil) {
+			if (player.getServerWorld().getEntityById(state.targetEntityId)
+					instanceof LivingEntity target) {
+				target.removeStatusEffect(StatusEffects.GLOWING);
+			}
+			com.tk.gun.entity.MoltenGolemEntity golem =
+					findLivingSummonedGolem(player, state.summonX, state.summonY,
+							state.summonZ);
+			boolean summoned = false;
+			if (golem != null) {
+				golem.setSummoner(player.getUuid());
+				golem.beginRelocationSummon(state.summonX, state.summonY,
+						state.summonZ, player.getYaw());
+				summoned = true;
+			} else {
+				golem = MOLTEN_GOLEM.create(player.getServerWorld());
+				if (golem != null) {
+					golem.refreshPositionAndAngles(state.summonX, state.summonY,
+							state.summonZ, player.getYaw(), 0.0F);
+					golem.setSummoner(player.getUuid());
+					summoned = player.getServerWorld().spawnEntity(golem);
+				}
+			}
+			clearBackpackTarget(state, now);
+			state.summonReadyUntil = 0;
+			state.summonCastUntil = 0;
+			state.cooldownUntil = now + (summoned
+					? SUMMON_ANTENNA_ALIVE_COOLDOWN_TICKS
+					: SUMMON_ANTENNA_COOLDOWN_TICKS);
+		}
+	}
+
+	private static com.tk.gun.entity.MoltenGolemEntity findLivingSummonedGolem(
+			ServerPlayerEntity player, double x, double y, double z) {
+		Vec3d destination = new Vec3d(x, y, z);
+		com.tk.gun.entity.MoltenGolemEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		for (Entity entity : player.getServerWorld().iterateEntities()) {
+			if (!(entity instanceof com.tk.gun.entity.MoltenGolemEntity golem)
+					|| !golem.isAlive() || golem.isRemoved()
+					|| !golem.isSummonedBy(player.getUuid())) {
+				continue;
+			}
+			double distance = golem.squaredDistanceTo(destination);
+			if (distance < nearestDistance) {
+				nearest = golem;
+				nearestDistance = distance;
+			}
+		}
+		return nearest;
+	}
+
+	private static int summonAntennaPhase(BackpackCharge state, long now) {
+		if (now < state.cooldownUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN;
+		}
+		if (state.summonCastUntil > 0) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST;
+		}
+		if (state.summonReadyUntil > now) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_READY;
+		}
+		if (state.targetEntityId >= 0 && now < state.targetUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_MARKED;
+		}
+		if (state.summonReadyUntil > 0) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_ARMED;
+		}
+		return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_DORMANT;
+	}
+
+	private static LivingEntity findSummonAntennaTarget(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackFirePayload payload) {
+		Vec3d cameraPos = new Vec3d(payload.cameraX(), payload.cameraY(), payload.cameraZ());
+		Vec3d forward = Vec3d.fromPolar(
+				(float) payload.cameraPitch(), (float) payload.cameraYaw()).normalize();
+		double yaw = Math.toRadians(payload.cameraYaw());
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		Vec3d up = right.crossProduct(forward).normalize();
+		double halfHorizontal = Math.max(0.02D,
+				Math.min(4.0D, payload.halfHorizontalTan()));
+		double halfVertical = Math.max(0.02D,
+				Math.min(4.0D, payload.halfVerticalTan()));
+		Vec3d playerCenter = player.getBoundingBox().getCenter();
+		net.minecraft.util.math.Box search =
+				player.getBoundingBox().expand(SUMMON_ANTENNA_TARGET_RADIUS);
+		LivingEntity best = null;
+		double bestAngle = -2.0D;
+		double bestDistance = Double.MAX_VALUE;
+		for (LivingEntity candidate : player.getServerWorld().getEntitiesByClass(
+				LivingEntity.class, search,
+				entity -> entity != player && entity.isAlive() && !entity.isSpectator()
+						&& entity.canHit() && !CombatTargeting.isGolem(entity))) {
+			Vec3d offset = candidate.getBoundingBox().getCenter().subtract(cameraPos);
+			if (offset.lengthSquared() < 1.0E-8D
+					|| playerCenter.squaredDistanceTo(candidate.getBoundingBox().getCenter())
+					> SUMMON_ANTENNA_TARGET_RADIUS * SUMMON_ANTENNA_TARGET_RADIUS) {
+				continue;
+			}
+			double depth = offset.dotProduct(forward);
+			if (depth <= 0.0D
+					|| Math.abs(offset.dotProduct(right)) > depth * halfHorizontal
+					|| Math.abs(offset.dotProduct(up)) > depth * halfVertical
+					|| !hasBlockLineOfSight(player, cameraPos,
+							candidate.getBoundingBox().getCenter())) {
+				continue;
+			}
+			double alignment = offset.normalize().dotProduct(forward);
+			double distance = offset.lengthSquared();
+			if (alignment > bestAngle
+					|| (Math.abs(alignment - bestAngle) < 1.0E-6D
+							&& distance < bestDistance)) {
+				best = candidate;
+				bestAngle = alignment;
+				bestDistance = distance;
+			}
+		}
+		return best;
+	}
+
+	private static boolean hasBlockLineOfSight(ServerPlayerEntity player,
+			Vec3d from, Vec3d to) {
+		return player.getServerWorld().raycast(new RaycastContext(from, to,
+						RaycastContext.ShapeType.COLLIDER,
+						RaycastContext.FluidHandling.NONE, player))
+				.getType() == net.minecraft.util.hit.HitResult.Type.MISS;
+	}
+
+	private static void beginSummonAntennaCast(ServerPlayerEntity player,
+			BackpackCharge state, com.tk.gun.net.CombatBackpackFirePayload payload,
+			long now, LivingEntity target) {
+		Vec3d origin = new Vec3d(payload.x(), payload.y(), payload.z());
+		Vec3d playerCenter = player.getBoundingBox().getCenter();
+		if (!Double.isFinite(origin.x) || !Double.isFinite(origin.y)
+				|| !Double.isFinite(origin.z)
+				|| origin.squaredDistanceTo(playerCenter) > 64.0D) {
+			origin = player.getBoundingBox().getCenter();
+		}
+		Vec3d destination;
+		if (target != null && target.isAlive()) {
+			destination = new Vec3d(target.getX(), target.getY(), target.getZ());
+		} else {
+			Vec3d direction = Vec3d.fromPolar(
+					(float) payload.cameraPitch(), (float) payload.cameraYaw()).normalize();
+			Vec3d start = new Vec3d(payload.cameraX(), payload.cameraY(),
+					payload.cameraZ());
+			Vec3d end = start.add(direction.multiply(SUMMON_ANTENNA_FALLBACK_RANGE));
+			net.minecraft.util.hit.BlockHitResult hit = player.getServerWorld().raycast(
+					new RaycastContext(start, end, RaycastContext.ShapeType.COLLIDER,
+							RaycastContext.FluidHandling.NONE, player));
+			destination = hit.getType() == net.minecraft.util.hit.HitResult.Type.BLOCK
+					? hit.getPos() : end;
+		}
+		state.summonX = destination.x;
+		state.summonY = destination.y;
+		state.summonZ = destination.z;
+		state.summonCastUntil = now + SUMMON_ANTENNA_CAST_TICKS;
+		state.summonReadyUntil = 0;
+		playSummonAntennaTrigger(player, origin);
+	}
+
+	private static void playSummonAntennaTrigger(ServerPlayerEntity player,
+			Vec3d origin) {
+		ServerWorld world = player.getServerWorld();
+		// Three simultaneous triggers form the stronger antenna activation cue.
+		for (int i = 0; i < 3; i++) {
+			world.playSound(null, origin.x, origin.y, origin.z,
+					SoundEvents.BLOCK_SCULK_SENSOR_CLICKING,
+					SoundCategory.BLOCKS, TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+		}
+		com.tk.gun.net.CombatBackpackParticlePayload payload =
+				new com.tk.gun.net.CombatBackpackParticlePayload(
+						player.getId(), origin.x, origin.y, origin.z);
+		for (ServerPlayerEntity viewer : world.getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
+		}
+	}
+
+	public static void clearBackpackCooldown(ServerPlayerEntity player) {
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		if (player.getServerWorld().getEntityById(state.targetEntityId)
+				instanceof LivingEntity target) {
+			target.removeStatusEffect(StatusEffects.GLOWING);
+		}
+		clearBackpackTarget(state, now);
+		clearMissileState(player);
+		state.cooldownUntil = 0;
+		state.targetUntil = 0;
+		state.jumpCloseUntil = 0;
+		state.jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		state.jumpEnergyLocked = false;
+		state.nextJumpEnergyUseAt = 0;
+		state.nextJumpEnergyRecoveryAt = 0;
+		state.summonReadyUntil = 0;
+		state.summonCastUntil = 0;
+		state.autoActive = false;
+		state.autoHoldAim = false;
+		state.nextAutoAttackAt = 0;
+		state.nextChargeAt = 0;
+		state.charges = Math.max(state.charges,
+				maxBackpackCharges(state.launcherType));
+		state.lastSyncAt = -1;
+		syncBackpackStatus(player, state, now);
+		sendBackpackFireResult(player);
+	}
+
+	/** Development tool entrypoint: reset every player-facing cooldown system. */
+	public static void clearAllCooldowns(ServerPlayerEntity player) {
+		clearBackpackCooldown(player);
+		ArmorAbilities.clearCooldowns(player);
+		clearGunCooldowns(player);
+		clearItemCooldowns(player);
+		ServerPlayNetworking.send(player,
+				new com.tk.gun.net.FortressSkillCooldownPayload(0));
+		ServerWorld world = player.getServerWorld();
+		for (com.tk.gun.entity.MoltenGolemEntity golem :
+				world.getEntitiesByClass(
+						com.tk.gun.entity.MoltenGolemEntity.class,
+						player.getBoundingBox().expand(256.0D),
+						candidate -> candidate.isOwner(player))) {
+			golem.clearAttackCooldowns();
+		}
+	}
+
+	private static void clearGunCooldowns(ServerPlayerEntity player) {
+		PState st = state(player);
+		st.overheatUntil = 0L;
+		st.aimLockUntil = 0L;
+		st.slideCooldownUntil = 0L;
+		st.fallbackRollReadyAt = 0L;
+		st.dodgeLockUntil = 0L;
+		st.dodgeBlockUntil = 0L;
+		st.lastDodgeAt = 0L;
+		st.lastDodgeKind = 0;
+		st.armorDodgeBoostUntil = 0L;
+		st.armorDodgeCooldownUntil = 0L;
+		st.armorDodgeCooldownPending = false;
+		st.lastArmorDodgeAt = 0L;
+		st.fortressSkillReadyAt = 0L;
+		GunStateMachine.clearDash(player);
+		rebroadcast(player);
+	}
+
+	private static void clearItemCooldowns(ServerPlayerEntity player) {
+		var manager = player.getItemCooldownManager();
+		if (manager instanceof ItemCooldownManagerAccessor accessor) {
+			for (Item item : List.copyOf(accessor.mechaniciancombat$entries().keySet())) {
+				manager.remove(item);
+			}
+		}
+	}
+
+	private static BackpackCharge backpackState(ServerPlayerEntity player, long now) {
+		BackpackCharge state = BACKPACK_STATES.computeIfAbsent(
+				player.getUuid(), ignored -> new BackpackCharge());
+		com.tk.gun.item.BackpackUpgradeData.LauncherType type =
+				com.tk.gun.item.BackpackUpgradeData.launcherType(
+						com.tk.gun.item.CombatBackpackItem.equippedStack(player));
+		if (player.isOnGround()) {
+			state.jumpLastGroundAt = now;
+		}
+		if (state.launcherType != type) {
+			if (player.getServerWorld().getEntityById(state.targetEntityId)
+					instanceof LivingEntity previousTarget) {
+				previousTarget.removeStatusEffect(StatusEffects.GLOWING);
+			}
+			clearBackpackTarget(state, now);
+			state.launcherType = type;
+			state.autoActive = false;
+			state.autoHoldAim = false;
+			state.cooldownUntil = type
+					== com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA
+					? now + (findLivingSummonedGolem(player, player.getX(),
+							player.getY(), player.getZ()) != null
+							? SUMMON_ANTENNA_ALIVE_COOLDOWN_TICKS
+							: SUMMON_ANTENNA_COOLDOWN_TICKS)
+					: 0;
+			state.nextAutoAttackAt = 0;
+			state.autoShotsOnTarget = 0;
+			state.nextChargeAt = 0;
+			state.charges = type
+					== com.tk.gun.item.BackpackUpgradeData.LauncherType.AUTO
+					? AUTO_BACKPACK_MAX_CHARGES : 0;
+			state.summonReadyUntil = 0;
+			state.summonCastUntil = 0;
+			state.jumpStartedAt = 0;
+			state.jumpReadyUntil = 0;
+			state.jumpThrustTicksUsed = 0;
+			state.jumpCloseUntil = 0;
+			state.jumpEnergyPixels = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+			state.jumpEnergyLocked = false;
+			state.nextJumpEnergyUseAt = 0;
+			state.nextJumpEnergyRecoveryAt = 0;
+			state.specialThrustActive = false;
+			state.specialThrustUntil = 0;
+			state.jumpLastGroundAt = 0;
+			state.jumpAirborne = false;
+			state.jumpKeyHeld = false;
+			state.jumpThrustSoundPlayed = false;
+			clearMissileTargets(player, state);
+			state.missileAiming = false;
+			state.missileFiring = false;
+			state.missileNextMarkAt = 0;
+			state.missileNextShotAt = 0;
+			state.missileCooldownUntil = 0;
+			state.missileShotIndex = 0;
+			if (!player.isCreative() || !player.getAbilities().flying) {
+				player.setNoGravity(false);
+			}
+		}
+		int maxCharges = maxBackpackCharges(state.launcherType);
+		state.charges = Math.max(0, Math.min(maxCharges, state.charges));
+		if (state.cooldownUntil <= now && state.targetEntityId < 0
+				&& state.charges < maxCharges && state.nextChargeAt <= 0
+				&& !state.autoActive
+				&& state.launcherType
+						!= com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
+			state.nextChargeAt = now + backpackChargeInterval(state.launcherType);
+		}
+		return state;
+	}
+
+	private static void markBackpackTarget(ServerPlayerEntity player, BackpackCharge state,
+										   com.tk.gun.net.CombatBackpackFirePayload payload) {
+		ServerWorld world = player.getServerWorld();
+		Vec3d center = player.getBoundingBox().getCenter();
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(BACKPACK_TARGET_RADIUS);
+		double maxDistanceSq = BACKPACK_TARGET_RADIUS * BACKPACK_TARGET_RADIUS;
+		double bestDistanceSq = Double.MAX_VALUE;
+		LivingEntity nearest = null;
+		for (LivingEntity candidate : world.getEntitiesByClass(LivingEntity.class, search,
+				entity -> entity != player && entity.isAlive() && !entity.isSpectator()
+						&& entity.canHit() && !CombatTargeting.isGolem(entity))) {
+			double distanceSq = candidate.getBoundingBox().getCenter()
+					.squaredDistanceTo(center);
+			if (distanceSq <= maxDistanceSq && distanceSq < bestDistanceSq
+					&& backpackTargetVisible(candidate, center, payload)) {
+				nearest = candidate;
+				bestDistanceSq = distanceSq;
+			}
+		}
+		if (nearest == null) {
+			clearBackpackTarget(state, world.getTime());
+			syncBackpackStatus(player, state, world.getTime());
+			return;
+		}
+
+		long now = world.getTime();
+		nearest.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
+				BACKPACK_TARGET_GLOW_TICKS, 0, false, false, true), player);
+		state.targetEntityId = nearest.getId();
+		state.targetUuid = nearest.getUuid();
+		state.targetUntil = now + BACKPACK_TARGET_WINDOW_TICKS;
+		state.nextChargeAt = 0;
+		syncBackpackStatus(player, state, now);
+		world.playSound(null, player.getBlockPos(), SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
+				SoundCategory.PLAYERS, TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+		TkGun.LOGGER.info("[mechaniciancombat] 战斗背包锁定最近生物 id={} 距离={} 玩家={}",
+				nearest.getId(), round3(Math.sqrt(bestDistanceSq)),
+				player.getName().getString());
+	}
+
+	/**
+	 * Five blocks or closer stay omnidirectional. Farther targets must project
+	 * inside the client camera's current viewport, while the 20-block radius is
+	 * deliberately unchanged.
+	 */
+	private static boolean backpackTargetVisible(LivingEntity candidate, Vec3d playerCenter,
+			com.tk.gun.net.CombatBackpackFirePayload payload) {
+		Vec3d targetCenter = candidate.getBoundingBox().getCenter();
+		if (targetCenter.squaredDistanceTo(playerCenter) <= 25.0D) {
+			return true;
+		}
+		Vec3d cameraPos = new Vec3d(payload.cameraX(), payload.cameraY(), payload.cameraZ());
+		if (!Double.isFinite(cameraPos.x) || !Double.isFinite(cameraPos.y)
+				|| !Double.isFinite(cameraPos.z)
+				|| cameraPos.squaredDistanceTo(playerCenter) > 64.0D) {
+			return false;
+		}
+		double halfHorizontal = Math.max(0.02D,
+				Math.min(4.0D, payload.halfHorizontalTan()));
+		double halfVertical = Math.max(0.02D,
+				Math.min(4.0D, payload.halfVerticalTan()));
+		Vec3d forward = Vec3d.fromPolar(
+				(float) payload.cameraPitch(), (float) payload.cameraYaw());
+		if (forward.lengthSquared() < 1.0E-8D) {
+			return false;
+		}
+		double yaw = Math.toRadians(payload.cameraYaw());
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw));
+		Vec3d up = right.crossProduct(forward).normalize();
+		Vec3d offset = targetCenter.subtract(cameraPos);
+		double depth = offset.dotProduct(forward);
+		if (depth <= 0.0D) {
+			return false;
+		}
+		return Math.abs(offset.dotProduct(right)) <= depth * halfHorizontal
+				&& Math.abs(offset.dotProduct(up)) <= depth * halfVertical;
+	}
+
+	private static LivingEntity activeBackpackTarget(ServerPlayerEntity player,
+													 BackpackCharge state, long now) {
+		if (state.targetEntityId < 0) {
+			return null;
+		}
+		Entity entity = player.getServerWorld().getEntityById(state.targetEntityId);
+		if (now >= state.targetUntil || !(entity instanceof LivingEntity living)
+				|| !living.isAlive() || CombatTargeting.isGolem(living)
+				|| !living.getUuid().equals(state.targetUuid)) {
+			clearBackpackTarget(state, now);
+			return null;
+		}
+		return living;
+	}
+
+	/** 当前仍在高亮窗口内、由该玩家战斗背包标记的实体。 */
+	public static LivingEntity backpackHighlightedTarget(ServerPlayerEntity owner) {
+		BackpackCharge state = BACKPACK_STATES.get(owner.getUuid());
+		if (state == null) {
+			return null;
+		}
+		return activeBackpackTarget(owner, state, owner.getWorld().getTime());
+	}
+
+	private static void clearBackpackTarget(BackpackCharge state, long now) {
+		state.targetEntityId = -1;
+		state.targetUuid = null;
+		state.targetUntil = 0;
+		if (state.cooldownUntil <= now) {
+			state.nextChargeAt = now + backpackChargeInterval(state.launcherType);
+		}
+	}
+
+	private static int backpackPhase(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			return jumpBackpackPhase(state, now);
+		}
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
+			return summonAntennaPhase(state, now);
+		}
+		if (state.launcherType
+				== com.tk.gun.item.BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+			PState skillState = TkGunServer.state(player);
+			if (skillState.battleBannerCastStarted > 0L) {
+				return com.tk.gun.net.CombatBackpackStatusPayload
+						.PHASE_BANNER_READY;
+			}
+			if (hasActiveWarBanner(player)) {
+				return com.tk.gun.net.CombatBackpackStatusPayload
+						.PHASE_BANNER_ACTIVE;
+			}
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_BANNER_CD;
+		}
+		if (now < state.cooldownUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN;
+		}
+		if (state.autoActive) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE;
+		}
+		if (state.autoHoldAim) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_PAUSED;
+		}
+		return state.targetEntityId >= 0 && now < state.targetUntil
+				? com.tk.gun.net.CombatBackpackStatusPayload.PHASE_MARKED
+				: com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY;
+	}
+
+	private static int missilePhase(BackpackCharge state, long now) {
+		if (state.launcherType
+				!= com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_NONE;
+		}
+		if (state.missileAiming || state.missileFiring) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_AIM;
+		}
+		if (now < state.missileCooldownUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_CD;
+		}
+		return com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_NONE;
+	}
+
+	private static int maxBackpackCharges(
+			com.tk.gun.item.BackpackUpgradeData.LauncherType type) {
+		return switch (type) {
+			case PORTABLE -> BACKPACK_MAX_CHARGES;
+			case AUTO -> AUTO_BACKPACK_MAX_CHARGES;
+			default -> 0;
+		};
+	}
+
+	private static int backpackChargeInterval(
+			com.tk.gun.item.BackpackUpgradeData.LauncherType type) {
+		return type == com.tk.gun.item.BackpackUpgradeData.LauncherType.AUTO
+				? AUTO_BACKPACK_CHARGE_INTERVAL_TICKS : BACKPACK_CHARGE_INTERVAL_TICKS;
+	}
+
+	private static void syncBackpackStatus(ServerPlayerEntity owner,
+										   BackpackCharge state, long now) {
+		ServerWorld world = owner.getServerWorld();
+		int phase = backpackPhase(owner, state, now);
+		int missilePhase = missilePhase(state, now);
+		int remaining = missilePhase
+				== com.tk.gun.net.CombatBackpackStatusPayload.MISSILE_CD
+				? (int) Math.max(0, state.missileCooldownUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_COOLDOWN
+				? (int) Math.max(0, state.cooldownUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_READY
+						? (int) Math.max(0, state.summonReadyUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST
+						? (int) Math.max(0, state.summonCastUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_MARKED
+						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
+				? (int) Math.max(0, state.targetUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY_TO_FLY
+						? (int) Math.max(0, state.jumpReadyUntil - now)
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING
+						? state.specialThrustActive
+								? (int) Math.max(0, state.specialThrustUntil - now)
+									: state.jumpEnergyPixels
+				: phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_CLOSE
+						? (int) Math.max(0, state.jumpCloseUntil - now) : 0;
+		if (phase == com.tk.gun.net.CombatBackpackStatusPayload
+				.PHASE_BANNER_READY) {
+			PState skillState = state(owner);
+			remaining = (int) Math.max(0,
+					skillState.battleBannerCastUntil - now);
+		} else if (phase == com.tk.gun.net.CombatBackpackStatusPayload
+				.PHASE_BANNER_ACTIVE) {
+			UUID bannerUuid = WAR_BANNERS.get(owner.getUuid());
+			Entity banner = bannerUuid == null ? null
+					: owner.getServerWorld().getEntity(bannerUuid);
+			remaining = banner instanceof WarBannerEntity
+					? Math.max(0, WarBannerEntity.LIFETIME_TICKS - banner.age)
+					: 0;
+		} else if (phase == com.tk.gun.net.CombatBackpackStatusPayload
+				.PHASE_BANNER_CD) {
+			remaining = 0;
+		}
+		boolean targetPhase =
+				phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_MARKED
+						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
+						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_MARKED
+						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST;
+		com.tk.gun.net.CombatBackpackStatusPayload payload =
+				new com.tk.gun.net.CombatBackpackStatusPayload(owner.getId(),
+						targetPhase
+								? state.targetEntityId : -1,
+						phase, state.charges, remaining,
+						switch (state.launcherType) {
+							case PORTABLE -> 1;
+							case AUTO -> 2;
+							case SUMMON_ANTENNA -> 3;
+							case JUMP_THRUSTER -> 4;
+							case BATTLE_BANNER -> 5;
+							default -> 0;
+				}, missilePhase, state.jumpEnergyPixels,
+				state.jumpEnergyLocked);
+		for (ServerPlayerEntity viewer : world.getPlayers()) {
+			ServerPlayNetworking.send(viewer, payload);
+		}
+		state.lastSyncAt = now;
+	}
+
+	private static void tickBackpackStates(MinecraftServer server) {
+		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+			if (!com.tk.gun.item.BackpackUpgradeData.canUseLauncher(
+					com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+				clearBackpackState(player);
+				continue;
+			}
+			long now = player.getWorld().getTime();
+			BackpackCharge state = backpackState(player, now);
+			int previousPhase = backpackPhase(player, state, now);
+			int previousCharges = state.charges;
+			if (state.launcherType
+					== com.tk.gun.item.BackpackUpgradeData.LauncherType.AUTO) {
+				tickAutoBackpack(player, state, now);
+			} else if (state.launcherType
+					== com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
+				tickSummonAntenna(player, state, now);
+			} else if (state.launcherType
+					== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
+				tickJumpEnergy(player, state, now);
+				tickMissileBox(player, state, now);
+				tickJumpBackpack(player, state, now);
+			} else if (state.launcherType
+					!= com.tk.gun.item.BackpackUpgradeData.LauncherType.BATTLE_BANNER) {
+				tickPortableBackpack(player, state, now);
+			} else {
+				state.charges = 0;
+				state.nextChargeAt = 0;
+			}
+			if (previousPhase != backpackPhase(player, state, now)
+					|| previousCharges != state.charges
+					|| state.lastSyncAt < 0 || now - state.lastSyncAt >= 5) {
+				syncBackpackStatus(player, state, now);
+			}
+		}
+	}
+
+	private static void tickPortableBackpack(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (state.cooldownUntil > 0) {
+			if (now >= state.cooldownUntil) {
+				state.cooldownUntil = 0;
+				state.charges = BACKPACK_MAX_CHARGES;
+				state.nextChargeAt = 0;
+			}
+		} else if (activeBackpackTarget(player, state, now) == null) {
+			if (state.nextChargeAt <= 0) {
+				state.nextChargeAt = now + BACKPACK_CHARGE_INTERVAL_TICKS;
+			}
+			if (now >= state.nextChargeAt && state.charges < BACKPACK_MAX_CHARGES) {
+				state.charges++;
+				state.nextChargeAt = state.charges >= BACKPACK_MAX_CHARGES
+						? 0 : now + BACKPACK_CHARGE_INTERVAL_TICKS;
+			}
+		}
+	}
+
+	public static void handleJumpBackpackInput(ServerPlayerEntity player,
+			boolean pressed) {
+		if (!com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
+				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		if (state.jumpAirborne) {
+			boolean wasHeld = state.jumpKeyHeld;
+			boolean canThrust = pressed && !TkGun.holdingGun(player)
+					&& player.isAlive() && !player.isSpectator()
+						&& !state.jumpEnergyLocked && state.jumpEnergyPixels > 0;
+			state.jumpKeyHeld = canThrust;
+			if (!canThrust) {
+				state.jumpThrustSoundPlayed = false;
+			} else if (!wasHeld && now >= state.jumpReadyUntil) {
+				playJumpThrustActivationSound(player, state);
+			}
+			return;
+		}
+		state.jumpKeyHeld = pressed;
+		if (!pressed || TkGun.holdingGun(player) || !player.isAlive()
+				|| player.isSpectator() || player.hasVehicle() || player.isFallFlying()
+				|| state.jumpEnergyLocked || state.jumpEnergyPixels <= 0
+				|| jumpBackpackPhase(state, now)
+						!= com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY) {
+			return;
+		}
+
+		boolean airborneStart = !player.isOnGround();
+		state.jumpStartedAt = now;
+		state.jumpReadyUntil = airborneStart ? now
+				: now + TkGun.JUMP_BACKPACK_READY_TICKS;
+		state.jumpThrustTicksUsed = 0;
+		state.jumpCloseUntil = 0;
+		state.jumpOriginY = player.getY();
+		state.jumpStartX = player.getX();
+		state.jumpStartZ = player.getZ();
+		state.jumpMaxY = player.getY();
+		state.jumpReadyChecked = airborneStart;
+		state.jumpAirborne = true;
+		state.jumpThrustSoundPlayed = false;
+		player.setNoGravity(false);
+		player.setSprinting(false);
+		player.fallDistance = 0.0F;
+		syncBackpackStatus(player, state, now);
+		TkGun.LOGGER.info("[mechaniciancombat] jump backpack {} launch player={} originY={}",
+				airborneStart ? "airborne" : "ground",
+				player.getName().getString(), round3(state.jumpOriginY));
+	}
+
+	private static int jumpBackpackPhase(BackpackCharge state, long now) {
+		if (state.specialThrustActive) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
+		}
+		if (state.jumpAirborne) {
+			if (now < state.jumpReadyUntil) {
+				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY_TO_FLY;
+			}
+			if (state.jumpKeyHeld && !state.jumpEnergyLocked
+					&& state.jumpEnergyPixels > 0) {
+				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
+			}
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
+		}
+		if (now < state.jumpCloseUntil) {
+			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_CLOSE;
+		}
+		return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY;
+	}
+
+	/**
+	 * Starts the jump-thruster rig animation for a gun-owned action without
+	 * enabling the normal jump backpack's gravity or held-key movement.
+	 */
+	private static boolean beginBackpackSpecialThrust(ServerPlayerEntity player,
+			long now, long until) {
+		if (!TkGun.holdingGun(player)
+				|| !com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
+						com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			return false;
+		}
+		BackpackCharge state = backpackState(player, now);
+		if (state.specialThrustActive || state.jumpAirborne
+				|| now < state.jumpCloseUntil
+				|| state.jumpEnergyLocked || state.jumpEnergyPixels <= 0) {
+			return false;
+		}
+		state.specialThrustActive = true;
+		state.specialThrustUntil = until;
+		state.jumpCloseUntil = 0;
+		state.jumpThrustSoundPlayed = false;
+		playJumpThrustActivationSound(player, state);
+		syncBackpackStatus(player, state, now);
+		TkGun.LOGGER.info("[mechaniciancombat] jump thruster attached to gun action until={} player={}",
+				until, player.getName().getString());
+		return true;
+	}
+
+	private static void finishBackpackSpecialThrust(ServerPlayerEntity player,
+			long now) {
+		BackpackCharge state = BACKPACK_STATES.get(player.getUuid());
+		if (state == null || !state.specialThrustActive) {
+			return;
+		}
+		state.specialThrustActive = false;
+		state.specialThrustUntil = 0;
+		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
+		syncBackpackStatus(player, state, now);
+		TkGun.LOGGER.info("[mechaniciancombat] jump thruster gun action ended -> close={} energy={} player={}",
+				TkGun.JUMP_BACKPACK_CLOSE_TICKS,
+				state.jumpEnergyPixels,
+				player.getName().getString());
+	}
+
+	private static void tickJumpEnergy(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		int maximum = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
+		int step = TkGun.JUMP_BACKPACK_ENERGY_STEP_PIXELS;
+		if (state.jumpEnergyLocked) {
+			if (state.nextJumpEnergyRecoveryAt <= 0L) {
+				state.nextJumpEnergyRecoveryAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+			} else if (now >= state.nextJumpEnergyRecoveryAt) {
+				state.jumpEnergyPixels = Math.min(maximum,
+						state.jumpEnergyPixels + step);
+				if (state.jumpEnergyPixels >= maximum) {
+					state.jumpEnergyLocked = false;
+					state.nextJumpEnergyRecoveryAt = 0L;
+				} else {
+					state.nextJumpEnergyRecoveryAt =
+							now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+				}
+			}
+			return;
+		}
+
+		boolean thrusting = state.specialThrustActive
+				|| (state.jumpAirborne && state.jumpKeyHeld
+				&& now >= state.jumpReadyUntil);
+		if (thrusting) {
+			state.nextJumpEnergyRecoveryAt = 0L;
+			if (state.nextJumpEnergyUseAt <= 0L) {
+				state.nextJumpEnergyUseAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+			} else if (now >= state.nextJumpEnergyUseAt) {
+				state.jumpEnergyPixels = Math.max(0,
+						state.jumpEnergyPixels - step);
+				state.nextJumpEnergyUseAt =
+						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+				if (state.jumpEnergyPixels <= 0) {
+					state.jumpEnergyPixels = 0;
+					state.jumpEnergyLocked = true;
+					state.nextJumpEnergyUseAt = 0L;
+					state.nextJumpEnergyRecoveryAt =
+							now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
+					state.jumpKeyHeld = false;
+					state.jumpThrustSoundPlayed = false;
+					state.specialThrustActive = false;
+					state.specialThrustUntil = 0L;
+					state.jumpCloseUntil =
+							now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
+				}
+			}
+			return;
+		}
+
+		state.nextJumpEnergyUseAt = 0L;
+		boolean falling = state.jumpAirborne && !player.isOnGround()
+				&& jumpBackpackPhase(state, now)
+				== com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
+		boolean grounded = player.isOnGround();
+		int recoveryTicks = falling
+				? TkGun.JUMP_BACKPACK_ENERGY_FALL_RECOVERY_TICKS
+				: grounded ? TkGun.JUMP_BACKPACK_ENERGY_GROUND_RECOVERY_TICKS : 0;
+		if (recoveryTicks > 0 && state.jumpEnergyPixels < maximum) {
+			if (state.nextJumpEnergyRecoveryAt <= 0L) {
+				state.nextJumpEnergyRecoveryAt =
+						now + recoveryTicks;
+			} else if (now >= state.nextJumpEnergyRecoveryAt) {
+				state.jumpEnergyPixels = Math.min(maximum,
+						state.jumpEnergyPixels + step);
+				state.nextJumpEnergyRecoveryAt =
+						state.jumpEnergyPixels >= maximum ? 0L
+								: now + recoveryTicks;
+			}
+		} else {
+			state.nextJumpEnergyRecoveryAt = 0L;
+		}
+	}
+
+	private static void tickJumpBackpack(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (!state.jumpAirborne) {
+			return;
+		}
+		if (!player.isAlive() || player.isSpectator()) {
+			state.jumpAirborne = false;
+			state.jumpKeyHeld = false;
+			player.setNoGravity(false);
+			return;
+		}
+		if (TkGun.holdingGun(player)) {
+			// Starting is blocked while carrying a gun. If the player switches
+			// into one in flight, release the controlled thrust immediately.
+			state.jumpKeyHeld = false;
+			state.jumpThrustSoundPlayed = false;
+		}
+		player.fallDistance = 0.0F;
+		state.jumpMaxY = Math.max(state.jumpMaxY, player.getY());
+		if (now < state.jumpReadyUntil) {
+			player.setNoGravity(false);
+			return;
+		}
+		if (!state.jumpReadyChecked) {
+			state.jumpReadyChecked = true;
+			double rise = state.jumpMaxY - state.jumpOriginY;
+			if (rise < TkGun.JUMP_BACKPACK_MIN_START_RISE
+					|| player.getVelocity().y <= 0.01D) {
+				state.jumpReadyUntil = now + 6L;
+				player.addStatusEffect(new StatusEffectInstance(
+						StatusEffects.SLOW_FALLING, 10, 0,
+						false, false, false));
+			}
+		}
+		if (now < state.jumpReadyUntil) {
+			player.setNoGravity(false);
+			return;
+		}
+		if (state.jumpKeyHeld && !state.jumpEnergyLocked
+				&& state.jumpEnergyPixels > 0) {
+			player.setNoGravity(true);
+			player.removeStatusEffect(StatusEffects.SLOW_FALLING);
+			playJumpThrustActivationSound(player, state);
+			double yaw = Math.toRadians(player.getYaw());
+			double forwardX = -Math.sin(yaw);
+			double forwardZ = Math.cos(yaw);
+			double speedMultiplier = state.jumpThrustTicksUsed
+					< TkGun.JUMP_BACKPACK_START_BOOST_TICKS
+					? TkGun.JUMP_BACKPACK_START_SPEED_MULTIPLIER : 1.0D;
+			double remainingLift = state.jumpOriginY
+					+ TkGun.JUMP_BACKPACK_MAX_HEIGHT - player.getY();
+			double vertical = state.jumpKeyHeld
+					? Math.max(0.0D, Math.min(
+							TkGun.JUMP_BACKPACK_BOOST_RISE * speedMultiplier,
+							remainingLift))
+					: 0.0D;
+			player.setVelocity(
+					forwardX * TkGun.JUMP_BACKPACK_FORWARD_SPEED * speedMultiplier,
+					vertical,
+					forwardZ * TkGun.JUMP_BACKPACK_FORWARD_SPEED * speedMultiplier);
+			player.velocityModified = true;
+			state.jumpThrustTicksUsed++;
+			if ((now - state.jumpStartedAt) % 2L == 0L) {
+				ServerWorld world = player.getServerWorld();
+				world.spawnParticles(ParticleTypes.FLAME,
+						player.getX() - forwardX * 0.55D,
+						player.getY() + 0.75D,
+						player.getZ() - forwardZ * 0.55D,
+						2, 0.08D, 0.08D, 0.08D, 0.01D);
+			}
+			return;
+		}
+		player.setNoGravity(false);
+		if (!state.jumpAirborne || now - state.jumpStartedAt < 2L) {
+			return;
+		}
+		if (player.isOnGround() || player.isTouchingWater()) {
+			finishJumpBackpack(player, state, now);
+		}
+	}
+
+	private static void playJumpThrustActivationSound(ServerPlayerEntity player,
+			BackpackCharge state) {
+		if (state.jumpThrustSoundPlayed) {
+			return;
+		}
+		state.jumpThrustSoundPlayed = true;
+		player.getServerWorld().playSound(null,
+				player.getX(), player.getY(), player.getZ(),
+				SoundEvents.ENTITY_WITHER_SHOOT,
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+	}
+
+	private static void finishJumpBackpack(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		state.jumpAirborne = false;
+		state.jumpKeyHeld = false;
+		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
+		player.setNoGravity(false);
+		player.fallDistance = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, Math.min(0.0D, velocity.y), 0.0D);
+		player.velocityModified = true;
+		syncBackpackStatus(player, state, now);
+		double horizontal = Math.sqrt(
+				(player.getX() - state.jumpStartX) * (player.getX() - state.jumpStartX)
+				+ (player.getZ() - state.jumpStartZ) * (player.getZ() - state.jumpStartZ));
+		TkGun.LOGGER.info("[mechaniciancombat] jump backpack landed -> close, height={}, distance={}, "
+						+ "energy={} player={}",
+				round3(state.jumpMaxY - state.jumpOriginY), round3(horizontal),
+				state.jumpEnergyPixels, player.getName().getString());
+	}
+
+	private static void tickAutoBackpack(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (state.cooldownUntil > 0) {
+			if (now >= state.cooldownUntil) {
+				state.cooldownUntil = 0;
+				state.charges = AUTO_BACKPACK_MAX_CHARGES;
+				state.nextChargeAt = 0;
+				state.autoHoldAim = false;
+			}
+			return;
+		}
+		if (!state.autoActive) {
+			if (state.charges < AUTO_BACKPACK_MAX_CHARGES) {
+				if (state.nextChargeAt <= 0) {
+					state.nextChargeAt = now + AUTO_BACKPACK_CHARGE_INTERVAL_TICKS;
+				}
+				if (now >= state.nextChargeAt) {
+					state.charges++;
+					state.nextChargeAt = state.charges >= AUTO_BACKPACK_MAX_CHARGES
+							? 0 : now + AUTO_BACKPACK_CHARGE_INTERVAL_TICKS;
+				}
+			}
+			return;
+		}
+		if (!com.tk.gun.item.BackpackAmmoData.stored(player)
+				.isOf(Items.FIREWORK_ROCKET)) {
+			stopAutoBackpack(player, state, now, false, true);
+			sendBackpackFireResult(player);
+			return;
+		}
+
+		LivingEntity target = activeBackpackTarget(player, state, now);
+		if (target == null || !autoTargetVisible(player, target, state, now)) {
+			int oldTarget = state.targetEntityId;
+			target = findAutoTarget(player, -1, state, now);
+			if (oldTarget != targetId(target)
+					&& player.getServerWorld().getEntityById(oldTarget)
+					instanceof LivingEntity oldLiving) {
+				oldLiving.removeStatusEffect(StatusEffects.GLOWING);
+			}
+			if (target == null) {
+				state.targetEntityId = -1;
+				state.targetUuid = null;
+				state.targetUntil = 0;
+			} else {
+				state.targetEntityId = target.getId();
+				state.targetUuid = target.getUuid();
+				state.targetUntil = now + 20;
+				state.autoShotsOnTarget = 0;
+			}
+		}
+		if (target != null) {
+			state.targetUntil = now + 20;
+			target.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
+					20, 0, false, false, true), player);
+			if (now >= state.nextAutoAttackAt) {
+				if (fireAutoBackpack(player, state, target, now)) {
+					state.nextAutoAttackAt =
+							now + AUTO_BACKPACK_ATTACK_INTERVAL_TICKS;
+				}
+			}
+		}
+	}
+
+	private static int targetId(LivingEntity target) {
+		return target == null ? -1 : target.getId();
+	}
+
+	private static boolean autoTargetVisible(ServerPlayerEntity player,
+			LivingEntity target, BackpackCharge state, long now) {
+		if (state.aimUpdatedAt < 0 || now - state.aimUpdatedAt > 20) {
+			return false;
+		}
+		Vec3d playerCenter = player.getBoundingBox().getCenter();
+		Vec3d center = target.getBoundingBox().getCenter();
+		Vec3d fromPlayer = center.subtract(playerCenter);
+		if (fromPlayer.lengthSquared()
+				> AUTO_BACKPACK_TARGET_RADIUS * AUTO_BACKPACK_TARGET_RADIUS
+				|| fromPlayer.lengthSquared() < 1.0E-8D) {
+			return false;
+		}
+		Vec3d camera = new Vec3d(
+				state.aimCameraX, state.aimCameraY, state.aimCameraZ);
+		Vec3d offset = center.subtract(camera);
+		Vec3d direction = Vec3d.fromPolar(
+				(float) state.aimPitch, (float) state.aimYaw);
+		return offset.normalize().dotProduct(direction) >= 0.0D
+				&& hasBlockLineOfSight(player, camera, center);
+	}
+
+	private static LivingEntity findAutoTarget(ServerPlayerEntity player,
+			int excludedEntityId, BackpackCharge state, long now) {
+		ServerWorld world = player.getServerWorld();
+		net.minecraft.util.math.Box search =
+				player.getBoundingBox().expand(AUTO_BACKPACK_TARGET_RADIUS);
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		for (LivingEntity candidate : world.getEntitiesByClass(LivingEntity.class, search,
+				entity -> entity != player && entity.getId() != excludedEntityId
+						&& entity.isAlive() && !entity.isSpectator()
+						&& entity.canHit() && !CombatTargeting.isGolem(entity)
+						&& autoTargetVisible(player, entity, state, now))) {
+			double distance = candidate.squaredDistanceTo(player);
+			if (distance < nearestDistance) {
+				nearest = candidate;
+				nearestDistance = distance;
+			}
+		}
+		return nearest;
+	}
+
+	private static void toggleAutoBackpack(ServerPlayerEntity player,
+			BackpackCharge state, com.tk.gun.net.CombatBackpackFirePayload payload,
+			long now) {
+		if (state.autoActive) {
+			stopAutoBackpack(player, state, now, false, true);
+			sendBackpackFireResult(player);
+			return;
+		}
+		if (state.charges <= 0
+				|| !com.tk.gun.item.BackpackAmmoData.stored(player)
+						.isOf(Items.FIREWORK_ROCKET)) {
+			syncBackpackStatus(player, state, now);
+			sendBackpackFireResult(player);
+			return;
+		}
+		LivingEntity target = findAutoTarget(player, -1, state, now);
+		if (target == null) {
+			syncBackpackStatus(player, state, now);
+			sendBackpackFireResult(player);
+			return;
+		}
+		captureAutoSpawnOffset(player, state, payload);
+		state.autoActive = true;
+		state.autoHoldAim = false;
+		state.nextAutoAttackAt = now;
+		state.autoShotsOnTarget = 0;
+		state.targetEntityId = target.getId();
+		state.targetUuid = target.getUuid();
+		state.targetUntil = now + 20;
+		fireAutoBackpack(player, state, target, now);
+		if (state.charges > 0) {
+			state.nextAutoAttackAt = now + AUTO_BACKPACK_ATTACK_INTERVAL_TICKS;
+		}
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void captureAutoSpawnOffset(ServerPlayerEntity player,
+			BackpackCharge state, com.tk.gun.net.CombatBackpackFirePayload payload) {
+		Vec3d requested = new Vec3d(payload.x(), payload.y(), payload.z());
+		Vec3d spawn = Double.isFinite(requested.x) && Double.isFinite(requested.y)
+				&& Double.isFinite(requested.z) && player.squaredDistanceTo(requested) <= 64.0D
+				? requested
+				: player.getPos().add(0.0D, player.getStandingEyeHeight() - 0.15D, 0.0D);
+		Vec3d offset = spawn.subtract(player.getPos());
+		float yaw = -player.getBodyYaw();
+		double radians = Math.toRadians(yaw);
+		double cos = Math.cos(radians);
+		double sin = Math.sin(radians);
+		state.frontOffsetX = offset.x * cos - offset.z * sin;
+		state.frontOffsetY = offset.y;
+		state.frontOffsetZ = offset.x * sin + offset.z * cos;
+		state.frontOffsetYaw = yaw;
+	}
+
+	private static Vec3d autoSpawnPosition(ServerPlayerEntity player,
+			BackpackCharge state) {
+		double radians = Math.toRadians(player.getBodyYaw());
+		double cos = Math.cos(radians);
+		double sin = Math.sin(radians);
+		return player.getPos().add(
+				state.frontOffsetX * cos - state.frontOffsetZ * sin,
+				state.frontOffsetY,
+				state.frontOffsetX * sin + state.frontOffsetZ * cos);
+	}
+
+	private static boolean fireAutoBackpack(ServerPlayerEntity player,
+			BackpackCharge state, LivingEntity target, long now) {
+		ItemStack stored = com.tk.gun.item.BackpackAmmoData.stored(player);
+		if (!stored.isOf(Items.FIREWORK_ROCKET) || state.charges <= 0) {
+			stopAutoBackpack(player, state, now, false, true);
+			sendBackpackFireResult(player);
+			return false;
+		}
+		Vec3d spawn = autoSpawnPosition(player, state);
+		Vec3d targetCenter = target.getBoundingBox().getCenter();
+		Vec3d direction = targetCenter.subtract(spawn).normalize();
+		if (direction.lengthSquared() < 1.0E-8D) {
+			return false;
+		}
+		ItemStack launched = stored.copyWithCount(1);
+		com.tk.gun.item.BackpackFireworkData.markNoSelfDamage(launched);
+		Entity projectile = createBackpackProjectile(player, launched, spawn, direction);
+		if (projectile == null) {
+			return false;
+		}
+		projectile.addCommandTag(CombatTargeting.BACKPACK_PROJECTILE_TAG);
+		projectile.setPosition(spawn.x, spawn.y, spawn.z);
+		BACKPACK_PROJECTILES.put(projectile.getUuid(),
+				now + BACKPACK_PROJECTILE_TRACK_TICKS);
+		if (!player.getServerWorld().spawnEntity(projectile)) {
+			BACKPACK_PROJECTILES.remove(projectile.getUuid());
+			return false;
+		}
+		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
+		state.charges--;
+		playSound(player, TkGun.SND_GUNSHOT, 0.9F, 1.0F);
+		sendBackpackFireResult(player);
+		if (state.charges <= 0) {
+			stopAutoBackpack(player, state, now, true, false);
+		} else {
+			state.autoShotsOnTarget++;
+			if (state.autoShotsOnTarget >= 2) {
+				LivingEntity next = findAutoTarget(player, target.getId(), state, now);
+				if (next != null) {
+					target.removeStatusEffect(StatusEffects.GLOWING);
+					state.targetEntityId = next.getId();
+					state.targetUuid = next.getUuid();
+					state.targetUntil = now + 20;
+					state.autoShotsOnTarget = 0;
+				}
+			}
+		}
+		return true;
+	}
+
+	private static void stopAutoBackpack(ServerPlayerEntity player,
+			BackpackCharge state, long now, boolean depleted, boolean holdAim) {
+		state.autoActive = false;
+		state.autoHoldAim = holdAim;
+		state.nextAutoAttackAt = 0;
+		state.autoShotsOnTarget = 0;
+		int targetId = state.targetEntityId;
+		state.targetEntityId = -1;
+		state.targetUuid = null;
+		state.targetUntil = 0;
+		if (player.getServerWorld().getEntityById(targetId)
+				instanceof LivingEntity living) {
+			living.removeStatusEffect(StatusEffects.GLOWING);
+		}
+		if (depleted && state.charges <= 0) {
+			state.cooldownUntil = now + AUTO_BACKPACK_COOLDOWN_TICKS;
+			state.nextChargeAt = 0;
+			state.autoHoldAim = false;
+		} else if (state.charges < AUTO_BACKPACK_MAX_CHARGES) {
+			state.nextChargeAt = now + AUTO_BACKPACK_CHARGE_INTERVAL_TICKS;
+		}
+		syncBackpackStatus(player, state, now);
+	}
+
+	private static void clearBackpackState(ServerPlayerEntity player) {
+		BackpackCharge state = BACKPACK_STATES.remove(player.getUuid());
+		if (state == null) {
+			return;
+		}
+		clearMissileTargets(player, state);
+		if (state.jumpAirborne) {
+			player.setNoGravity(false);
+		}
+		if (state.targetEntityId < 0) {
+			return;
+		}
+		if (player.getServerWorld().getEntityById(state.targetEntityId)
+				instanceof LivingEntity living) {
+			living.removeStatusEffect(StatusEffects.GLOWING);
+		}
+	}
+
+	private static void launchBackpackProjectile(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackFirePayload payload, LivingEntity target,
+			BackpackCharge state) {
+		long now = player.getWorld().getTime();
+
+		ItemStack stored = com.tk.gun.item.BackpackAmmoData.stored(player);
+		if (!com.tk.gun.item.BackpackLauncherRules.isLaunchable(stored)) {
+			sendBackpackFireResult(player);
+			return;
+		}
+
+		Vec3d requested = new Vec3d(payload.x(), payload.y(), payload.z());
+		Vec3d fallback = player.getPos().add(0.0D, player.getStandingEyeHeight() - 0.15D, 0.0D);
+		Vec3d spawn = Double.isFinite(requested.x) && Double.isFinite(requested.y)
+				&& Double.isFinite(requested.z) && player.squaredDistanceTo(requested) <= 64.0D
+				? requested : fallback;
+		Vec3d targetCenter = target == null
+				? crosshairAimPoint(player, payload)
+				: target.getBoundingBox().getCenter();
+		Vec3d direction = targetCenter.subtract(spawn).normalize();
+		if (direction.lengthSquared() < 1.0E-8D) {
+			direction = player.getRotationVector();
+		}
+		ItemStack launchedStack = stored.copyWithCount(1);
+		Entity projectile = createBackpackProjectile(player, launchedStack, spawn, direction);
+		if (projectile == null) {
+			sendBackpackFireResult(player);
+			return;
+		}
+		projectile.addCommandTag(CombatTargeting.BACKPACK_PROJECTILE_TAG);
+		projectile.setPosition(spawn.x, spawn.y, spawn.z);
+		BACKPACK_PROJECTILES.put(projectile.getUuid(),
+				now + BACKPACK_PROJECTILE_TRACK_TICKS);
+		if (!player.getServerWorld().spawnEntity(projectile)) {
+			BACKPACK_PROJECTILES.remove(projectile.getUuid());
+			sendBackpackFireResult(player);
+			return;
+		}
+		if (target != null && target.isAlive()) {
+			projectile.setNoGravity(true);
+			PORTABLE_PROJECTILE_TRACKERS.put(projectile.getUuid(),
+					new PortableProjectileTracker(player.getServerWorld(),
+							projectile.getUuid(), target.getId(),
+							now + BACKPACK_PROJECTILE_TRACK_TICKS));
+		}
+		playBackpackLaunchSound(player.getServerWorld(), spawn, launchedStack);
+		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
+		state.charges = Math.max(0, state.charges - 1);
+		if (state.charges == 0) {
+			int targetId = state.targetEntityId;
+			clearBackpackTarget(state, now);
+			if (player.getServerWorld().getEntityById(targetId) instanceof LivingEntity living) {
+				living.removeStatusEffect(StatusEffects.GLOWING);
+			}
+			state.cooldownUntil = now + BACKPACK_FIREWORK_COOLDOWN_TICKS;
+			state.nextChargeAt = 0;
+		}
+		syncBackpackStatus(player, state, now);
+		sendBackpackFireResult(player);
+		TkGun.LOGGER.info("[mechaniciancombat] 战斗背包烟花：从({}, {}, {})向({}, {}, {})以弩速发射 玩家={}",
+				round3(spawn.x), round3(spawn.y), round3(spawn.z),
+				round3(direction.x), round3(direction.y), round3(direction.z),
+				player.getName().getString());
+	}
+
+	private static Entity createBackpackProjectile(ServerPlayerEntity player, ItemStack stack,
+			Vec3d spawn, Vec3d direction) {
+		ServerWorld world = player.getServerWorld();
+		if (stack.isOf(Items.FIREWORK_ROCKET)) {
+			com.tk.gun.item.BackpackFireworkData.markNoSelfDamage(stack);
+			var rocket = new net.minecraft.entity.projectile.FireworkRocketEntity(
+					world, stack, player, spawn.x, spawn.y, spawn.z, true);
+			rocket.setVelocity(direction.multiply(1.6D));
+			return rocket;
+		}
+		if (stack.isOf(Items.TIPPED_ARROW)) {
+			var arrow = new ArrowEntity(world, player, stack, stack.copy());
+			arrow.setVelocity(direction.multiply(2.5D));
+			return arrow;
+		}
+		if (stack.isOf(Items.WIND_CHARGE)) {
+			var windCharge = new net.minecraft.entity.projectile.WindChargeEntity(
+					player, world, spawn.x, spawn.y, spawn.z);
+			windCharge.setVelocity(direction.multiply(1.6D));
+			return windCharge;
+		}
+		if (stack.getItem() instanceof TridentItem) {
+			TridentEntity trident;
+			if (BOLT != null && stack.isOf(BOLT)) {
+				var molten = new com.tk.gun.entity.MoltenTridentEntity(
+						MOLTEN_TRIDENT_ENTITY, world, player, stack);
+				molten.setGunFired(false);
+				trident = molten;
+			} else {
+				trident = new TridentEntity(world, player, stack);
+			}
+			trident.setVelocity(direction.multiply(2.5D));
+			return trident;
+		}
+		return null;
+	}
+
+	private static void playBackpackLaunchSound(ServerWorld world, Vec3d position,
+			ItemStack stack) {
+		SoundEvent sound;
+		if (stack.isOf(Items.FIREWORK_ROCKET)) {
+			sound = SoundEvents.ENTITY_FIREWORK_ROCKET_LAUNCH;
+		} else if (stack.isOf(Items.TIPPED_ARROW)) {
+			sound = SoundEvents.ENTITY_ARROW_SHOOT;
+		} else if (stack.isOf(Items.WIND_CHARGE)) {
+			sound = SoundEvents.ENTITY_WIND_CHARGE_THROW;
+		} else if (stack.getItem() instanceof TridentItem) {
+			sound = SoundEvents.ITEM_TRIDENT_THROW.value();
+		} else {
+			return;
+		}
+		world.playSound(null, position.x, position.y, position.z, sound,
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+	}
+
+	private static Vec3d crosshairAimPoint(ServerPlayerEntity player,
+			com.tk.gun.net.CombatBackpackFirePayload payload) {
+		Vec3d camera = new Vec3d(payload.cameraX(), payload.cameraY(), payload.cameraZ());
+		Vec3d forward = Vec3d.fromPolar(
+				(float) payload.cameraPitch(), (float) payload.cameraYaw());
+		if (!Double.isFinite(camera.x) || !Double.isFinite(camera.y)
+				|| !Double.isFinite(camera.z)
+				|| camera.squaredDistanceTo(player.getEyePos()) > 4096.0D
+				|| forward.lengthSquared() < 1.0E-8D) {
+			camera = player.getEyePos();
+			forward = player.getRotationVector();
+		}
+		return camera.add(forward.multiply(128.0D));
+	}
+
+	private static void clearBackpackMarker(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		int targetId = state.targetEntityId;
+		clearBackpackTarget(state, now);
+		if (player.getServerWorld().getEntityById(targetId) instanceof LivingEntity living) {
+			living.removeStatusEffect(StatusEffects.GLOWING);
+		}
+	}
+
+	public static void restoreBackpackChargeAfterLoyalty(ServerPlayerEntity player) {
+		long now = player.getWorld().getTime();
+		BackpackCharge state = backpackState(player, now);
+		if (state.cooldownUntil > 0) {
+			state.cooldownUntil = 0;
+			state.charges = BACKPACK_MAX_CHARGES;
+			state.nextChargeAt = 0;
+		} else if (state.charges < BACKPACK_MAX_CHARGES) {
+			state.charges++;
+			state.nextChargeAt = state.charges >= BACKPACK_MAX_CHARGES
+					? 0 : now + BACKPACK_CHARGE_INTERVAL_TICKS;
+		}
+		syncBackpackStatus(player, state, now);
+	}
+
+	public static boolean isBackpackProjectile(Entity entity) {
+		return entity != null && BACKPACK_PROJECTILES.containsKey(entity.getUuid());
+	}
+
+	private static void tickBackpackProjectiles(MinecraftServer server) {
+		int now = server.getTicks();
+		Iterator<Map.Entry<UUID, Long>> iterator = BACKPACK_PROJECTILES.entrySet().iterator();
+		while (iterator.hasNext()) {
+			if (iterator.next().getValue() < now) {
+				iterator.remove();
+			}
+		}
+		Iterator<Map.Entry<UUID, MissileTracker>> missiles =
+				MISSILE_TRACKERS.entrySet().iterator();
+		while (missiles.hasNext()) {
+			Map.Entry<UUID, MissileTracker> entry = missiles.next();
+			MissileTracker tracker = entry.getValue();
+			Entity projectile = tracker.world.getEntity(tracker.projectileUuid);
+			Entity target = tracker.world.getEntityById(tracker.targetEntityId);
+			if (projectile == null || !projectile.isAlive()
+					|| !(target instanceof LivingEntity living) || !living.isAlive()
+					|| now >= tracker.expiresAt) {
+				missiles.remove();
+				continue;
+			}
+			if (!tracker.tracking) {
+				boolean reachedColdDistance = projectile.getPos()
+						.squaredDistanceTo(tracker.coldOrigin)
+						>= MISSILE_BOX_COLD_DISTANCE * MISSILE_BOX_COLD_DISTANCE;
+				boolean coldTimedOut = now - tracker.launchedAt
+						>= MISSILE_BOX_COLD_MAX_TICKS;
+				if (!reachedColdDistance && !coldTimedOut) {
+					projectile.setVelocity(tracker.coldDirection.multiply(
+							MISSILE_BOX_COLD_SPEED));
+					projectile.velocityModified = true;
+					continue;
+				}
+				tracker.tracking = true;
+				projectile.setNoGravity(false);
+				projectile.setSilent(false);
+				if (projectile instanceof net.minecraft.entity.projectile.FireworkRocketEntity rocket) {
+					playBackpackLaunchSound(tracker.world,
+							projectile.getPos(), rocket.getStack());
+				}
+			}
+			Vec3d currentVelocity = projectile.getVelocity();
+			Vec3d current = currentVelocity.lengthSquared() < 1.0E-8D
+					? projectile.getRotationVector()
+					: currentVelocity.normalize();
+			Vec3d desired = living.getBoundingBox().getCenter()
+					.subtract(projectile.getPos()).normalize();
+			Vec3d steered = rotateTowards(current, desired,
+					MISSILE_BOX_TURN_RADIANS);
+			projectile.setVelocity(steered.multiply(
+					MISSILE_BOX_IGNITED_SPEED));
+			projectile.velocityModified = true;
+		}
+		Iterator<Map.Entry<UUID, PortableProjectileTracker>> portable =
+				PORTABLE_PROJECTILE_TRACKERS.entrySet().iterator();
+		while (portable.hasNext()) {
+			Map.Entry<UUID, PortableProjectileTracker> entry = portable.next();
+			PortableProjectileTracker tracker = entry.getValue();
+			Entity projectile = tracker.world.getEntity(tracker.projectileUuid);
+			Entity target = tracker.world.getEntityById(tracker.targetEntityId);
+			if (projectile == null || !projectile.isAlive()
+					|| !(target instanceof LivingEntity living)
+					|| !living.isAlive() || now >= tracker.expiresAt) {
+				if (projectile != null && projectile.isAlive()) {
+					projectile.setNoGravity(false);
+				}
+				portable.remove();
+				continue;
+			}
+			Vec3d velocity = projectile.getVelocity();
+			double speed = velocity.length();
+			if (speed < 1.0E-6D
+					|| projectile.squaredDistanceTo(living) < 1.0D) {
+				continue;
+			}
+			Vec3d current = velocity.multiply(1.0D / speed);
+			Vec3d desired = living.getBoundingBox().getCenter()
+					.subtract(projectile.getPos()).normalize();
+			Vec3d steered = rotateTowards(current, desired,
+					PORTABLE_TURRET_TURN_RADIANS);
+			projectile.setVelocity(steered.multiply(speed));
+			projectile.velocityModified = true;
+		}
+	}
+
+	private static Vec3d rotateTowards(Vec3d current, Vec3d target,
+									   double maxRadians) {
+		double dot = Math.max(-1.0D, Math.min(1.0D,
+				current.dotProduct(target)));
+		double angle = Math.acos(dot);
+		if (angle <= maxRadians || angle < 1.0E-5D) {
+			return target.normalize();
+		}
+		double denominator = Math.sin(angle);
+		if (Math.abs(denominator) < 1.0E-6D) {
+			Vec3d fallback = current.crossProduct(new Vec3d(0.0D, 1.0D, 0.0D));
+			if (fallback.lengthSquared() < 1.0E-6D) {
+				fallback = current.crossProduct(new Vec3d(1.0D, 0.0D, 0.0D));
+			}
+			return fallback.normalize();
+		}
+		double t = maxRadians / angle;
+		double a = Math.sin((1.0D - t) * angle) / denominator;
+		double b = Math.sin(t * angle) / denominator;
+		return current.multiply(a).add(target.normalize().multiply(b)).normalize();
+	}
+
+	private static void enforceLauncherOffhandStorage(ServerPlayerEntity player) {
+		if (player.isUsingItem() && player.getActiveHand() == Hand.OFF_HAND) {
+			player.stopUsingItem();
+		}
+		net.minecraft.entity.player.PlayerInventory inventory = player.getInventory();
+		ItemStack offhand = inventory.getStack(
+				net.minecraft.entity.player.PlayerInventory.OFF_HAND_SLOT);
+		boolean bannerInstalled = com.tk.gun.item.BackpackLauncherRules
+				.isBattleBannerInstalled(player);
+		if (com.tk.gun.item.BackpackLauncherRules
+				.isVirtualBattleBanner(offhand)) {
+			offhand.setCount(0);
+			inventory.markDirty();
+			player.playerScreenHandler.syncState();
+			return;
+		}
+		boolean occupied = bannerInstalled
+				|| com.tk.gun.item.BackpackLauncherRules.hasActiveLauncher(player);
+		if (occupied && !offhand.isEmpty()) {
+			com.tk.gun.item.BackpackAmmoData.absorbOffhand(player);
+		}
+		com.tk.gun.item.BackpackAmmoData.returnStoredIfUnsupported(player);
+	}
+
+	private static void sendBackpackFireResult(ServerPlayerEntity player) {
+		ServerPlayNetworking.send(player,
+				new com.tk.gun.net.CombatBackpackFireResultPayload());
+	}
+
+	public static boolean isOverheated(ServerPlayerEntity player) {
+		PState st = state(player);
+		return player.getWorld().getTime() < st.overheatUntil;
+	}
+
+	// ---------------------------------------------------------------- 开火
+	/** @param charged true=右键蓄满，false=左键腰射（腰射要额外等拉栓） */
+	/**
+	 * 举枪状态三档：AIM（24 tick）、AIM_FAST（14 tick）、AIM_SLIDE（10 tick）。
+	 * 客户端按状态选择对应动画和播放速度。
+	 *
+	 * <p>普通右键只建立 item-use 瞄准状态；专注由 Z 切换。本方法供调试命令和快速举枪路径使用。
+	 */
+	public static boolean isVeritasMainHand(ServerPlayerEntity player) {
+		return TkGun.isGun(player.getMainHandStack())
+				&& TkGun.definition(player.getMainHandStack()).id()
+						.equals(TkGun.id("veritas_et_justitia"));
+	}
+
+	private static void handleMeleeInput(ServerPlayerEntity player, boolean pressed,
+			boolean movingForward) {
+		if (player == null || player.getServer() == null || !player.isAlive()) {
+			return;
+		}
+		if (pressed && !SoulAnchorSkillService.allowsMeleeStart(player)) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		st.meleeInputHeld = pressed;
+		st.meleeInputPressedAt = pressed ? now : 0L;
+		if (!pressed) {
+			if (st.state == TkGun.State.MELEE && st.meleeCombo == 3
+					&& st.meleeAtk3MainEnded) {
+				long holdElapsed = now - st.stateStarted
+						- TkGun.MELEE_ATK3_MAIN_END_TICK;
+				if (holdElapsed >= TkGun.MELEE_ATK3_HOLD_RELEASE_TICKS) {
+					beginMeleeHoldOver(player, st, now);
+				} else {
+					beginMelee(player, st, now, 4, false);
+				}
+			}
+			return;
+		}
+		if (TkGun.isKineticSword(player)) {
+			handleKineticSwordInput(player, st, now);
+			return;
+		}
+		if (!isVeritasMainHand(player) || !player.isOnGround()) {
+			st.meleeInputHeld = false;
+			st.meleeInputPressedAt = 0L;
+			return;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			if (st.meleeDashAttack) {
+				return;
+			}
+			if (st.meleeReturning) {
+				st.meleeQueued = true;
+				return;
+			}
+			if (st.meleeCombo != 3
+					&& now >= st.stateStarted + TkGun.meleeHitTick(st.meleeCombo)) {
+				st.meleeQueued = true;
+			}
+			return;
+		}
+		if (st.state != TkGun.State.IDLE || st.deployed || player.isUsingItem()
+				|| !GunStateMachine.canFire(st.state)) {
+			st.meleeInputHeld = false;
+			st.meleeInputPressedAt = 0L;
+			return;
+		}
+		if ((now < st.dashUntil || now < st.speedBoostUntil)
+				&& movingForward) {
+			beginDashMelee(player, st, now);
+			return;
+		}
+		int next = st.lastMeleeAt > 0 && now - st.lastMeleeAt <= 60
+				? nextMeleeTap(st.meleeCombo) : 1;
+		beginMelee(player, st, now, next, false);
+	}
+
+	private static void handleKineticSwordInput(ServerPlayerEntity player,
+			PState st, long now) {
+		if (!player.isOnGround() || player.isUsingItem()) {
+			return;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			if (st.kineticSwordAttack && !st.kineticSwordReturn) {
+				int index = Math.max(0, Math.min(5, st.meleeCombo - 1));
+				long chainAt = st.stateStarted
+						+ TkGun.KINETIC_SWORD_ATTACK_TICKS[index];
+				if (now < chainAt && st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length) {
+					st.kineticSwordQueued = true;
+				}
+			}
+			return;
+		}
+		if (st.state != TkGun.State.IDLE || st.deployed
+				|| !GunStateMachine.canFire(st.state)) {
+			return;
+		}
+		beginKineticSwordAttack(player, st, now, 1);
+	}
+
+	private static void beginKineticSwordAttack(ServerPlayerEntity player,
+			PState st, long now, int step) {
+		if (player.getServer() == null) {
+			return;
+		}
+		int combo = Math.max(1, Math.min(TkGun.KINETIC_SWORD_DAMAGE_TICKS.length, step));
+		st.meleeCombo = combo;
+		st.shotIndex = combo;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleeHoldOver = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.meleeReturning = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordAttack = true;
+		st.kineticSwordQueued = false;
+		st.kineticSwordHitIndex = 0;
+		double yaw = Math.toRadians(player.getYaw());
+		st.kineticSwordMoveDirX = -Math.sin(yaw);
+		st.kineticSwordMoveDirZ = Math.cos(yaw);
+		st.kineticSwordMoveDistance = switch (combo) {
+			case 1 -> 1.0D;
+			case 2, 3, 4, 5, 6 -> 1.0D;
+			default -> 0.0D;
+		};
+		st.kineticSwordMoveStartTick = combo == 1
+				? TkGun.KINETIC_SWORD_DAMAGE_TICKS[0][0] : 0;
+		st.kineticSwordMoveEndTick =
+				Math.max(st.kineticSwordMoveStartTick + 1,
+						TkGun.KINETIC_SWORD_ATTACK_TICKS[combo - 1] - 1);
+		st.kineticSwordMoveLastX = player.getX();
+		st.kineticSwordMoveLastZ = player.getZ();
+		st.kineticSwordMoveTraveled = 0.0D;
+		st.meleePlayedSoundCues.clear();
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.KINETIC_SWORD_ATTACK_TICKS[combo - 1]);
+		playMeleeAnimationSounds(player, st, "GS_ATK_" + combo, 0.0D);
+		TkGun.LOGGER.info("[mechaniciancombat] kinetic sword attack {} started player={}",
+				combo, player.getName().getString());
+	}
+
+	private static void beginKineticSwordRecovery(ServerPlayerEntity player,
+			PState st, long now) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.kineticSwordAttack = false;
+		st.kineticSwordQueued = false;
+		st.kineticSwordReturn = true;
+		st.kineticSwordHitIndex = 0;
+		st.kineticSwordMoveDistance = 0.0D;
+		st.kineticSwordMoveTraveled = 0.0D;
+		st.meleeReturning = true;
+		st.shotIndex = Math.max(1, Math.min(6, st.meleeCombo));
+		st.shotSeq++;
+		st.meleeInputHeld = false;
+		st.meleeInputPressedAt = 0L;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.KINETIC_SWORD_BACK_IDLE_TICKS);
+		TkGun.LOGGER.info("[mechaniciancombat] kinetic sword attack {} -> back-idle player={}",
+				st.meleeCombo, player.getName().getString());
+	}
+
+	private static void tickKineticSwordAttack(ServerPlayerEntity player,
+			PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		tickKineticSwordAttackMotion(player, st, elapsed);
+
+		String animation = "GS_ATK_" + st.meleeCombo;
+		playMeleeAnimationSounds(player, st, animation, elapsed / 20.0D);
+		int attackIndex = Math.max(0, Math.min(
+				TkGun.KINETIC_SWORD_DAMAGE_TICKS.length - 1,
+				st.meleeCombo - 1));
+		int[] damageTicks = TkGun.KINETIC_SWORD_DAMAGE_TICKS[attackIndex];
+		while (st.kineticSwordHitIndex < damageTicks.length
+				&& elapsed >= damageTicks[st.kineticSwordHitIndex]) {
+			st.kineticSwordHitIndex++;
+			performKineticSwordHit(player, st);
+		}
+
+		if (st.kineticSwordQueued
+				&& st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length
+				&& elapsed >= (st.meleeCombo == 2 || st.meleeCombo == 4
+						? TkGun.KINETIC_SWORD_QUICK_CHAIN_TICK
+						: TkGun.KINETIC_SWORD_ATTACK_TICKS[attackIndex])) {
+			beginKineticSwordAttack(player, st, now, st.meleeCombo + 1);
+			return;
+		}
+		if (elapsed >= TkGun.KINETIC_SWORD_ATTACK_TICKS[attackIndex]) {
+			beginKineticSwordRecovery(player, st, now);
+		}
+	}
+
+	private static void tickKineticSwordAttackMotion(ServerPlayerEntity player,
+			PState st, long elapsed) {
+		double dx = player.getX() - st.kineticSwordMoveLastX;
+		double dz = player.getZ() - st.kineticSwordMoveLastZ;
+		st.kineticSwordMoveLastX = player.getX();
+		st.kineticSwordMoveLastZ = player.getZ();
+		st.kineticSwordMoveTraveled += Math.max(0.0D,
+				dx * st.kineticSwordMoveDirX + dz * st.kineticSwordMoveDirZ);
+		if (st.kineticSwordMoveDistance <= 0.0D
+				|| elapsed < st.kineticSwordMoveStartTick
+				|| elapsed >= st.kineticSwordMoveEndTick) {
+			return;
+		}
+		double remaining = Math.max(0.0D,
+				st.kineticSwordMoveDistance - st.kineticSwordMoveTraveled);
+		long ticksLeft = Math.max(1L,
+				st.kineticSwordMoveEndTick - elapsed);
+		double speed = Math.min(remaining, remaining / ticksLeft)
+				/ holdOverMovementFriction(player);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.kineticSwordMoveDirX * speed, velocity.y,
+				st.kineticSwordMoveDirZ * speed);
+		player.velocityModified = true;
+	}
+
+	private static void performKineticSwordHit(ServerPlayerEntity player,
+			PState st) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		Vec3d origin = player.getPos().add(0.0D, 1.0D, 0.0D);
+		// Three blocks ahead plus one body block, centred on the player foot line.
+		Vec3d center = origin.add(forward.multiply(1.5D));
+		double halfWidth = 1.5D;
+		double halfHeight = 1.5D;
+		double halfDepth = 2.0D;
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(4.0D, 3.0D, 4.0D);
+		List<Entity> hitTargets = new ArrayList<>();
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator()
+						&& CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), center,
+					right, up, forward, halfWidth, halfHeight, halfDepth)) {
+				continue;
+			}
+			if (entity instanceof LivingEntity living) {
+				living.timeUntilRegen = 0;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player),
+					TkGun.KINETIC_SWORD_DAMAGE)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			MeleeImpactService.apply(player, st, hitTargets, forward,
+					MeleeImpactService.ATK_2_TICKS, false, false, false);
+			TkGun.LOGGER.info("[mechaniciancombat] kinetic sword ATK_{} hit {} targets player={}",
+					st.meleeCombo, hitTargets.size(),
+					player.getName().getString());
+		}
+	}
+
+	private static int nextMeleeTap(int current) {
+		return switch (current) {
+			case 1 -> 2;
+			case 2 -> 4;
+			case 3 -> 4;
+			default -> 1;
+		};
+	}
+
+	private static boolean isMeleeLongPress(PState st, long now) {
+		return st.meleeInputHeld && st.meleeInputPressedAt > 0L
+				&& now - st.meleeInputPressedAt >= TkGun.MELEE_LONG_PRESS_TICKS;
+	}
+
+	private static java.lang.reflect.Method betterCombatDisableMethod;
+	private static boolean betterCombatBridgeResolved;
+
+	private static void syncBetterCombatAttackFlag(ServerPlayerEntity player, boolean disabled) {
+		PState st = state(player);
+		if (st.betterCombatAttackDisabled == disabled) {
+			return;
+		}
+		if (!net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("bettercombat")) {
+			return;
+		}
+		if (!betterCombatBridgeResolved) {
+			betterCombatBridgeResolved = true;
+			try {
+				Class<?> flags = Class.forName("net.bettercombat.api.CombatFlags");
+				betterCombatDisableMethod = flags.getMethod("setAttacksDisabled",
+						ServerPlayerEntity.class, boolean.class);
+			} catch (Throwable throwable) {
+				TkGun.LOGGER.warn("[mechaniciancombat] Better Combat attack bridge unavailable: {}",
+						throwable.toString());
+			}
+		}
+		try {
+			if (betterCombatDisableMethod != null) {
+				betterCombatDisableMethod.invoke(null, player, disabled);
+				st.betterCombatAttackDisabled = disabled;
+			}
+		} catch (Throwable throwable) {
+			TkGun.LOGGER.warn("[mechaniciancombat] Failed to update Better Combat attack flag: {}",
+					throwable.toString());
+		}
+	}
+
+	private static void beginMelee(ServerPlayerEntity player, PState st, long now,
+			int step, boolean empowered) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeCombo = Math.max(1, Math.min(4, step));
+		st.shotIndex = st.meleeCombo;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = st.meleeCombo == 4 && empowered;
+		st.meleeHoldOver = false;
+		st.meleePlayedSoundCues.clear();
+		st.meleeHoldOverHits = 0;
+		st.meleeHoldOverDirX = 0.0D;
+		st.meleeHoldOverDirZ = 0.0D;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.kineticSwordAttack = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordQueued = false;
+		st.meleeReturning = false;
+		st.meleeDashReturn = false;
+		st.meleeReturnToRun = false;
+		st.meleeDashResumeSprint = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		if (st.meleeCombo == 3) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+		}
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.meleeTicks(st.meleeCombo));
+	}
+
+	private static void beginMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeCombo = 4;
+		st.shotIndex = 4;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = true;
+		st.meleeAtk4Empowered = true;
+		st.meleeHoldOver = true;
+		st.meleePlayedSoundCues.clear();
+		st.meleeHoldOverHits = 0;
+		double yaw = Math.toRadians(player.getYaw());
+		st.meleeHoldOverDirX = -Math.sin(yaw);
+		st.meleeHoldOverDirZ = Math.cos(yaw);
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.kineticSwordAttack = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordQueued = false;
+		st.meleeReturning = false;
+		st.meleeDashReturn = false;
+		st.meleeReturnToRun = false;
+		st.meleeDashResumeSprint = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.MELEE_HOLD_OVER_TICKS);
+	}
+
+	private static void beginMeleeReturn(ServerPlayerEntity player, PState st, int step,
+										 boolean dashReturn, boolean returnToRun) {
+		if (player.getServer() == null) {
+			return;
+		}
+		boolean holdOverReturn = st.meleeHoldOver;
+		st.meleeReturning = true;
+		st.meleeDashReturn = dashReturn;
+		st.meleeReturnToRun = dashReturn && returnToRun;
+		st.meleeHoldOver = false;
+		st.meleeHoldOverHits = 0;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.kineticSwordAttack = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordQueued = false;
+		st.meleeHitDone = true;
+		st.meleeQueued = false;
+		st.shotIndex = Math.max(1, Math.min(4, step));
+		st.shotSeq++;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				holdOverReturn ? TkGun.MELEE_HOLDOVER_RETURN_TICKS
+						: TkGun.MELEE_RETURN_TICKS);
+		if (dashReturn) {
+			TkGun.LOGGER.info("[mechaniciancombat] dash melee recovery -> ATK_run_to_idle player={}",
+					player.getName().getString());
+		}
+	}
+
+	private static void beginDashMelee(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null) {
+			return;
+		}
+		st.meleeDashAimYaw = player.getYaw();
+		double yaw = Math.toRadians(st.meleeDashAimYaw);
+		st.meleeCombo = 2;
+		st.shotIndex = 2;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleePlayedSoundCues.clear();
+		st.meleeDashAttack = true;
+		st.meleeDashMoving = false;
+		st.kineticSwordAttack = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordQueued = false;
+		st.meleeDashStunSpeed = 0.0D;
+		st.meleeDashStunHits.clear();
+		st.meleeReturning = false;
+		st.meleeDashResumeSprint = player.isSprinting();
+		st.meleeDashDirX = -Math.sin(yaw);
+		st.meleeDashDirZ = Math.cos(yaw);
+		st.meleeDashFromX = player.getX();
+		st.meleeDashFromZ = player.getZ();
+		st.meleeDashStunFromX = player.getX();
+		st.meleeDashStunFromZ = player.getZ();
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.dashSyncActive = false;
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		GunStateMachine.clearDash(player);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.MELEE_DASH_TOTAL_TICKS);
+		st.meleeDashMoving = true;
+		playMeleeAnimationSounds(player, st, "ATK_run", 0.0D);
+		performDashMeleeHorizontalPlaneHit(player, st);
+		double initialSpeed = 2.0D * TkGun.MELEE_DASH_DISTANCE
+				/ TkGun.MELEE_DASH_MOVE_TICKS;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.meleeDashDirX * initialSpeed, velocity.y,
+				st.meleeDashDirZ * initialSpeed);
+		player.velocityModified = true;
+		TkGun.LOGGER.info("[mechaniciancombat] dash attack triggered: acceleration cleared, "
+						+ "{} tick controlled slide, first hit done player={}",
+				TkGun.MELEE_DASH_MOVE_TICKS, player.getName().getString());
+	}
+
+	private static void tickMelee(ServerPlayerEntity player, PState st, long now) {
+		if (st.state != TkGun.State.MELEE) {
+			return;
+		}
+		if (st.kineticSwordReturn) {
+			return;
+		}
+		if (st.kineticSwordAttack) {
+			tickKineticSwordAttack(player, st, now);
+			return;
+		}
+		if (st.meleeReturning) {
+			return;
+		}
+		if (st.meleeDashAttack) {
+			tickDashMeleeMove(player, st, now);
+			return;
+		}
+		if (st.meleeHoldOver) {
+			tickMeleeHoldOver(player, st, now);
+			return;
+		}
+		playMeleeAttackSounds(player, st, now - st.stateStarted);
+		if (!st.meleeHitDone
+				&& now >= st.stateStarted + TkGun.meleeHitTick(st.meleeCombo)) {
+			st.meleeHitDone = true;
+			if (st.meleeCombo == 3) {
+				MeleeImpactService.sendCameraShake(player,
+						MeleeImpactService.ticksForStep(3), false);
+			}
+			performMeleeHit(player, st, st.meleeCombo);
+		}
+		if (st.meleeCombo != 3) {
+			return;
+		}
+		if (!st.meleeAtk3MainEnded
+				&& now >= st.stateStarted + TkGun.MELEE_ATK3_MAIN_END_TICK) {
+			st.meleeAtk3MainEnded = true;
+			if (!isMeleeLongPress(st, now)) {
+				beginMelee(player, st, now, 4, false);
+				return;
+			}
+			TkGun.LOGGER.info("[mechaniciancombat] ATK_3 main end -> hold last frame for ATK_4 charge player={}",
+					player.getName().getString());
+		}
+		if (st.meleeAtk3MainEnded
+				&& now >= st.stateStarted + TkGun.MELEE_ATK3_MAIN_END_TICK
+						+ TkGun.MELEE_ATK3_HOLD_MAX_TICKS) {
+			TkGun.LOGGER.info("[mechaniciancombat] ATK_3 0.75 s charge complete -> ATK_hold_over player={}",
+					player.getName().getString());
+			beginMeleeHoldOver(player, st, now);
+		}
+	}
+
+	private record MeleeSoundCue(double seconds, String key) {
+	}
+
+	private static final Map<Identifier, Map<String, List<MeleeSoundCue>>>
+			MELEE_SOUND_TIMELINES = new HashMap<>();
+
+	private static void playMeleeAttackSounds(ServerPlayerEntity player,
+											  PState st, long elapsed) {
+		String animation = "ATK_" + st.meleeCombo;
+		long animationElapsed = elapsed;
+		if (st.meleeCombo == 3
+				&& elapsed >= TkGun.MELEE_ATK3_MAIN_END_TICK) {
+			animation = "ATK_3_hold";
+			animationElapsed -= TkGun.MELEE_ATK3_MAIN_END_TICK;
+		}
+		playMeleeAnimationSounds(player, st, animation,
+				animationElapsed / 20.0D);
+	}
+
+	private static void playMeleeAnimationSounds(ServerPlayerEntity player,
+												 PState st, String animation,
+												 double elapsedSeconds) {
+		List<MeleeSoundCue> cues =
+				meleeSoundTimelines(TkGun.definition(player).animationResource())
+						.getOrDefault(animation, List.of());
+		for (int index = 0; index < cues.size(); index++) {
+			MeleeSoundCue cue = cues.get(index);
+			if (elapsedSeconds + 1.0E-4D < cue.seconds()) {
+				continue;
+			}
+			String cueId = animation + "#" + index;
+			if (!st.meleePlayedSoundCues.add(cueId)) {
+				continue;
+			}
+			String key = cue.key();
+			playMeleeSound(player, key, 1.0F, 1.0F);
+			TkGun.LOGGER.info("[mechaniciancombat] melee attack sound {} at {}s ({}) player={}",
+					key, cue.seconds(), animation,
+					player.getName().getString());
+		}
+	}
+
+	private static Map<String, List<MeleeSoundCue>> meleeSoundTimelines(
+			Identifier animationResource) {
+		Map<String, List<MeleeSoundCue>> cached =
+				MELEE_SOUND_TIMELINES.get(animationResource);
+		if (cached != null) {
+			return cached;
+		}
+		Map<String, List<MeleeSoundCue>> loaded = new HashMap<>();
+		String resource = "/assets/" + animationResource.getNamespace() + "/"
+				+ animationResource.getPath();
+		try (java.io.InputStream stream =
+					 TkGunServer.class.getResourceAsStream(resource)) {
+			if (stream == null) {
+				throw new IllegalStateException("Missing resource " + resource);
+			}
+			String text = new String(stream.readAllBytes(),
+					java.nio.charset.StandardCharsets.UTF_8);
+			com.google.gson.JsonObject animations =
+					com.google.gson.JsonParser.parseString(text)
+							.getAsJsonObject().getAsJsonObject("animations");
+			for (Map.Entry<String, com.google.gson.JsonElement> animation
+					: animations.entrySet()) {
+				if (!animation.getValue().isJsonObject()) {
+					continue;
+				}
+				com.google.gson.JsonElement soundsElement =
+						animation.getValue().getAsJsonObject().get("sound_effects");
+				if (soundsElement == null || !soundsElement.isJsonObject()) {
+					continue;
+				}
+				List<MeleeSoundCue> cues = new ArrayList<>();
+				for (Map.Entry<String, com.google.gson.JsonElement> sound
+						: soundsElement.getAsJsonObject().entrySet()) {
+					if (!sound.getValue().isJsonObject()) {
+						continue;
+					}
+					com.google.gson.JsonObject value =
+							sound.getValue().getAsJsonObject();
+					String key = value.has("effect")
+							? value.get("effect").getAsString() : "";
+					if (key.isBlank() || !TkGun.KEYFRAME_SOUNDS.containsKey(key)) {
+						continue;
+					}
+					cues.add(new MeleeSoundCue(
+							Double.parseDouble(sound.getKey()), key));
+				}
+				if ("ATK_2".equals(animation.getKey())
+						&& cues.stream().noneMatch(cue ->
+								Math.abs(cue.seconds() - 0.25D) < 1.0E-3D)) {
+					cues.add(new MeleeSoundCue(0.25D, "claymore_swing"));
+				}
+				cues.sort(java.util.Comparator.comparingDouble(
+						MeleeSoundCue::seconds));
+				if (!cues.isEmpty()) {
+					loaded.put(animation.getKey(), List.copyOf(cues));
+				}
+			}
+		} catch (Throwable throwable) {
+			TkGun.LOGGER.warn("[mechaniciancombat] failed to load melee sound timelines: {}",
+					throwable.toString());
+		}
+		Map<String, List<MeleeSoundCue>> immutable =
+				Map.copyOf(loaded);
+		MELEE_SOUND_TIMELINES.put(animationResource, immutable);
+		TkGun.LOGGER.info("[mechaniciancombat] loaded melee sound timelines for {}: {}",
+				animationResource, immutable.keySet());
+		return immutable;
+	}
+
+	private static boolean playMeleeSound(ServerPlayerEntity player, String key,
+									   float volume, float pitch) {
+		TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(key);
+		if (sound != null) {
+			playSound(player, sound.id(), volume * sound.volume(),
+					pitch * sound.pitch());
+			return true;
+		}
+		TkGun.LOGGER.warn(
+				"[mechaniciancombat] Missing keyframe sound mapping: {}", key);
+		return false;
+	}
+
+	private static void tickDashMeleeMove(ServerPlayerEntity player, PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		player.setYaw(st.meleeDashAimYaw);
+		player.setBodyYaw(st.meleeDashAimYaw);
+		playMeleeAnimationSounds(player, st, "ATK_run", elapsed / 20.0D);
+		if (elapsed >= TkGun.MELEE_DASH_MOVE_TICKS) {
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			if (!st.meleeHitDone) {
+				st.meleeHitDone = true;
+				performDashMeleeHorizontalPlaneHit(player, st);
+			}
+			int stunElapsed = (int) (elapsed - TkGun.MELEE_DASH_MOVE_TICKS);
+			Vec3d velocity = player.getVelocity();
+			if (st.meleeDashStunSpeed <= 0.0D && stunElapsed == 0) {
+				st.meleeDashStunSpeed = Math.max(0.0D,
+						velocity.x * st.meleeDashDirX + velocity.z * st.meleeDashDirZ);
+				TkGun.LOGGER.info("[mechaniciancombat] dash hard-stop inherited speed={} player={}",
+						round3(st.meleeDashStunSpeed),
+						player.getName().getString());
+			}
+			double inertia = stunElapsed < TkGun.MELEE_DASH_STUN_TICKS
+					? st.meleeDashStunSpeed
+						* (1.0D - stunElapsed / (double) TkGun.MELEE_DASH_STUN_TICKS)
+					: 0.0D;
+			player.setVelocity(st.meleeDashDirX * inertia, velocity.y,
+					st.meleeDashDirZ * inertia);
+			player.velocityModified = true;
+			performDashMeleeStunHit(player, st);
+			return;
+		}
+		double dx = player.getX() - st.meleeDashFromX;
+		double dz = player.getZ() - st.meleeDashFromZ;
+		double travelled = dx * st.meleeDashDirX + dz * st.meleeDashDirZ;
+		double left = Math.max(0.0D, TkGun.MELEE_DASH_DISTANCE - travelled);
+		double progress = elapsed / (double) TkGun.MELEE_DASH_MOVE_TICKS;
+		double speed = Math.min(left,
+				2.0D * TkGun.MELEE_DASH_DISTANCE
+						/ TkGun.MELEE_DASH_MOVE_TICKS * (1.0D - progress));
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.meleeDashDirX * speed, velocity.y, st.meleeDashDirZ * speed);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		st.meleeDashStunFromX = player.getX();
+		st.meleeDashStunFromZ = player.getZ();
+	}
+
+	private static void tickMeleeHoldOver(ServerPlayerEntity player, PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		tickMeleeHoldOverMovement(player, st, elapsed);
+		playMeleeAnimationSounds(player, st, "ATK_hold_over", elapsed / 20.0D);
+		while (st.meleeHoldOverHits < TkGun.MELEE_HOLD_OVER_HIT_TICKS.length
+				&& elapsed >= TkGun.MELEE_HOLD_OVER_HIT_TICKS[st.meleeHoldOverHits]) {
+			st.meleeHoldOverHits++;
+			MeleeImpactService.sendCameraShake(
+					player, MeleeImpactService.HOLD_OVER_TICKS, true);
+			performMeleeHit(player, st, 4);
+			// A successful hit pauses the authored timeline. Re-read it so the
+			// next authored hit cannot fire during the same server tick.
+			elapsed = now - st.stateStarted;
+		}
+	}
+
+	private static void tickMeleeHoldOverMovement(ServerPlayerEntity player,
+			PState st, long elapsed) {
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		if (elapsed >= TkGun.MELEE_HOLD_OVER_MOTION_END_TICK) {
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			return;
+		}
+
+		double speedFactorTotal = 0.0D;
+		for (long tick = 0;
+				tick < TkGun.MELEE_HOLD_OVER_MOTION_END_TICK; tick++) {
+			speedFactorTotal += holdOverStrikeEnvelope(tick + 0.5D);
+		}
+		double peakSpeed = TkGun.MELEE_HOLD_OVER_TOTAL_DISTANCE
+				/ speedFactorTotal;
+		double speed = peakSpeed
+				* holdOverStrikeEnvelope(elapsed + 0.5D)
+				/ holdOverMovementFriction(player);
+		player.setVelocity(st.meleeHoldOverDirX * speed, velocity.y,
+				st.meleeHoldOverDirZ * speed);
+		player.velocityModified = true;
+	}
+
+	private static double holdOverStrikeEnvelope(double tick) {
+		double fadeStart = TkGun.MELEE_HOLD_OVER_STRIKE_FADE_START_TICK;
+		double start = TkGun.MELEE_HOLD_OVER_STRIKE_START_TICK;
+		double end = TkGun.MELEE_HOLD_OVER_STRIKE_END_TICK;
+		double fadeEnd = TkGun.MELEE_HOLD_OVER_STRIKE_FADE_END_TICK;
+		if (tick <= fadeStart) {
+			return 0.0D;
+		}
+		if (tick <= start) {
+			return smoothStep((tick - fadeStart) / (start - fadeStart));
+		}
+		if (tick <= end) {
+			return 1.0D;
+		}
+		if (tick >= fadeEnd) {
+			return 0.0D;
+		}
+		return smoothStep((fadeEnd - tick) / (fadeEnd - end));
+	}
+
+	private static double smoothStep(double value) {
+		double t = Math.max(0.0D, Math.min(1.0D, value));
+		return t * t * (3.0D - 2.0D * t);
+	}
+
+	/** Match the horizontal multiplier applied by LivingEntity#travel next tick. */
+	private static double holdOverMovementFriction(ServerPlayerEntity player) {
+		double friction = 0.91D;
+		if (player.isOnGround()) {
+			friction = player.getSteppingBlockState().getBlock()
+					.getSlipperiness() * 0.91D;
+		}
+		return Math.max(0.05D, friction);
+	}
+
+	private static boolean finishDashMelee(ServerPlayerEntity player, PState st) {
+		double dx = player.getX() - st.meleeDashFromX;
+		double dz = player.getZ() - st.meleeDashFromZ;
+		TkGun.LOGGER.info("[mechaniciancombat] dash melee end: forward={} blocks, target={} player={}",
+				round3(dx * st.meleeDashDirX + dz * st.meleeDashDirZ),
+				TkGun.MELEE_DASH_DISTANCE, player.getName().getString());
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		// Dash attacks terminate the current normal combo; the next attack
+		// after hard-stop/recovery starts from ATK_1.
+		st.meleeCombo = 0;
+		st.lastMeleeAt = 0L;
+		st.meleeInputHeld = false;
+		st.meleeInputPressedAt = 0L;
+		boolean resumeSprint = st.meleeDashResumeSprint;
+		st.meleeDashResumeSprint = false;
+		GunStateMachine.clearDash(player);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		player.setSprinting(resumeSprint);
+		return resumeSprint;
+	}
+
+	private static void performMeleeHit(ServerPlayerEntity player, PState st, int step) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		List<Entity> hitTargets = new ArrayList<>();
+		double range = TkGun.MELEE_RANGE;
+		Vec3d origin = player.getPos().add(0.0D, 0.9D, 0.0D);
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(range, 2.5D, range);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
+			Vec3d offset = entity.getBoundingBox().getCenter().subtract(origin);
+			double depth = offset.dotProduct(forward);
+			double lateral = Math.abs(offset.dotProduct(right));
+			double vertical = Math.abs(offset.y);
+			double radius = entity.getWidth() * 0.5D;
+			boolean inBox = switch (step) {
+				case 2 -> depth > 0.0D && depth <= range
+						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
+						&& vertical <= 1.5D + entity.getHeight() * 0.5D;
+				case 3, 4 -> Math.hypot(offset.x, offset.z) <= range + radius
+						&& vertical <= 2.5D + entity.getHeight() * 0.5D;
+				default -> depth >= -0.25D && depth <= range
+						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
+						&& vertical <= 1.8D + entity.getHeight() * 0.5D;
+			};
+			if (!inBox) {
+				continue;
+			}
+			float damage = TkGun.DIAMOND_AXE_DAMAGE
+					* (step == 4 && st.meleeAtk4Empowered ? 2.0F : 1.0F);
+			if (st.meleeHoldOver && entity instanceof LivingEntity living) {
+				living.timeUntilRegen = 0;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player), damage)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			boolean critical = st.meleeHoldOver || st.meleeAtk4Empowered;
+			boolean lockAttacker = !st.meleeInputHeld && !st.meleeHoldOver;
+			MeleeImpactService.apply(player, st, hitTargets, forward,
+					MeleeImpactService.ticksForStep(step), critical, lockAttacker,
+					false);
+		}
+		if (step != 2) {
+			player.getServerWorld().spawnParticles(
+					net.minecraft.particle.ParticleTypes.SWEEP_ATTACK,
+					player.getX() + forward.x * 1.5D,
+					player.getY() + 1.0D,
+					player.getZ() + forward.z * 1.5D,
+					3, 0.35D, 0.25D, 0.35D, 0.0D);
+		}
+	}
+
+	private static void performDashMeleeHorizontalPlaneHit(
+			ServerPlayerEntity player, PState st) {
+		double yaw = Math.toRadians(st.meleeDashAimYaw);
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		List<Entity> hitTargets = new ArrayList<>();
+		double range = TkGun.MELEE_RANGE;
+		Vec3d origin = player.getPos().add(0.0D,
+				player.getStandingEyeHeight() * 0.15D, 0.0D);
+		Vec3d boxCenter = origin.add(forward.multiply(range * 0.5D));
+		double halfWidth = range;
+		double halfHeight = range / 6.0D;
+		double halfDepth = range * 0.5D;
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(range * 1.5D, range / 3.0D + 2.0D, range * 1.5D);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), boxCenter,
+					right, up, forward, halfWidth, halfHeight, halfDepth)) {
+				continue;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player),
+					TkGun.DIAMOND_AXE_DAMAGE)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			MeleeImpactService.apply(player, state(player), hitTargets, forward,
+					MeleeImpactService.DASH_TICKS, false, false, false);
+		}
+	}
+
+	/**
+	 * Damages each target once while the inherited hard-stop momentum carries
+	 * the horizontal attack box through them. The box covers the union from
+	 * the previous sampled position through the current one.
+	 */
+	private static void performDashMeleeStunHit(
+			ServerPlayerEntity player, PState st) {
+		double fromX = st.meleeDashStunFromX;
+		double fromZ = st.meleeDashStunFromZ;
+		double toX = player.getX();
+		double toZ = player.getZ();
+		double pathLength = Math.hypot(toX - fromX, toZ - fromZ);
+
+		double yaw = Math.toRadians(st.meleeDashAimYaw);
+		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		double range = TkGun.MELEE_RANGE;
+		Vec3d segmentCenter = new Vec3d(
+				(fromX + toX) * 0.5D,
+				player.getY() + player.getStandingEyeHeight() * 0.15D,
+				(fromZ + toZ) * 0.5D);
+		Vec3d boxCenter = segmentCenter.add(forward.multiply(range * 0.5D));
+		double halfWidth = range;
+		double halfHeight = range / 6.0D;
+		double halfDepth = range * 0.5D + pathLength * 0.5D;
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(range * 1.5D + pathLength, range / 3.0D + 2.0D,
+						range * 1.5D + pathLength);
+		List<Entity> hitTargets = new ArrayList<>();
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
+			if (st.meleeDashStunHits.contains(entity.getUuid())
+					|| !orientedBoxOverlaps(entity.getBoundingBox(), boxCenter,
+							right, up, forward, halfWidth, halfHeight, halfDepth)) {
+				continue;
+			}
+			st.meleeDashStunHits.add(entity.getUuid());
+			if (entity instanceof LivingEntity living) {
+				living.timeUntilRegen = 0;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player),
+					TkGun.DIAMOND_AXE_DAMAGE)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			MeleeImpactService.apply(player, st, hitTargets, forward,
+					MeleeImpactService.DASH_TICKS, false, false, false);
+		}
+		st.meleeDashStunFromX = toX;
+		st.meleeDashStunFromZ = toZ;
+	}
+
+	private static boolean orientedBoxOverlaps(net.minecraft.util.math.Box bounds,
+			Vec3d center, Vec3d right, Vec3d up, Vec3d forward,
+			double halfWidth, double halfHeight, double halfDepth) {
+		Vec3d aabbCenter = bounds.getCenter();
+		Vec3d aabbHalf = new Vec3d(
+				(bounds.maxX - bounds.minX) * 0.5D,
+				(bounds.maxY - bounds.minY) * 0.5D,
+				(bounds.maxZ - bounds.minZ) * 0.5D);
+		Vec3d delta = aabbCenter.subtract(center);
+		Vec3d[] worldAxes = {
+				new Vec3d(1.0D, 0.0D, 0.0D),
+				new Vec3d(0.0D, 1.0D, 0.0D),
+				new Vec3d(0.0D, 0.0D, 1.0D)
+		};
+		Vec3d[] boxAxes = {right, up, forward};
+		for (Vec3d axis : worldAxes) {
+			if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+					right, up, forward)) {
+				return false;
+			}
+		}
+		for (Vec3d axis : boxAxes) {
+			if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+					right, up, forward)) {
+				return false;
+			}
+		}
+		for (Vec3d worldAxis : worldAxes) {
+			for (Vec3d boxAxis : boxAxes) {
+				Vec3d axis = worldAxis.crossProduct(boxAxis);
+				if (axis.lengthSquared() < 1.0E-8D) {
+					continue;
+				}
+				if (separatedOnAxis(delta, axis, aabbHalf, halfWidth, halfHeight, halfDepth,
+						right, up, forward)) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	private static boolean separatedOnAxis(Vec3d delta, Vec3d axis, Vec3d aabbHalf,
+			double halfWidth, double halfHeight, double halfDepth,
+			Vec3d right, Vec3d up, Vec3d forward) {
+		double aabbRadius = aabbHalf.x * Math.abs(axis.x)
+				+ aabbHalf.y * Math.abs(axis.y)
+				+ aabbHalf.z * Math.abs(axis.z);
+		double boxRadius = halfWidth * Math.abs(axis.dotProduct(right))
+				+ halfHeight * Math.abs(axis.dotProduct(up))
+				+ halfDepth * Math.abs(axis.dotProduct(forward));
+		return Math.abs(delta.dotProduct(axis)) > aabbRadius + boxRadius + 1.0E-6D;
+	}
+
+	public static void startAim(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		if (TkGun.isMeleeWeapon(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (!player.isOnGround()) {
+			TkGun.LOGGER.info("[mechaniciancombat] aim denied: player is airborne player={}",
+					player.getName().getString());
+			return;
+		}
+		if (st.state == TkGun.State.MELEE) {
+			return;
+		}
+		// Right-click is used only to aim the camera during the fortress skill.
+		// It must not replace ready_gather/gather with a normal AIM state.
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			return;
+		}
+		// 已经架着枪了（例如刚打完一发、或者又点了一次右键）→ **保持**当前姿势，
+		// 别重播 Focus_ready：那段开头是收枪姿势，用户 2026-10-13 明确说"打完不要变成收枪动作"。
+		if (st.deployed && st.shotQueue.isEmpty() && st.state != TkGun.State.FIRE) {
+			setState(server, player, TkGun.State.AIM_HOLD, 600);
+			return;
+		}
+		long now = player.getWorld().getTime();
+		boolean fast = now < st.fastAimUntil || player.isSneaking();
+		clearDodgeCooldownsForFocus(st);
+		st.deployed = true;
+		// **进蹲射 = 重置翻滚/滑铲的循环**（用户 2026-10-17："在蹲射后会重置此循环"）：
+		// 交替状态归零、那把 1 秒锁也清掉 —— 蹲射之后的第一次闪避一定是翻滚。
+		st.lastDodgeKind = 0;
+		st.dodgeBlockUntil = 0;
+		setState(server, player, fast ? TkGun.State.AIM_FAST : TkGun.State.AIM,
+				600);   // 举枪状态保持足够长，由对应动画播放完成并停在尾帧。
+	}
+
+	/**
+	 * **滑铲里按右键**：立刻结束滑铲、进"架枪（最快档）"。
+	 *
+	 * <p>用户 2026-10-13 原话："可以滑铲期间检测到右键，立刻加速播放架枪动画进入架枪状态"。
+	 * 所以这里不给 sliding_ready 收势，直接切 Focus_ready 3 倍速（0.35s 架好），
+	 * 滑铲剩下的冲量还在（不打速度，让原版摩擦自然收）。
+	 */
+	public static void startSlideBrace(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		if (!player.isOnGround()) {
+			TkGun.LOGGER.info("[mechaniciancombat] slide fast focus denied: player is airborne player={}",
+					player.getName().getString());
+			return;
+		}
+		PState st = state(player);
+		if (st.state == TkGun.State.MELEE) {
+			return;
+		}
+		if (ensureMagazineLoaded(player, st)) {
+			rebroadcast(player);
+		}
+		long now = player.getWorld().getTime();
+		// 记录滑铲剩余时间，随后立即结束滑行并进入 AIM_SLIDE。
+		boolean wasSliding = now < st.slideUntil;
+		long slideLeft = Math.max(0, st.slideUntil - now);
+		st.slideUntil = 0;                     // 滑铲立刻收
+		st.slideMeasuring = false;
+		if (wasSliding) {
+			finishBackpackSpecialThrust(player, now);
+		}
+		st.fastAimUntil = now + 60;            // 之后这一小段里右键都算"快"
+		clearDodgeCooldownsForFocus(st);
+		st.deployed = true;
+		setState(server, player, TkGun.State.AIM_SLIDE,
+				TkGun.AIM_TICKS_SLIDE);
+		if (wasSliding) {
+			applySlideFastFocusInertia(player, st, now);
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] 滑铲中右键 -> 架枪（AIM_SLIDE 1 倍速，滑铲剩余={} tick）玩家={}",
+				slideLeft, player.getName().getString());
+		if (!wasSliding) {
+			TkGun.LOGGER.info("[mechaniciancombat] （注意：这次右键进来时其实不在滑铲里，状态被强行设成 AIM_SLIDE）");
+		}
+	}
+
+	/** 松开右键（或没架完就松手）→ 回到待机姿势。 */
+	public static void stopAim(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		PState st = state(player);
+		if (TkGun.State.isAiming(st.state)) {
+			st.deployed = false;
+			st.focusRamp = 0;             // 解除专注：射速/伤害的递增曲线归零
+			st.state = TkGun.State.IDLE;
+			st.stateUntil = 0;
+			broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+		}
+	}
+
+	/** 这次部署要几 tick（右键至少按住这么久再松手才会开火）。 */
+	public static int aimTicks(ServerPlayerEntity player) {
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		// 冲刺加成窗口里也算"快档"：那条路进专注用的是 `fast_ready`（见 startFocus）。
+		return (now < st.fastAimUntil || now < st.dashUntil || player.isSneaking())
+				? TkGun.AIM_TICKS_FAST : TkGun.AIM_TICKS_NORMAL;
+	}
+
+	public static void tryFire(ServerPlayerEntity player, boolean charged) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		if (TkGun.isMeleeWeapon(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (ensureMagazineLoaded(player, st)) {
+			rebroadcast(player);
+		}
+		long now = player.getWorld().getTime();
+		if (now == st.lastFireTick) {                 // 同一 tick 里右键和左键都触发，只认一次
+			return;
+		}
+		st.lastFireTick = now;
+		if (now < st.overheatUntil) {
+			playSound(player, TkGun.SND_VENT, 0.7F, 1.1F);
+			TkGunTexts.say(player, TkGunTexts.OVERHEAT_NO_FIRE, true);
+			return;
+		}
+		if (now < st.reloadUntil) {                   // 装填中（弹夹还没插回去）
+			playSound(player, TkGun.SND_BOLT, 0.45F, 1.7F);
+			TkGunTexts.say(player, TkGunTexts.RELOADING, true);
+			return;
+		}
+		// ⚠️ 2026-10-15 用户："**正常按左键是不能开火的** —— 行走射击也得先瞄准，然后播行走射击的动画，
+		//    然后才能开火"：扣扳机的前提是**举着枪**（右键按住 = `isUsingItem()`）。
+		//    客户端那边已经先拦了一道（右键没按就不发开火包），这里是权威兜底（老客户端 / 改包的）。
+		if (!player.isUsingItem() && !st.deployed) {
+			playSound(player, emptySound(player), 0.45F, 1.6F);
+			TkGunTexts.say(player, TkGunTexts.needAimText(), true);
+			// 打一行日志：验收/排查时"这次没出膛到底是被谁拦的"要能一眼看出来
+			TkGun.LOGGER.info("[mechaniciancombat] 扣扳机被拒（没举枪：isUsingItem=false）玩家={}",
+					player.getName().getString());
+			return;
+		}
+		// 开火资格由 GunStateMachine.canFire 统一决定。
+		if (!GunStateMachine.canFire(st.state)) {
+			playSound(player, emptySound(player), 0.45F, 1.5F);
+			TkGunTexts.say(player, TkGunTexts.CANT_FIRE, true);
+			TkGun.LOGGER.info("[mechaniciancombat] 扣扳机被拒（状态 {} 不允许开火）玩家={}", st.state,
+					player.getName().getString());
+			return;
+		}
+		// 专注每个射击间隔最多预输入 1 发；腰射不接受预输入。
+		int queueLimit = st.deployed ? 1 : TkGun.SHOT_QUEUE_MAX;
+		if (st.shotQueue.size() >= queueLimit) {
+			return;
+		}
+		// **腰射取消预输入**（2026-10-18 用户）：当前这一发仍在播放 / 仍在队列里 /
+		// 本 tick 已经消费过一次点击 → 后续点击直接忽略。快速点三下只会打出一发，
+		// 不会在切物品或松手之后继续补射。专注模式不受这一段影响。
+		// `now <= lastShotAt` 同时挡住同一服务端 tick 内连续到达的多个开火包。
+		if (!st.deployed && (st.shotAnimating || !st.shotQueue.isEmpty()
+				|| now <= st.lastShotAt || now < st.shotCycleAt)) {
+			TkGun.LOGGER.info("[mechaniciancombat] 腰射无预输入：当前射击未结束，这次点击忽略 玩家={}",
+					player.getName().getString());
+			return;
+		}
+		enqueueShot(player, st, now);
+	}
+
+	private static boolean isMoltenTridentAmmo(String ammoId) {
+		try {
+			return "bolt".equals(net.minecraft.util.Identifier.tryParse(ammoId).getPath());
+		} catch (RuntimeException ignored) {
+			return false;
+		}
+	}
+
+	private static boolean isGrapeshotAmmo(String ammoId) {
+		try {
+			return "armor_piercing_bolt".equals(net.minecraft.util.Identifier.tryParse(ammoId).getPath());
+		} catch (RuntimeException ignored) {
+			return false;
+		}
+	}
+
+	private static boolean isRoseQuartzAmmo(String ammoId) {
+		try {
+			return "rose_quartz_bolt".equals(net.minecraft.util.Identifier.tryParse(ammoId).getPath());
+		} catch (RuntimeException ignored) {
+			return false;
+		}
+	}
+
+	/** 从当前枪械 ItemStack 的 NBT 载入腰射弹匣；新枪默认 0/6 空弹匣。 */
+	private static void loadMagazineFromGun(ServerPlayerEntity player, PState st) {
+		ItemStack gun = com.tk.gun.item.GunAmmoData.heldGun(player);
+		if (gun.isEmpty()) {
+			return;
+		}
+		int hipCapacity = TkGun.magazineCapacity(gun, false);
+		st.lastHeldGun = gun;
+		int mag;
+		String ammo;
+		int version = com.tk.gun.item.GunAmmoData.savedMagazineVersion(gun);
+		if (!com.tk.gun.item.GunAmmoData.hasSavedMagazine(gun)) {
+			// 新枪不预装任何弹种：0/6、空弹匣；弹仓也保持空。
+			ammo = "";
+			mag = hipCapacity;
+			com.tk.gun.item.GunAmmoData.saveMagazine(gun, mag, ammo);
+			player.getInventory().markDirty();
+			TkGun.LOGGER.info("[mechaniciancombat] 新枪初始化空弹匣: 0/{} 玩家={}",
+					hipCapacity, player.getName().getString());
+		} else {
+			mag = com.tk.gun.item.GunAmmoData.savedMagazineCount(gun);
+			ammo = com.tk.gun.item.GunAmmoData.savedMagazineAmmo(gun);
+			if (version < 2 && mag == 0 && "mechaniciancombat:bolt".equals(ammo)
+					&& !mechaniciancombat$ringHasAmmo(gun, ammo, player)) {
+				// r163 自动填入的默认满弹匣：弹仓里并没有对应弹药，清掉。
+				mag = hipCapacity;
+				ammo = "";
+				com.tk.gun.item.GunAmmoData.saveMagazine(gun, mag, ammo);
+				player.getInventory().markDirty();
+				TkGun.LOGGER.info("[mechaniciancombat] 清除旧版自动弹匣（弹仓无对应弹药）玩家={}",
+						player.getName().getString());
+			} else if (version < 2) {
+				// 合法的旧弹匣：保留状态，只补写版本号，避免以后重复迁移。
+				com.tk.gun.item.GunAmmoData.saveMagazine(gun, mag, ammo);
+				player.getInventory().markDirty();
+			}
+		}
+		if (ammo == null || ammo.isEmpty()) {
+			// 无弹种的“满弹匣”是旧版默认状态；统一修复成真正的 0/6 空弹匣。
+			if (mag != hipCapacity) {
+				mag = hipCapacity;
+				com.tk.gun.item.GunAmmoData.saveMagazine(gun, mag, "");
+				player.getInventory().markDirty();
+				TkGun.LOGGER.info("[mechaniciancombat] 修复无弹种满弹匣 -> 空弹匣 玩家={}",
+						player.getName().getString());
+			}
+		}
+		st.mag = Math.max(0, Math.min(hipCapacity, mag));
+		st.magAmmo = ammo == null ? "" : ammo;
+		st.magAmmoStack = ItemStack.EMPTY;
+		if (!st.magAmmo.isEmpty()) {
+			for (ItemStack candidate : com.tk.gun.item.GunAmmoData.read(
+					gun, player.getWorld().getRegistryManager())) {
+				if (!candidate.isEmpty()
+						&& Registries.ITEM.getId(candidate.getItem()).toString().equals(st.magAmmo)) {
+					st.magAmmoStack = candidate.copyWithCount(1);
+					break;
+				}
+			}
+			if (st.magAmmoStack.isEmpty()) {
+				st.magAmmoStack = com.tk.gun.item.GunAmmoData.stackForId(st.magAmmo);
+			}
+		}
+		st.lastSavedMag = st.mag;
+		st.lastSavedAmmo = st.magAmmo;
+		TkGun.LOGGER.info("[mechaniciancombat] 弹匣载入: {}/{} 弹种={} 版本={} 玩家={}",
+				hipCapacity - st.mag, hipCapacity,
+				st.magAmmo.isEmpty() ? "空" : st.magAmmo, version,
+				player.getName().getString());
+	}
+
+	private static boolean ensureMagazineLoaded(ServerPlayerEntity player, PState st) {
+		ItemStack gun = com.tk.gun.item.GunAmmoData.heldGun(player);
+		if (gun.isEmpty()) {
+			return false;
+		}
+		if (st.magLoaded && st.lastHeldGun == gun) {
+			return false;
+		}
+		st.lastHeldGun = gun;
+		loadMagazineFromGun(player, st);
+		st.magLoaded = true;
+		return true;
+	}
+
+	private static boolean mechaniciancombat$ringHasAmmo(ItemStack gun, String ammoId, ServerPlayerEntity player) {
+		for (ItemStack stack : com.tk.gun.item.GunAmmoData.read(
+				gun, player.getWorld().getRegistryManager())) {
+			if (!stack.isEmpty()
+					&& Registries.ITEM.getId(stack.getItem()).toString().equals(ammoId)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** 腰射弹匣变化时写回枪械 NBT；专注弹匣不覆盖腰射状态。 */
+	private static void persistHipMagazine(ServerPlayerEntity player, PState st) {
+		persistHipMagazine(player, st, false);
+	}
+
+	private static void persistHipMagazine(ServerPlayerEntity player, PState st, boolean force) {
+		if (!st.magLoaded || (st.deployed && !force)) {
+			return;
+		}
+		ItemStack gun = com.tk.gun.item.GunAmmoData.heldGun(player);
+		if (gun.isEmpty()) {
+			gun = st.lastHeldGun;
+		}
+		if (gun.isEmpty()) {
+			return;
+		}
+		if (st.mag == st.lastSavedMag
+				&& java.util.Objects.equals(st.magAmmo, st.lastSavedAmmo)) {
+			return;
+		}
+		com.tk.gun.item.GunAmmoData.saveMagazine(gun, st.mag, st.magAmmo);
+		st.lastSavedMag = st.mag;
+		st.lastSavedAmmo = st.magAmmo;
+		player.getInventory().markDirty();
+	}
+
+	/** 清空尚未开火的预输入：腰射回退弹匣计数，专注退还已从弹仓扣除的弹药。 */
+	private static void clearPendingShots(ServerPlayerEntity player, PState st, String reason) {
+		int cleared = st.shotQueue.size();
+		if (cleared == 0 && !st.shotAnimating) {
+			return;
+		}
+		int hip = 0;
+		int focus = 0;
+		int focusQueued = 0;
+		for (Pending p : st.shotQueue) {
+			if (p.focus) {
+				focusQueued++;
+				ItemStack template = p.ammoStack;
+				if (template.isEmpty() && !p.ammo.isEmpty()) {
+					template = com.tk.gun.item.GunAmmoData.stackForId(p.ammo);
+				}
+				if (!template.isEmpty()
+						&& com.tk.gun.item.GunAmmoData.refund(
+						player, st.lastHeldGun, template, 1)) {
+					focus++;
+				}
+			} else {
+				hip++;
+				st.mag = Math.max(0, st.mag - 1);
+			}
+		}
+		st.focusShots = Math.max(0, st.focusShots - focusQueued);
+		st.shotQueue.clear();
+		st.shotAnimating = false;
+		st.shotCycleAt = 0;
+		st.boltAt = 0;
+		persistHipMagazine(player, st);
+		TkGun.LOGGER.info("[mechaniciancombat] 清空预输入（{}）：{} 发，腰射回退 {}，专注退还 {} 玩家={}",
+				reason, cleared, hip, focus, player.getName().getString());
+	}
+
+	/**
+	 * **入队一发**（真正的"扣扳机"动作）：弹夹计数 +1、排进射击队列、按 ramp 算这一发的节奏。
+	 *
+	 * <p>两条路都走它：单次扣扳机（{@link #tryFire}）和**专注里的按住左键全自动**（{@code tickAll}）。
+	 *
+	 * @return true = 真的入队了；false = 弹夹是空的（已经转成装填）
+	 */
+	private static boolean enqueueShot(ServerPlayerEntity player, PState st, long now) {
+		GunDefinition definition = TkGun.definition(player);
+		int capacity = TkGun.magazineCapacity(definition, st.deployed);
+		if (activeMag(st) >= capacity) {
+			// 当前模式的弹匣已经空了。
+			// ⚠️ 2026-10-17 用户："在任何状态下空弹匣不会自动装填" —— 所以**扣扳机不再触发装填**，
+			//    只响一声空仓 + 提示按 F。
+			playSound(player, emptySound(player), 0.5F, 1.3F);
+			TkGunTexts.say(player, TkGunTexts.MAG_EMPTY, true);
+			return false;
+		}
+		String ammoId = st.deployed
+				? com.tk.gun.item.GunAmmoData.selectedAmmoId(player)
+				: st.magAmmo;
+		if (st.deployed) {
+			st.lastFocusAmmo = ammoId;
+		}
+		ItemStack ammoStack = st.deployed
+				? com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1)
+				: st.magAmmoStack.copyWithCount(1);
+		if (st.deployed && !com.tk.gun.item.GunAmmoData.consumeExpected(player, ammoId, 1)) {
+			playSound(player, emptySound(player), 0.5F, 1.3F);
+			return false;
+		}
+		int shotIndex;
+		if (st.deployed) {
+			st.focusShots++;
+			shotIndex = st.focusShots;
+		} else {
+			st.mag++;
+			shotIndex = st.mag;
+			persistHipMagazine(player, st);
+		}
+		st.shotQueue.add(Pending.shot(shotIndex, ammoId, ammoStack, st.deployed));
+		st.shotSeq++;
+		// 节奏：专注里**每发递减 0.25 秒**（用户 2026-10-16），下限 FOCUS_CYCLE_MIN；腰射固定 20 tick
+		st.shotCycle = st.deployed
+				? definition.focusCycleTicks(st.focusRamp)
+				: definition.hipShotCycleTicks();
+		if (st.deployed && isMoltenTridentAmmo(ammoId)) {
+			st.shotCycle *= 2;                     // 蹲射连射间隔减慢一倍
+		}
+		if (st.deployed && isGrapeshotAmmo(ammoId)) {
+			st.shotCycle = TkGun.grapeshotFocusCycleTicks(definition, st.focusRamp);
+		}
+		if (st.deployed && isRoseQuartzAmmo(ammoId)) {
+			st.shotCycle = TkGun.roseQuartzFocusCycleTicks(st.focusRamp);
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] 入队弹夹第 {} 发（动画 {}，队列 {} 件，节奏 {} tick/发，专注={} ramp={}）玩家={}",
+				shotIndex, TkGun.shotAnimation(shotIndex), st.shotQueue.size(), st.shotCycle, st.deployed,
+				st.focusRamp, player.getName().getString());
+		st.lastShotAt = now;
+		if (PROBE_NEXT_SHOT) {
+			st.probeShot = true;
+			PROBE_NEXT_SHOT = false;
+		}
+		return true;
+	}
+
+	/** 主动装填：从当前弹仓消耗对应弹药并播放 reload；空弹匣不会自动触发。 */
+	/** Focus reload also consumes and loads one complete hip-fire magazine. */
+	private static boolean reloadHipMagazineDuringFocus(ServerPlayerEntity player, PState st,
+													   String focusAmmoId) {
+		int capacity = TkGun.magazineCapacity(player, false);
+		boolean sameAmmo = focusAmmoId.equals(st.magAmmo);
+		int needed = sameAmmo ? st.mag : capacity;
+		if (needed <= 0) {
+			return true;
+		}
+		ItemStack selectedStack =
+				com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1);
+		if (selectedStack.isEmpty()
+				|| !com.tk.gun.item.GunAmmoData.consumeExpected(player, focusAmmoId, needed)) {
+			return false;
+		}
+		if (!sameAmmo) {
+			int refundAmount = Math.max(0, capacity - st.mag);
+			ItemStack oldTemplate = st.magAmmoStack;
+			if (oldTemplate.isEmpty() && !st.magAmmo.isEmpty()) {
+				oldTemplate = com.tk.gun.item.GunAmmoData.stackForId(st.magAmmo);
+			}
+			if (refundAmount > 0
+					&& (oldTemplate.isEmpty()
+					|| !com.tk.gun.item.GunAmmoData.refund(player, oldTemplate, refundAmount))) {
+				com.tk.gun.item.GunAmmoData.refund(player, selectedStack, needed);
+				return false;
+			}
+			st.magExplosive = com.tk.gun.item.GunAmmoData.selectedIsExplosive(player);
+			st.magAmmo = focusAmmoId;
+		}
+		st.mag = 0;
+		st.magAmmoStack = selectedStack;
+		persistHipMagazine(player, st, true);
+		return true;
+	}
+
+	private static void restoreLastFocusAmmoSelection(ServerPlayerEntity player, PState st) {
+		if (st.lastFocusAmmo.isEmpty()) {
+			return;
+		}
+		if (com.tk.gun.item.GunAmmoData.selectAmmoType(player, st.lastFocusAmmo)) {
+			TkGun.LOGGER.info("[mechaniciancombat] 退出蹲射：弹仓切回最后使用弹种 {} 玩家={}",
+					st.lastFocusAmmo, player.getName().getString());
+		}
+	}
+
+	public static void reload(ServerPlayerEntity player) {
+		if (TkGun.isMeleeWeapon(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (ensureMagazineLoaded(player, st)) {
+			rebroadcast(player);
+		}
+		long now = player.getWorld().getTime();
+		if (now < st.reloadUntil) {
+			return;                                    // 已经在装填了
+		}
+		if (!st.deployed) {
+			int hipCapacity = TkGun.magazineCapacity(player, false);
+			int loadedRemaining = Math.max(0, hipCapacity - st.mag);
+			String selectedId = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
+			ItemStack selectedStack =
+					com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1);
+			if (selectedId.isEmpty()) {
+				playSound(player, emptySound(player), 0.5F, 1.3F);
+				return;
+			}
+			boolean sameAmmo = !st.magAmmo.isEmpty() && st.magAmmo.equals(selectedId);
+			if (sameAmmo && loadedRemaining >= hipCapacity) {
+				return;                                // full magazine, same ammo: no-op
+			}
+			int needed = sameAmmo ? st.mag : hipCapacity;
+			if (needed <= 0
+					|| !com.tk.gun.item.GunAmmoData.consumeExpected(player, selectedId, needed)) {
+				playSound(player, emptySound(player), 0.5F, 1.3F);
+				return;
+			}
+			if (!sameAmmo) {
+				int refundAmount = st.magAmmo.isEmpty() ? 0 : loadedRemaining;
+				ItemStack oldTemplate = st.magAmmoStack;
+				if (oldTemplate.isEmpty() && !st.magAmmo.isEmpty()) {
+					oldTemplate = com.tk.gun.item.GunAmmoData.stackForId(st.magAmmo);
+				}
+				if (refundAmount > 0
+						&& (oldTemplate.isEmpty()
+						|| !com.tk.gun.item.GunAmmoData.refund(player, oldTemplate, refundAmount))) {
+					// Roll back the new rounds if the old rounds cannot be returned.
+					com.tk.gun.item.GunAmmoData.refund(player, selectedStack, needed);
+					playSound(player, emptySound(player), 0.5F, 1.3F);
+					TkGun.LOGGER.warn("[mechaniciancombat] 换弹取消：弹仓没有空间返还旧弹 {} 发 玩家={}",
+							refundAmount, player.getName().getString());
+					return;
+				}
+				st.magExplosive = com.tk.gun.item.GunAmmoData.selectedIsExplosive(player);
+				st.magAmmo = selectedId;
+			}
+			st.magAmmoStack = selectedStack;
+		} else {
+			String focusAmmoId = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
+			if (focusAmmoId.isEmpty()
+					|| !reloadHipMagazineDuringFocus(player, st, focusAmmoId)) {
+				playSound(player, emptySound(player), 0.5F, 1.3F);
+				return;
+			}
+			st.lastFocusAmmo = focusAmmoId;
+			st.focusShots = 0;
+			st.shotIndex = 1;
+		}
+		st.mag = 0;
+		st.reloadUntil = now + TkGun.RELOAD_TICKS;
+		st.lastShotAt = now;
+		st.boltAt = now + TkGun.RELOAD_TICKS;          // 装填完才允许开火（boltAt 到点还会补一声"上膛"）
+		ServerWorld w = player.getServerWorld();
+		// v4 素材（2026-10-16）给了两段真·换弹声：`换弹.ogg`（插弹夹）+ `换弹2.ogg`（弹夹到位）。
+		// 作者在 `reload` 动画里把这两声埋在 0.111s / 0.833s，这里按同样的节奏放（1 tick = 0.05s）——
+		// 服务端放的附近所有人都听得见，客户端那边就不重复放了（见 BowgunRig#onSoundKeyframe）。
+		// 原来那两声（铁活板门 + 弩上膛）是"没有真素材时的凑合"，现在撤掉。
+		playSound(player, TkGun.SND_RELOAD, 0.9F, 1.0F);
+		st.reloadAuxSoundAt = now + 3;
+		st.reloadClickAt = now + 17;
+		MinecraftServer server = player.getServer();
+		if (server != null) {
+			// 装填动作 = 作者的换弹动画 `reload`（1.125 秒）—— 2026-10-14 新素材才有的，
+			// 老素材没换弹动画，是拿 `Focus_ready` 的头半段（弹夹从枪身里滑到位）顶的。
+			// 架着枪时播完接着走"保持尾针"（AIM_HOLD，见 tickAll 的状态到期分支）；
+			// 没架枪时播完回 IDLE。
+			setState(server, player, TkGun.State.RELOAD, TkGun.RELOAD_TICKS);
+		}
+		persistHipMagazine(player, st);
+		TkGun.LOGGER.info("[mechaniciancombat] 装填 {} tick（弹夹回满 {} 发，deployed={}）玩家={}",
+				TkGun.RELOAD_TICKS, TkGun.magazineCapacity(player, st.deployed), st.deployed,
+				player.getName().getString());
+	}
+
+	/**
+	 * 连发节奏机：队列里还有事就逐件来 —— 每一件都重新广播 FIRE（带它自己的 {@code shotIndex}，
+	 * 客户端据此把**那一段**射击动画从头播一遍）：
+	 * 隔 {@link TkGun#ATTACK_FRAME_TICKS} tick 到**出伤帧**才出膛，再隔
+	 * {@link TkGun#SHOT_CYCLE_TICKS} 处理下一件。
+	 */
+	private static void tickShots(ServerPlayerEntity player, PState st, long now) {
+		// **枪已离手 → 这一 tick 一发都不许出膛**（用户 2026-10-17："切换物品后仍然有子弹射出"）：
+		// 腰射的预输入队列在 `tickAll` 里会被清掉，这里再加一道，保证它不会赶在清队列之前补射出去。
+		if (!TkGun.holdingGun(player)) {
+			return;
+		}
+		if (st.shotAnimating) {
+			if (now >= st.shotReleaseAt) {
+				st.shotAnimating = false;
+				Pending p = st.shotQueue.poll();
+				if (p != null) {
+					releaseShot(player.getServer(), player, st, p);
+					// Cadence is measured from shot start. Anchoring it to the release
+					// tick would add ATTACK_FRAME_TICKS to every requested interval.
+					st.shotCycleAt = st.shootStartTick + st.shotCycle;
+				}
+			}
+			return;
+		}
+		if (!st.shotQueue.isEmpty() && now >= st.shotCycleAt && now >= st.boltAt
+				&& st.state != TkGun.State.OVERHEAT) {
+			Pending p = st.shotQueue.peek();
+			if (p == null) {
+				return;
+			}
+			st.shotAnimating = true;
+			st.shootStartTick = now;
+			st.shotIndex = p.shotIndex;
+			// 当前模式的最后一发：播放卸匣声并进入对应收尾逻辑。
+			if (p.shotIndex >= TkGun.magazineCapacity(player, true)) {
+				playSound(player, TkGun.SND_MAG, 0.85F, 1.0F);
+			}
+			st.shotReleaseAt = now + TkGun.ATTACK_FRAME_TICKS;
+			if (st.probeShot) {
+				TkGun.LOGGER.info("[mechaniciancombat] 开火起手 tick={} 动画={}（队列 {} 件，弹药等出伤帧 +{} tick）",
+						now, TkGun.shotAnimation(p.shotIndex), st.shotQueue.size(), TkGun.ATTACK_FRAME_TICKS);
+			}
+			setState(player.getServer(), player, TkGun.State.FIRE,
+					TkGun.definition(player).fireTicks());
+		}
+	}
+
+	/**
+	 * 调试/验收用：一次把 n 发塞进连发队列。
+	 * 正常左键每 tick 只认一次（防连点重复触发），所以"排队"这条得靠这个命令来验：
+	 * 入队 n 发后，日志里应该是 n 组「开火起手 → 攻击帧出膛」，彼此间隔 {@link TkGun#SHOT_CYCLE_TICKS} tick。
+	 *
+	 * <p>该命令会在当前弹匣容量用完后继续填充队列，以便压测连射节奏和过热；正常游戏流程仍要求主动装填。
+	 */
+	public static int queueShots(ServerPlayerEntity player, int n) {
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		int added = 0;
+		for (int i = 0; i < n && st.shotQueue.size() < TkGun.SHOT_QUEUE_MAX; i++) {
+			if (now < st.overheatUntil) {
+				break;
+			}
+			int capacity = TkGun.magazineCapacity(player, st.deployed);
+			if (activeMag(st) >= capacity) {
+				if (st.deployed) {
+					st.focusShots = 0;
+				} else {
+					st.mag = 0;
+				}
+			}
+			int shotIndex;
+			if (st.deployed) {
+				st.focusShots++;
+				shotIndex = st.focusShots;
+			} else {
+				st.mag++;
+				shotIndex = st.mag;
+			}
+			st.shotQueue.add(Pending.shot(shotIndex,
+					com.tk.gun.item.GunAmmoData.selectedAmmoId(player),
+					com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1),
+					st.deployed));
+			st.shotSeq++;
+			added++;
+		}
+		st.lastShotAt = now;
+		if (added > 0) {
+			st.probeShot = true;
+			TkGun.LOGGER.info("[mechaniciancombat] 一次入队 {} 件（队列 {} 件，节奏 {} tick/发，弹夹 {}/{}）",
+					added, st.shotQueue.size(), TkGun.definition(player).hipShotCycleTicks(),
+					activeMag(st), TkGun.magazineCapacity(player, st.deployed));
+		}
+		return added;
+	}
+
+	/** 出伤帧到点：弹药真正出膛 + 枪口特效 + 炮声 + 热量/连射结算。 */
+	private static void releaseShot(MinecraftServer server, ServerPlayerEntity player, PState st, Pending p) {
+		if (p == null) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		if (st.probeShot) {
+			st.probeShot = false;
+			TkGun.LOGGER.info("[mechaniciancombat] 出伤帧到点 tick={} → 弹夹第 {} 发射出（动画 {}，起手 tick={}，差 {} tick）",
+					now, p.shotIndex, TkGun.shotAnimation(p.shotIndex), st.shootStartTick,
+					now - st.shootStartTick);
+		}
+
+		// —— 专注里的"越打越快/越打越疼"（2026-10-15 用户要的）——
+		// ⚠️ **腰射（没进专注）完全不涨热、也不会过热**（用户："相当于站立射击的时候是不会过热的"）：
+		//    那种情况下 ramp 归零、伤害倍率 1.0、节奏固定 SHOT_CYCLE_TICKS。
+		boolean focus = st.deployed;
+		float damageMult = 1.0F;
+		if (focus) {
+			st.focusRamp = (now <= st.focusWindowUntil) ? st.focusRamp + 1 : 1;
+			st.focusWindowUntil = now + TkGun.COMBO_WINDOW;
+			damageMult = Math.min(TkGun.FOCUS_DAMAGE_MAX,
+					TkGun.FOCUS_DAMAGE_START + (st.focusRamp - 1) * TkGun.FOCUS_DAMAGE_STEP);
+		} else {
+			st.focusRamp = 0;
+		}
+		fireOnce(player, st, damageMult, p.ammo, p.ammoStack);
+		if (focus) {
+			reduceFortressSkillCooldownOnFocusShot(player, st, now);
+		}
+
+		// 拉栓时长：专注里若当前节奏比拉栓还快（射速递减到 0.25s 一发），拉栓不能成为瓶颈，
+		// 所以专注里取 min(拉栓, 当前节奏) —— 否则"每发间隔 -0.25s"会被 8 tick 的拉栓卡住（2026-10-16）。
+		st.boltAt = now + (focus ? Math.min(TkGun.BOLT_TICKS, st.shotCycle) : TkGun.BOLT_TICKS);
+		playShotSound(player, st.focusRamp, p.ammo);
+		// 专注模式打出弹匣最后一发时进入过热。
+		// 进过热会清掉连发队列、把 deployed 复位，并按规则挂上"缓慢 10"。
+		if (focus && p.shotIndex >= TkGun.magazineCapacity(player, true)) {
+			TkGun.LOGGER.info("[mechaniciancombat] 专注里打出最后一颗（第 {} 发）-> 进过热 玩家={}",
+					p.shotIndex, player.getName().getString());
+			startOverheat(server, player);
+			return;
+		}
+		if (!focus) {
+			return;                       // 腰射：不涨热、不算连射，打完就完事
+		}
+		st.heat = Math.min(TkGun.HEAT_MAX, st.heat + TkGun.HEAT_PER_SHOT);
+		if (st.heat >= TkGun.HEAT_MAX * 0.75F && st.heat < TkGun.HEAT_MAX) {
+			TkGunTexts.say(player, TkGunTexts.OVERHEAT_WARN, true);
+		}
+		rebroadcast(player);
+		// 专注里连到第 N 发（或热量满）= **就在这一发的出伤帧当 tick 进过热动画**
+		// （用户 2026-10-13 原话："连续射击 10 发以上，射击出伤帧会立刻触发 overheat 动画"）
+		// 过热只由"专注弹匣最后一颗"触发；连射 ramp / 热量不再决定过热时机。
+		int nextCycle = TkGun.definition(player).focusCycleTicks(st.focusRamp);
+		if (isMoltenTridentAmmo(p.ammo)) {
+			nextCycle *= 2;
+		}
+		if (isGrapeshotAmmo(p.ammo)) {
+			nextCycle = TkGun.grapeshotFocusCycleTicks(
+					TkGun.definition(player), st.focusRamp);
+		}
+		if (isRoseQuartzAmmo(p.ammo)) {
+			nextCycle = TkGun.roseQuartzFocusCycleTicks(st.focusRamp);
+		}
+		st.shotCycle = nextCycle;
+		TkGun.LOGGER.info("[mechaniciancombat] 专注第 {} 发：伤害 x{}，下一发节奏 {} tick（热 {}）玩家={}",
+				st.focusRamp, Math.round(damageMult * 100) / 100.0F,
+				nextCycle,
+				st.heat, player.getName().getString());
+	}
+
+	/** 枪击的伤害类型（mechaniciancombat:bolt：死亡信息"被 xxx 的熔铁弩矢打穿"）。 */
+	/** Runs on the tick the visible bullet reaches its impact point. */
+	private static void applyBulletImpact(ServerWorld world, ServerPlayerEntity player,
+										  net.minecraft.entity.Entity target, Vec3d hitPos,
+										  boolean hitSomething, boolean explosive, boolean cutting,
+										  boolean sculk, boolean roseQuartz, float damageMult, Vec3d dir) {
+		if (!hitSomething) {
+			return;
+		}
+		if (CombatTargeting.isGolem(target)) {
+			return;
+		}
+		if (sculk) {
+			// 幽匿弹：直击与范围共用 6 点无视护甲伤害，避免直击目标被结算两次。
+			applySonicBurst(world, player, hitPos, target, 7.2F);
+		} else if (target != null && target.isAlive()) {
+			float directDamage = roseQuartz
+					? TkGun.ROSE_QUARTZ_DAMAGE : rangedDamage(player) * damageMult;
+			if (target instanceof net.minecraft.entity.LivingEntity living) {
+				if (cutting) {
+					applyCuttingDamage(living, gunDamageSource(player));
+				} else {
+					living.damage(gunDamageSource(player), directDamage);
+				}
+				if (!cutting && !roseQuartz) {
+					living.takeKnockback(0.5D, dir.x, dir.z);
+				}
+			} else {
+				target.damage(gunDamageSource(player), directDamage);
+			}
+		}
+		if (sculk) {
+			world.spawnParticles(TkGunParticles.SONIC_BOOM,
+					hitPos.x, hitPos.y, hitPos.z, 1, 0.0, 0.0, 0.0, 0.0);
+		} else if (explosive) {
+			applyExplosionDamage(
+					world, player, hitPos, rangedDamage(player) * damageMult, true);
+			world.spawnParticles(TkGunParticles.EXPLOSIVE_BOLT_IMPACT,
+					hitPos.x, hitPos.y, hitPos.z, 1, 0.0, 0.0, 0.0, 0.0);
+			world.spawnParticles(ParticleTypes.FLAME,
+					hitPos.x, hitPos.y, hitPos.z, 14, 0.16, 0.16, 0.16, 0.08);
+			world.spawnParticles(ParticleTypes.SMALL_FLAME,
+					hitPos.x, hitPos.y, hitPos.z, 12, 0.2, 0.2, 0.2, 0.06);
+			world.spawnParticles(ParticleTypes.CRIT,
+					hitPos.x, hitPos.y, hitPos.z, 16, 0.2, 0.2, 0.2, 0.25);
+			world.spawnParticles(ParticleTypes.SMOKE,
+					hitPos.x, hitPos.y, hitPos.z, 10, 0.18, 0.18, 0.18, 0.05);
+		} else if (cutting) {
+			// 切割弹同样带 3×3×3 范围伤害；数值与爆破弹一致（直伤 8 的 75% = 6 点）。
+			applyExplosionDamage(
+					world, player, hitPos, rangedDamage(player) * damageMult, false);
+			world.spawnParticles(TkGunParticles.CUTTING_EXPLO,
+					hitPos.x, hitPos.y, hitPos.z, 1, 0.0, 0.0, 0.0, 0.0);
+		} else if (roseQuartz) {
+			world.spawnParticles(TkGunParticles.ROSE_QUARTZ_IMPACT,
+					hitPos.x, hitPos.y, hitPos.z, 1, 0.0, 0.0, 0.0, 0.0);
+		}
+		if (roseQuartz) {
+			net.minecraft.util.math.BlockPos feedbackPos = target == null
+					? net.minecraft.util.math.BlockPos.ofFloored(hitPos) : player.getBlockPos();
+			world.playSound(null, feedbackPos,
+					net.minecraft.sound.SoundEvent.of(TkGun.SND_ROSE_QUARTZ_HIT),
+					SoundCategory.MASTER, 1.0F, 1.0F);
+		} else if (target != null) {
+			// Play at the shooter so long-range hits always produce a confirmation.
+			world.playSound(null, player.getBlockPos(), SoundEvents.ITEM_TRIDENT_HIT,
+					SoundCategory.MASTER, 1.0F, 2.0F);
+			Identifier effectSound = sculk ? TkGun.SND_SONIC_BOOM
+					: (explosive ? TkGun.SND_EXPLOSION1
+					: (cutting ? TkGun.SND_CUTTING1 : null));
+			if (effectSound != null) {
+				world.playSound(null,
+						net.minecraft.util.math.BlockPos.ofFloored(
+								hitPos.x, hitPos.y, hitPos.z),
+						net.minecraft.sound.SoundEvent.of(effectSound),
+						SoundCategory.MASTER, 1.0F, 1.0F);
+			}
+		} else {
+			Identifier impactSound = sculk ? TkGun.SND_SONIC_BOOM
+					: (explosive ? TkGun.SND_EXPLOSION1
+					: (cutting ? TkGun.SND_CUTTING1 : TkGun.SND_IMPACT));
+			world.playSound(null,
+					net.minecraft.util.math.BlockPos.ofFloored(hitPos.x, hitPos.y, hitPos.z),
+					net.minecraft.sound.SoundEvent.of(impactSound),
+					SoundCategory.MASTER, 1.0F, 1.0F);
+		}
+		ServerPlayNetworking.send(player, new com.tk.gun.net.GunHitMarkerPayload());
+		// TODO: Add a non-positional shooter-only impact confirmation for very long shots.
+	}
+
+	/** Cutting rounds deal three independent hits: iron sword (6), then 3, then 1.5. */
+	private static boolean applyCuttingDamage(net.minecraft.entity.LivingEntity target,
+										   net.minecraft.entity.damage.DamageSource source) {
+		float[] hits = {7.2F, 3.6F, 1.8F};
+		boolean damaged = false;
+		for (float amount : hits) {
+			if (!target.isAlive()) {
+				break;
+			}
+			target.timeUntilRegen = 0;
+			damaged |= target.damage(source, amount);
+		}
+		return damaged;
+	}
+
+	/** Explosive and cutting rounds damage surrounding living entities in a 3x3x3 area. */
+	private static boolean applyExplosionDamage(ServerWorld world, ServerPlayerEntity player,
+											 Vec3d center, float damage, boolean knockback) {
+		net.minecraft.util.math.Box area = new net.minecraft.util.math.Box(
+				center.add(-1.5D, -1.5D, -1.5D),
+				center.add(1.5D, 1.5D, 1.5D));
+		net.minecraft.entity.damage.DamageSource source = gunDamageSource(player);
+		float splashDamage = damage * 0.75F;
+		boolean damaged = false;
+		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
+				net.minecraft.entity.LivingEntity.class, area,
+				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
+						&& !CombatTargeting.isGolem(e))) {
+			Vec3d away = living.getPos().subtract(center);
+			damaged |= living.damage(source, splashDamage);
+			if (knockback) {
+				living.takeKnockback(0.45D, away.x, away.z);
+			}
+		}
+		return damaged;
+	}
+
+	/**
+	 * 幽匿弹音爆：以命中点为中心，3 格直径球体内所有生物受到 6 点无视护甲伤害。
+	 * 所有受影响目标只受到伤害，不再附加击退或上挑。
+	 */
+	private static boolean applySonicBurst(ServerWorld world, ServerPlayerEntity player,
+										Vec3d center, net.minecraft.entity.Entity direct, float damage) {
+		net.minecraft.util.math.Box area = new net.minecraft.util.math.Box(
+				center.add(-1.5D, -1.5D, -1.5D), center.add(1.5D, 1.5D, 1.5D));
+		net.minecraft.entity.damage.DamageSource source = sonicDamageSource(player);
+		java.util.Set<net.minecraft.entity.LivingEntity> affected =
+				java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+		if (direct instanceof net.minecraft.entity.LivingEntity living && living.isAlive()
+				&& !CombatTargeting.isGolem(living)) {
+			affected.add(living);
+		}
+		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
+				net.minecraft.entity.LivingEntity.class, area,
+				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
+						&& !CombatTargeting.isGolem(e))) {
+			Vec3d bodyCenter = living.getBoundingBox().getCenter();
+			if (bodyCenter.squaredDistanceTo(center) <= 2.25D) {
+				affected.add(living);
+			}
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] 幽匿弹音爆：中心=({}, {}, {}) 直击生物={} 影响生物={}",
+				round3(center.x), round3(center.y), round3(center.z),
+				direct instanceof net.minecraft.entity.LivingEntity, affected.size());
+		boolean damaged = false;
+		for (net.minecraft.entity.LivingEntity living : affected) {
+			living.timeUntilRegen = 0;
+			damaged |= living.damage(source, damage);
+			if (!living.isAlive()) {
+				continue;
+			}
+		}
+		return damaged;
+	}
+
+	/** 幽匿弹的伤害类型：mechaniciancombat:sonic 已加入 bypasses_armor / bypasses_enchantments。 */
+	private static net.minecraft.entity.damage.DamageSource sonicDamageSource(ServerPlayerEntity player) {
+		net.minecraft.registry.RegistryKey<net.minecraft.entity.damage.DamageType> key =
+				net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.DAMAGE_TYPE,
+						TkGun.id("sonic"));
+		RegistryEntry<net.minecraft.entity.damage.DamageType> entry = player.getServerWorld()
+				.getRegistryManager().get(net.minecraft.registry.RegistryKeys.DAMAGE_TYPE).getEntry(key)
+				.map(e -> (RegistryEntry<net.minecraft.entity.damage.DamageType>) e).orElse(null);
+		if (entry == null) {
+			return player.getDamageSources().sonicBoom(player);
+		}
+		return new net.minecraft.entity.damage.DamageSource(entry, player, player);
+	}
+
+	private static net.minecraft.entity.damage.DamageSource gunDamageSource(ServerPlayerEntity player) {
+		net.minecraft.registry.RegistryKey<net.minecraft.entity.damage.DamageType> key =
+				net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.DAMAGE_TYPE,
+						TkGun.id("bolt"));
+		RegistryEntry<net.minecraft.entity.damage.DamageType> entry = player.getServerWorld()
+				.getRegistryManager().get(net.minecraft.registry.RegistryKeys.DAMAGE_TYPE).getEntry(key)
+				.map(e -> (RegistryEntry<net.minecraft.entity.damage.DamageType>) e).orElse(null);
+		if (entry == null) {
+			return player.getDamageSources().playerAttack(player);
+		}
+		return new net.minecraft.entity.damage.DamageSource(entry, player, player);
+	}
+
+	/**
+	 * **开炮声 = 素材里那一声 `枪击3.ogg`，就这一声，别的都不要。**
+	 *
+	 * <p>沿革：2026-10-13 我自己合成过 cannon_boom/clank/tail 三层（音色发尖发空，已删）；
+	 * 2026-10-14 改回"素材枪声 + 三层原版音效（龙息火球爆 / 通用爆炸 / 铁砧落地）压音高拼的炮感"；
+	 * **用户要求完全删除现有射击音效并只使用素材枪声** —— 所以那三层原版叠层、
+	 * 连同旧的 `枪击.ogg`（`mechaniciancombat:gunshot`：文件 + sounds.json 条目）**全部下线**，这里只剩素材那一声。
+	 * 素材的 `枪击3.ogg` 与本包里的 `gunshot3.ogg` sha1 逐字节相同
+	 * （`CBB76D33916656AD77ECD04AF30D2D9F6CBD5437`），没有做任何转码。
+	 *
+	 * <p>{@code ramp} 参数留着是为了不改进队侧那几处调用点；现在已经不分单发/连射了。
+	 */
+	private static void playShotSound(ServerPlayerEntity player, int ramp, String ammoId) {
+		// 无论单发还是专注连射，统一播放素材 `枪击3.ogg`。
+		String path = "";
+		try {
+			path = net.minecraft.util.Identifier.tryParse(ammoId).getPath();
+		} catch (RuntimeException ignored) {
+		}
+		Identifier shot = "bolt".equals(path) ? TkGun.SND_CROSSBOW_FIRE
+				: ("cutting_bolt".equals(path) ? TkGun.SND_SHOT2
+				: ("sculk_bolt".equals(path) ? TkGun.SND_SONIC_SHOT
+				: ("armor_piercing_bolt".equals(path) ? TkGun.SND_GRAPESHOT_FIRE
+				: ("rose_quartz_bolt".equals(path) ? TkGun.SND_GUNSHOT : TkGun.SND_SHOT3))));
+		playSound(player, shot, 0.9F, 1.0F);
+	}
+
+	private static void startOverheat(MinecraftServer server, ServerPlayerEntity player) {
+		PState st = state(player);
+		// 清掉尚未出膛的连发队列并归还对应弹药。
+		clearPendingShots(player, st, "过热");
+		// 过热会退出专注；清除 deployed 可避免 Overheat 结束后错误回到 AIM_HOLD。
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;              // 过热/收枪：递增曲线归零
+		restoreLastFocusAmmoSelection(player, st);
+		st.overheatUntil = player.getWorld().getTime() + TkGun.OVERHEAT_TICKS;
+		st.heat = TkGun.HEAT_MAX;
+		if (TkGun.definition(player).id()
+				.equals(TkGun.id("veritas_et_justitia"))) {
+			playSound(player, TkGun.SND_VERITAS_FOCUS_EMPTY, 1.0F, 1.0F);
+		}
+		// 音效：**交给 `Overheat` 自己的音效关键帧** —— 作者在那段 0.4167s 处配了 `散热.ogg`
+		// （用户 2026-10-17："将专注相关的音效替换为…模型所引用的音频"）。原来这里那声即时 `vent`
+		// 和一层原版灭火声（`BLOCK_FIRE_EXTINGUISH`）已删：动画到点响的那一声才对得上画面。
+		TkGunTexts.say(player, TkGunTexts.OVERHEAT_START, true);
+		// **过热期间也挂"缓慢 10"**（用户 2026-10-17："将缓慢效果绑定退出专注状态以及过热两种状态"）：
+		// 时长 = **过热动画本身的时长**（`Overheat` 1.5s = 30 tick，见 TkGun#OVERHEAT_ANIM_TICKS）。
+		// 原来错写成 100 tick（散热窗口）：动画 1.5s 就停了，人还被缓慢按在原地 3.5s。
+		// 翻滚会把动画和这个效果一起打断（见 onRollStarted）。
+		player.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
+				net.minecraft.entity.effect.StatusEffects.SLOWNESS,
+				TkGun.OVERHEAT_ANIM_TICKS, TkGun.SLOW_ON_EXIT_AMPLIFIER, false, false, true));
+		setState(server, player, TkGun.State.OVERHEAT, TkGun.OVERHEAT_ANIM_TICKS);
+	}
+
+	public static void startInspect(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return;
+		}
+		setState(server, player, TkGun.State.INSPECT, TkGun.INSPECT_TICKS);
+		playSound(player, TkGun.SND_BOLT, 0.8F, 1.0F);
+	}
+
+	// ---------------------------------------------------------------- 专注（架枪）状态
+	/** 熔铁矢：以满蓄力三叉戟的 2.5 格/tick 从枪口发射，附魔走真实 TridentEntity。 */
+	private static void spawnMoltenTrident(ServerWorld world, ServerPlayerEntity player,
+										   Vec3d muzzle, Vec3d dir, ItemStack ammoStack) {
+		ItemStack stack = ammoStack == null || ammoStack.isEmpty()
+				? new ItemStack(BOLT) : ammoStack.copyWithCount(1);
+		com.tk.gun.entity.MoltenTridentEntity trident =
+				new com.tk.gun.entity.MoltenTridentEntity(MOLTEN_TRIDENT_ENTITY, world, player, stack);
+		trident.setGunFired(true);
+		float yaw = (float) Math.toDegrees(Math.atan2(-dir.x, dir.z));
+		float pitch = (float) Math.toDegrees(Math.atan2(-dir.y,
+				Math.sqrt(dir.x * dir.x + dir.z * dir.z)));
+		trident.refreshPositionAndAngles(muzzle.x, muzzle.y, muzzle.z, yaw, pitch);
+		trident.prevYaw = yaw;
+		trident.prevPitch = pitch;
+		trident.setVelocity(dir.multiply(5.0D));
+		if (player.isInCreativeMode()) {
+			trident.pickupType =
+					net.minecraft.entity.projectile.PersistentProjectileEntity.PickupPermission.CREATIVE_ONLY;
+		}
+		boolean spawned = world.spawnEntity(trident);
+		TkGun.LOGGER.info("[mechaniciancombat] 熔铁矢：spawn={} id={} 枪口=({}, {}, {}) 方向=({}, {}, {}) 附魔={}",
+				spawned, trident.getId(),
+				round3(muzzle.x), round3(muzzle.y), round3(muzzle.z),
+				round3(dir.x), round3(dir.y), round3(dir.z), stack.hasGlint());
+	}
+
+	/**
+	 * 放一颗**看得见的子弹**（2026-10-15 用户："用这个去代表那个弹丸"）：从枪口沿弹道飞，
+	 * 飞够 {@code distance} 格就自己消失。伤害/爆裂粒子在 {@link #fireOnce} 里已经瞬时结算完了，
+	 * 它只是"画面上飞出去的那颗"。
+	 */
+	private static void spawnGrapeshot(ServerWorld world, ServerPlayerEntity player,
+									   Vec3d muzzle, Vec3d dir, float damageMult) {
+		Vec3d forward = dir.normalize();
+		Vec3d reference = Math.abs(forward.y) > 0.98D
+				? new Vec3d(1.0D, 0.0D, 0.0D) : new Vec3d(0.0D, 1.0D, 0.0D);
+		Vec3d right = forward.crossProduct(reference).normalize();
+		Vec3d up = right.crossProduct(forward).normalize();
+		double spread = TkGun.GRAPESHOT_CONE_RADIUS / TkGun.GRAPESHOT_RANGE;
+		applyGrapeshotDamage(world, player, muzzle, forward, damageMult);
+		com.tk.gun.entity.GrapeshotVolley volley =
+				new com.tk.gun.entity.GrapeshotVolley(player.getId(), muzzle, forward);
+
+		int spawned = 0;
+		double sectorAngle = Math.PI * 2.0D / TkGun.GRAPESHOT_PELLETS;
+		double patternRotation = player.getRandom().nextDouble() * Math.PI * 2.0D;
+		for (int i = 0; i < TkGun.GRAPESHOT_PELLETS; i++) {
+			// Stratified disk sampling: one pellet per angular sector and one
+			// area-balanced radial band. A random rotation and small jitter keep
+			// consecutive shots varied without allowing all pellets to clump.
+			double angle = patternRotation
+					+ (i + 0.5D) * sectorAngle
+					+ (player.getRandom().nextDouble() - 0.5D) * sectorAngle * 0.35D;
+			int radialBand = Math.floorMod(i * 3, TkGun.GRAPESHOT_PELLETS);
+			double areaFraction = (radialBand + player.getRandom().nextDouble())
+					/ TkGun.GRAPESHOT_PELLETS;
+			double radius = Math.sqrt(areaFraction) * spread;
+			Vec3d pelletDir = forward
+					.add(right.multiply(Math.cos(angle) * radius))
+					.add(up.multiply(Math.sin(angle) * radius))
+					.normalize();
+			double pelletRange = Math.min(TkGun.GRAPESHOT_RANGE,
+					grapeshotBlockDistance(world, player, muzzle, pelletDir));
+			com.tk.gun.entity.BulletEntity pellet = spawnBullet(
+					world, player, muzzle, pelletDir, pelletRange, "mechaniciancombat:armor_piercing_bolt");
+			if (pellet != null) {
+				pellet.setGrapeshotVolley(volley);
+				spawned++;
+			}
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] 霰弹：从枪口({}, {}, {}) 发射 {} 颗弹丸，锥角上限 {}°，飞行 {} 格 / {} tick",
+				round3(muzzle.x), round3(muzzle.y), round3(muzzle.z), spawned,
+				Math.round(Math.toDegrees(Math.atan(spread))), TkGun.GRAPESHOT_RANGE,
+				TkGun.GRAPESHOT_FLIGHT_TICKS);
+	}
+
+	private static double grapeshotBlockDistance(ServerWorld world, ServerPlayerEntity player,
+												 Vec3d muzzle, Vec3d dir) {
+		Vec3d end = muzzle.add(dir.multiply(TkGun.GRAPESHOT_RANGE));
+		net.minecraft.util.hit.BlockHitResult hit = world.raycast(
+				new RaycastContext(muzzle, end, RaycastContext.ShapeType.COLLIDER,
+						RaycastContext.FluidHandling.NONE, player));
+		return hit.getType() == net.minecraft.util.hit.HitResult.Type.MISS
+				? TkGun.GRAPESHOT_RANGE
+				: Math.min(TkGun.GRAPESHOT_RANGE, muzzle.distanceTo(hit.getPos()));
+	}
+
+	private static boolean applyGrapeshotDamage(ServerWorld world, ServerPlayerEntity player,
+											 Vec3d muzzle, Vec3d forward, float damageMult) {
+		Vec3d end = muzzle.add(forward.multiply(TkGun.GRAPESHOT_RANGE));
+		double radius = TkGun.GRAPESHOT_DAMAGE_RADIUS;
+		net.minecraft.util.math.Box search = new net.minecraft.util.math.Box(
+				Math.min(muzzle.x, end.x) - radius, Math.min(muzzle.y, end.y) - radius,
+				Math.min(muzzle.z, end.z) - radius, Math.max(muzzle.x, end.x) + radius,
+				Math.max(muzzle.y, end.y) + radius, Math.max(muzzle.z, end.z) + radius);
+		float nearDamage = rangedDamage(player) * damageMult;
+		float farDamage = nearDamage * 0.5F;
+		double radiusSq = radius * radius;
+		int hitCount = 0;
+		boolean damaged = false;
+		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
+				net.minecraft.entity.LivingEntity.class, search,
+				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
+						&& !CombatTargeting.isGolem(e))) {
+			Vec3d center = living.getBoundingBox().getCenter();
+			Vec3d relative = center.subtract(muzzle);
+			double along = relative.dotProduct(forward);
+			if (along < 0.0D || along > TkGun.GRAPESHOT_RANGE) {
+				continue;
+			}
+			Vec3d axisPoint = muzzle.add(forward.multiply(along));
+			if (center.squaredDistanceTo(axisPoint) > radiusSq) {
+				continue;
+			}
+			damaged |= living.damage(gunDamageSource(player),
+					along <= 6.0D ? nearDamage : farDamage);
+			Vec3d away = relative.subtract(forward.multiply(along));
+			if (away.horizontalLengthSquared() > 1.0E-6D) {
+				living.takeKnockback(0.35D, away.x, away.z);
+			}
+			hitCount++;
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] 霰弹范围结算：{} 个实体，半径 {} 格，长度 {} 格",
+				hitCount, radius, TkGun.GRAPESHOT_RANGE);
+		return damaged;
+	}
+
+	private static void spawnRoseQuartz(ServerWorld world, ServerPlayerEntity player,
+										Vec3d muzzle, Vec3d dir, float damageMult) {
+		com.tk.gun.entity.BulletEntity projectile = spawnBullet(
+				world, player, muzzle, dir, TkGun.HITSCAN_RANGE, "mechaniciancombat:rose_quartz_bolt");
+		if (projectile == null) {
+			TkGun.LOGGER.warn("[mechaniciancombat] 玫瑰石英弹体注册不可用，本次发射取消。玩家={}",
+					player.getName().getString());
+			return;
+		}
+		projectile.configureGuidance(player, TkGun.ROSE_QUARTZ_GUIDANCE_RADIUS);
+		projectile.setGuidedImpactAction((target, hitPos, impactDir) -> {
+			if (player.isRemoved()) {
+				return;
+			}
+			applyBulletImpact(world, player, target, hitPos, true,
+					false, false, false, true, damageMult, impactDir);
+		});
+		TkGun.LOGGER.info("[mechaniciancombat] 玫瑰石英：制导半径={}格，实际碰撞结算，id={}，玩家={}",
+				TkGun.ROSE_QUARTZ_GUIDANCE_RADIUS, projectile.getId(),
+				player.getName().getString());
+	}
+
+	private static com.tk.gun.entity.BulletEntity spawnBullet(
+			ServerWorld world, ServerPlayerEntity player, Vec3d muzzle, Vec3d dir,
+			double distance, String ammoId) {
+		if (BULLET_ENTITY == null) {
+			return null;
+		}
+		com.tk.gun.entity.BulletEntity bullet = new com.tk.gun.entity.BulletEntity(BULLET_ENTITY, world);
+		String path = "";
+		try {
+			path = net.minecraft.util.Identifier.tryParse(ammoId).getPath();
+		} catch (RuntimeException ignored) {
+		}
+		int style = ("bolt".equals(path) || "explosive_bolt".equals(path))
+				? com.tk.gun.entity.BulletEntity.STYLE_EXPLOSIVE
+				: ("cutting_bolt".equals(path) ? com.tk.gun.entity.BulletEntity.STYLE_CUTTING
+				: ("sculk_bolt".equals(path) ? com.tk.gun.entity.BulletEntity.STYLE_SCULK
+				: ("armor_piercing_bolt".equals(path) ? com.tk.gun.entity.BulletEntity.STYLE_GRAPESHOT
+				: ("rose_quartz_bolt".equals(path) ? com.tk.gun.entity.BulletEntity.STYLE_ROSE_QUARTZ
+				: com.tk.gun.entity.BulletEntity.STYLE_TRAIL))));
+		bullet.setBulletStyle(style);
+		bullet.refreshPositionAndAngles(muzzle.x, muzzle.y, muzzle.z, player.getYaw(), player.getPitch());
+		double speed = "armor_piercing_bolt".equals(path)
+				? TkGun.GRAPESHOT_SPEED : TkGun.BULLET_SPEED;
+		bullet.launch(dir, distance, speed);
+		world.spawnEntity(bullet);
+		if (style != com.tk.gun.entity.BulletEntity.STYLE_GRAPESHOT) {
+		TkGun.LOGGER.info("[mechaniciancombat] 子弹实体：从({}, {}, {}) 朝({}, {}, {}) 飞 {} 格（{} tick）",
+				round3(muzzle.x), round3(muzzle.y), round3(muzzle.z),
+				round3(dir.x), round3(dir.y), round3(dir.z), round3(distance),
+				Math.max(TkGun.BULLET_MIN_TICKS, (int) Math.ceil(distance / speed)));
+		}
+		return bullet;
+	}
+
+	/**
+	 * **这位玩家现在在专注（架枪）里吗**（服务端权威；客户端靠状态包的 `focus` 位镜像）。
+	 */
+	public static boolean focused(ServerPlayerEntity player) {
+		PState st = state(player);
+		return st.deployed && TkGun.holdingGun(player);
+	}
+
+	/**
+	 * 切换专注模式。按 Z 或调用本方法：未专注时进入对应的 AIM 状态，已专注时播放 Focus_over 退出。
+	 * 专注期间移动、跳跃及大部分热键被屏蔽；过热时无法进入。
+	 *
+	 * @return true = 本次进入专注；false = 本次退出或被拒绝
+	 */
+	private static void clearDodgeCooldownsForFocus(PState st) {
+		st.fallbackRollReadyAt = 0;
+		st.dodgeLockUntil = 0;
+		st.dodgeBlockUntil = 0;
+		st.slideCooldownUntil = 0;
+		st.lastDodgeAt = 0;
+		st.lastDodgeKind = 0;
+		st.rollFallbackPending = false;
+		st.rollFallbackAt = 0;
+		st.rollInputAccepted = false;
+	}
+
+	/** A successful Silent Storm landing refreshes the next manual dodge. */
+	private static void completeDodgeCooldownAfterSkillJump(PState st) {
+		st.fallbackRollReadyAt = 0;
+		st.dodgeLockUntil = 0;
+		st.dodgeBlockUntil = 0;
+		st.slideCooldownUntil = 0;
+		st.lastDodgeAt = 0;
+		st.lastDodgeKind = 0;
+		st.rollFallbackPending = false;
+		st.rollFallbackAt = 0;
+		st.rollInputAccepted = false;
+		st.dodgeFocusQueued = false;
+		st.dodgeFocusQueuedAt = 0;
+	}
+
+	private static void startGunJumpAction(ServerPlayerEntity player) {
+		if (!TkGun.holdingGun(player) || TkGun.isMeleeWeapon(player)) {
+			return;
+		}
+		Identifier gunId = TkGun.definition(player).id();
+		if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
+			startSkillJump(player);
+		} else if (gunId.equals(TkGun.id("bowgun"))) {
+			startFortressSkill(player);
+		}
+	}
+
+	private static boolean isDodgeActionState(TkGun.State state) {
+		return state == TkGun.State.ROLL || state == TkGun.State.ROLL_TO_IDLE
+				|| state == TkGun.State.ROLL_TO_RUN
+				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY;
+	}
+
+	private static boolean holdingFortressDestroyer(ServerPlayerEntity player) {
+		return TkGun.holdingGun(player)
+				&& TkGun.definition(player).id().equals(TkGun.id("bowgun"));
+	}
+
+	private static void startFortressSkill(ServerPlayerEntity player) {
+		if (player.getServer() == null || !player.isAlive() || !player.isOnGround()
+				|| !holdingFortressDestroyer(player)) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		boolean fromFocus = st.deployed;
+		boolean fromSlide = st.state == TkGun.State.SLIDE && now < st.slideUntil;
+		if (fromFocus) {
+			TkGun.LOGGER.info("[mechaniciancombat] fortress skill denied while crouched player={}",
+					player.getName().getString());
+			return;
+		}
+		if ((isDodgeActionState(st.state) && !fromSlide)
+				|| st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT
+				|| now < st.fortressSkillReadyAt) {
+			return;
+		}
+
+		Vec3d inheritedVelocity = player.getVelocity();
+		double inheritedSpeed = Math.sqrt(
+				inheritedVelocity.x * inheritedVelocity.x
+						+ inheritedVelocity.z * inheritedVelocity.z);
+		double slideDirX = st.slideDirX;
+		double slideDirZ = st.slideDirZ;
+		if (inheritedSpeed > 1.0E-4D) {
+			slideDirX = inheritedVelocity.x / inheritedSpeed;
+			slideDirZ = inheritedVelocity.z / inheritedSpeed;
+		}
+		clearPendingShots(player, st, "破垒重炮技能启动");
+		player.stopUsingItem();
+		player.removeStatusEffect(StatusEffects.SLOWNESS);
+		player.setSprinting(false);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.overheatUntil = 0;
+		st.dashUntil = 0;
+		st.speedBoostUntil = 0;
+		st.dashSyncActive = false;
+		st.meleeHoldOver = false;
+		st.meleeReturning = false;
+		st.meleeDashAttack = false;
+		st.fortressSkillLevel = 0;
+		st.fortressSkillFromFocus = fromFocus;
+		st.fortressSkillFromSlide = fromSlide;
+		st.fortressSkillSlideDirX = slideDirX;
+		st.fortressSkillSlideDirZ = slideDirZ;
+		st.fortressSkillSlideSpeed = fromSlide ? inheritedSpeed : 0.0D;
+		st.fortressSkillHitDirX = 0.0D;
+		st.fortressSkillHitDirZ = 0.0D;
+		if (fromSlide) {
+			st.slideUntil = 0L;
+			st.slideMeasuring = false;
+			finishBackpackSpecialThrust(player, now);
+		}
+		GunStateMachine.clearDash(player);
+		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_LOAD,
+				TkGun.FORTRESS_SKILL_LOAD_TICKS);
+		if (fromSlide) {
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			player.setVelocity(slideDirX * inheritedSpeed, inheritedVelocity.y,
+					slideDirZ * inheritedSpeed);
+			player.velocityModified = true;
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] Fortress skill load started fromSlide={} speed={} player={}",
+				fromSlide, round3(inheritedSpeed), player.getName().getString());
+	}
+
+	private static int fortressGatherLevel(long elapsed) {
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_3_TICK) {
+			return 3;
+		}
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_2_TICK) {
+			return 2;
+		}
+		if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_LEVEL_1_TICK) {
+			return 1;
+		}
+		return 0;
+	}
+
+	/** Returns true when a click belongs to the Fortress skill and must not fire. */
+	private static boolean handleFortressSkillAttack(ServerPlayerEntity player,
+													 Vec3d attackDirection) {
+		if (!holdingFortressDestroyer(player)) {
+			return false;
+		}
+		PState st = state(player);
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			return true;
+		}
+		if (st.state != TkGun.State.FORTRESS_SKILL_GATHER) {
+			return false;
+		}
+		long elapsed = player.getWorld().getTime() - st.stateStarted;
+		int level = fortressGatherLevel(elapsed);
+		if (level > 0) {
+			startFortressSkillHit(player, st, level, attackDirection);
+		}
+		return true;
+	}
+
+	private static void startFortressSkillHit(ServerPlayerEntity player,
+											 PState st, int level,
+											 Vec3d attackDirection) {
+		if (player.getServer() == null) {
+			return;
+		}
+		int clampedLevel = Math.max(1, Math.min(3, level));
+		st.fortressSkillLevel = clampedLevel;
+		Vec3d forward;
+		if (attackDirection != null
+				&& attackDirection.horizontalLengthSquared() > 1.0E-6D) {
+			forward = new Vec3d(attackDirection.x, 0.0D,
+					attackDirection.z).normalize();
+		} else {
+			double yaw = Math.toRadians(player.getYaw());
+			forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+		}
+		st.fortressSkillHitDirX = -forward.x;
+		st.fortressSkillHitDirZ = -forward.z;
+		float lockedYaw = (float) Math.toDegrees(
+				Math.atan2(-forward.x, forward.z));
+		player.setYaw(lockedYaw);
+		player.setHeadYaw(lockedYaw);
+		player.setBodyYaw(lockedYaw);
+		long now = player.getWorld().getTime();
+		st.heat = TkGun.HEAT_MAX;
+		st.overheatUntil = now + TkGun.FORTRESS_SKILL_HIT_TICKS;
+		st.fortressSkillReadyAt =
+				now + TkGun.FORTRESS_SKILL_COOLDOWN_TICKS;
+		player.getItemCooldownManager().set(
+				player.getMainHandStack().getItem(),
+				TkGun.FORTRESS_SKILL_COOLDOWN_TICKS);
+		ServerPlayNetworking.send(player,
+				new com.tk.gun.net.FortressSkillCooldownPayload(
+						TkGun.FORTRESS_SKILL_COOLDOWN_TICKS));
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		clearPendingShots(player, st, "破垒重炮技能释放");
+		setState(player.getServer(), player, TkGun.State.FORTRESS_SKILL_HIT,
+				TkGun.FORTRESS_SKILL_HIT_TICKS);
+		performFortressSkillDamage(player, st, clampedLevel);
+		TkGun.LOGGER.info("[mechaniciancombat] Fortress skill hit level={} damage={} "
+						+ "retreat={} blocks player={}",
+				clampedLevel,
+				TkGun.FORTRESS_SKILL_BASE_DAMAGE
+						* Math.pow(TkGun.FORTRESS_SKILL_LEVEL_MULTIPLIER,
+								clampedLevel - 1),
+				TkGun.FORTRESS_SKILL_HIT_DISTANCE,
+				player.getName().getString());
+	}
+
+	/**
+	 * Focused fire contributes one second toward the skill cooldown. The vanilla
+	 * item cooldown is updated at the same time so the displayed cooldown matches
+	 * the authoritative {@code fortressSkillReadyAt} timestamp.
+	 */
+	private static void reduceFortressSkillCooldownOnFocusShot(
+			ServerPlayerEntity player, PState st, long now) {
+		if (!st.deployed || !holdingFortressDestroyer(player)
+				|| st.fortressSkillReadyAt <= now) {
+			return;
+		}
+		long reduced = Math.max(now,
+				st.fortressSkillReadyAt - TkGun.FORTRESS_SKILL_FOCUS_COOLDOWN_REDUCTION_TICKS);
+		long removed = st.fortressSkillReadyAt - reduced;
+		if (removed <= 0L) {
+			return;
+		}
+		st.fortressSkillReadyAt = reduced;
+		int remaining = (int) Math.min(Integer.MAX_VALUE, reduced - now);
+		ItemStack held = player.getMainHandStack();
+		if (remaining <= 0) {
+			player.getItemCooldownManager().remove(held.getItem());
+		} else {
+			player.getItemCooldownManager().set(held.getItem(), remaining);
+			ServerPlayNetworking.send(player,
+					new com.tk.gun.net.FortressSkillCooldownPayload(remaining));
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] fortress skill cooldown -{} ticks -> {} remaining player={}",
+				removed, remaining, player.getName().getString());
+	}
+
+	private static void performFortressSkillDamage(ServerPlayerEntity player,
+													PState st, int level) {
+		Vec3d forward = new Vec3d(-st.fortressSkillHitDirX, 0.0D,
+				-st.fortressSkillHitDirZ).normalize();
+		Vec3d right = new Vec3d(-forward.z, 0.0D, forward.x).normalize();
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		double side = 3.0D;
+		double halfHeight = 3.0D;
+		double halfDepth = 3.0D;
+		Vec3d center = player.getPos().add(0.0D, halfHeight, 0.0D)
+				.add(forward.multiply(halfDepth));
+		net.minecraft.util.math.Box search = player.getBoundingBox()
+				.expand(6.0D, 6.0D, 6.0D);
+		float impactDamage = TkGun.FORTRESS_SKILL_IMPACT_DAMAGE;
+		float delayedDamage = TkGun.fortressSkillDamage(level);
+		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator()
+						&& CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), center,
+					right, up, forward, side, halfHeight, halfDepth)) {
+				continue;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player), impactDamage)
+					&& entity.isAlive()) {
+				FortressSkillKnockbackService.start(player, entity, forward,
+						delayedDamage);
+			}
+		}
+	}
+
+	/**
+	 * Silent Storm consumes its active acceleration for a fixed-height,
+	 * fixed-distance leap. All eligibility checks are server-authoritative.
+	 */
+	private static boolean holdingSilentStorm(ServerPlayerEntity player) {
+		return TkGun.holdingGun(player)
+				&& TkGun.definition(player).id()
+						.equals(TkGun.id("abyssal_ancient_cannon"));
+	}
+
+	/** Consumes exactly one queued fall attack input during the jump. */
+	private static void handleSilentStormFallInput(ServerPlayerEntity player) {
+		if (!holdingSilentStorm(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (st.state != TkGun.State.SKILL_JUMP || st.skillFallAttackQueued
+				|| st.skillFallImpactDone) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		if (st.skillJumpHovering) {
+			st.skillFallAttackQueued = true;
+			endSkillJumpHover(player, st);
+			startSkillFallAttack(player, st, now, true);
+			TkGun.LOGGER.info("[mechaniciancombat] fall attack interrupted thruster hover player={}",
+					player.getName().getString());
+			return;
+		}
+		st.skillFallAttackQueued = true;
+		TkGun.LOGGER.info("[mechaniciancombat] fall attack queued during jump player={}",
+				player.getName().getString());
+		if (st.skillJumpFalling) {
+			startSkillFallAttack(player, st, now);
+		}
+	}
+
+	private static void startSkillJump(ServerPlayerEntity player) {
+		if (player.getServer() == null || !player.isAlive()
+				|| !TkGun.holdingGun(player) || !player.isOnGround()) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		boolean accelerated = now < st.dashUntil || now < st.speedBoostUntil;
+		if (!accelerated || (st.state != TkGun.State.IDLE
+				&& st.state != TkGun.State.FIRE
+				&& st.state != TkGun.State.RUN)) {
+			return;
+		}
+		if (!TkGun.definition(player).id()
+				.equals(TkGun.id("abyssal_ancient_cannon"))) {
+			return;
+		}
+
+		clearPendingShots(player, st, "静谧风暴跳跃技能");
+		player.stopUsingItem();
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.dashUntil = 0L;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		st.dashSyncActive = false;
+		st.skillJumpStartedAt = now;
+		st.skillJumpAirborne = false;
+		st.skillJumpFalling = false;
+		st.skillJumpResumeSprint = player.isSprinting();
+		st.skillJumpHovering = false;
+		st.skillJumpHoverConsumed = false;
+		st.skillJumpThrusterFlight = false;
+		st.skillJumpHoverUntil = 0L;
+		st.skillFallAttackQueued = false;
+		st.skillFallDiveStarted = false;
+		st.skillFallImpactDone = false;
+		st.skillFallExtendedDetection = false;
+		st.skillFallTailPose = false;
+		st.skillFallSlowUntil = 0L;
+		st.skillFallTargetUuid = null;
+		GunStateMachine.clearDash(player);
+
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		player.setVelocity(
+				forward.x * TkGun.SKILL_JUMP_HORIZONTAL_SPEED,
+				TkGun.SKILL_JUMP_VERTICAL_SPEED,
+				forward.z * TkGun.SKILL_JUMP_HORIZONTAL_SPEED);
+		player.velocityModified = true;
+		// Use air friction for the launch tick instead of ground friction.
+		player.setOnGround(false);
+		player.fallDistance = 0.0F;
+
+		boolean thrusterEquipped =
+				com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
+						com.tk.gun.item.CombatBackpackItem.equippedStack(player));
+		setState(player.getServer(), player, TkGun.State.SKILL_JUMP,
+				thrusterEquipped ? TkGun.SKILL_JUMP_THRUSTER_MAX_TICKS
+						: TkGun.SKILL_JUMP_MAX_TICKS);
+		ServerWorld world = player.getServerWorld();
+		world.spawnParticles(TkGunParticles.SONIC_BOOM,
+				player.getX(), player.getY() + 0.05D, player.getZ(),
+				1, 0.0D, 0.0D, 0.0D, 0.0D);
+		world.playSound(null,
+				net.minecraft.util.math.BlockPos.ofFloored(
+						player.getX(), player.getY(), player.getZ()),
+				net.minecraft.sound.SoundEvent.of(TkGun.SND_SONIC_BOOM),
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+		TkGun.LOGGER.info("[mechaniciancombat] Silent Storm skill jump: vertical={}, horizontal={}, "
+						+ "dir=({}, {}) player={}",
+				TkGun.SKILL_JUMP_VERTICAL_SPEED,
+				TkGun.SKILL_JUMP_HORIZONTAL_SPEED,
+				round3(forward.x), round3(forward.z), player.getName().getString());
+	}
+
+	public static boolean startFocus(ServerPlayerEntity player) {
+		MinecraftServer server = player.getServer();
+		if (server == null) {
+			return false;
+		}
+		if (TkGun.isMeleeWeapon(player)) {
+			return false;
+		}
+		PState st = state(player);
+		if (!st.deployed && !player.isOnGround()) {
+			TkGun.LOGGER.info("[mechaniciancombat] focus denied: player is airborne player={}",
+					player.getName().getString());
+			return false;
+		}
+		if (st.state == TkGun.State.MELEE
+				|| st.state == TkGun.State.SKILL_JUMP
+				|| st.state == TkGun.State.FALL_ATTACK
+				|| st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
+			return false;
+		}
+		if (ensureMagazineLoaded(player, st)) {
+			rebroadcast(player);
+		}
+		long now = player.getWorld().getTime();
+		if (!st.shotQueue.isEmpty() || st.shotAnimating) {
+			clearPendingShots(player, st, "进入专注");
+		}
+		// 滑铲+Z 的组合输入可能同时走“滑铲开始时消费缓冲”和“随后到达的焦点包”两条路。
+		// AIM_SLIDE 只有 10 tick，重复进入会把 `sliding_fast_ready` 从 Focus 保持中重新拉回开头，
+		// 表现就是快速蹲射动作播两遍。这里直接吸收重复包。
+		if (st.deployed && st.state == TkGun.State.AIM_SLIDE && now < st.stateUntil
+				&& now <= st.lastSlideFastFocusAt + 4) {
+			TkGun.LOGGER.info("[mechaniciancombat] AIM_SLIDE 已进入，忽略重复专注包 玩家={}",
+					player.getName().getString());
+			return true;
+		}
+		/**
+		 * 这次 Z 是"翻滚过 2/3 后打断"或"翻滚刚结束的宽限窗"→ 用快档
+		 * （`AIM_ROLL` → `rolling_fast_ready`）。
+		 */
+		boolean fromRoll = false;
+		boolean rolling = st.state == TkGun.State.ROLL;
+		if (rolling && !st.rollQuickFocusEligible) {
+			TkGun.LOGGER.info("[mechaniciancombat] 快速专注仅限专注状态下开始的翻滚，普通翻滚中忽略 Z 玩家={}",
+					player.getName().getString());
+			return false;
+		}
+		// **翻滚中按 Z = 快速蹲射**（用户 2026-10-17："让翻滚时可以进行快速蹲射并打断翻滚动画并进入蹲射状态"）：
+		// 先把 ROLL 收掉（这样能绕过 `setState` 里"翻滚没播完不许换状态"那道闸），再照常进专注 ——
+		// 下面用专门的 `AIM_ROLL`，客户端播 `rolling_fast_ready`。
+		if (rolling) {
+			// **2026-10-18 用户定档：翻滚动画 0.38s 处开始执行快速蹲射**。
+			// 0.38s × 20 向上取整 = 第 8 tick；在此之前输入的 Z 不丢，先缓存（预输入）。
+			long fastAt = st.rollFocusAt > 0
+					? st.rollFocusAt
+					: st.stateStarted + com.tk.gun.CombatRollHook.ROLL_FAST_FOCUS_TICKS;
+			if (now < fastAt) {
+				st.rollFocusRequested = true;
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚快速蹲射预输入：等待 0.38s 执行（剩 {} tick）玩家={}",
+						fastAt - now, player.getName().getString());
+				return false;
+			}
+			if (!st.rollFocusRequested) {
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚快速蹲射窗口已结束（第 {} tick，仅接受 0.38s 前预输入）玩家={}",
+						now - st.stateStarted, player.getName().getString());
+				return false;
+			}
+			st.rollFocusRequested = false;
+			st.rollFocusAt = 0;
+			TkGun.LOGGER.info("[mechaniciancombat] 翻滚已达 0.38s（第 {} tick）-> 打断翻滚、快速蹲射 玩家={}",
+					now - st.stateStarted, player.getName().getString());
+			st.state = TkGun.State.IDLE;
+			st.stateUntil = 0;
+			// **动作意图优先**：即使上一帧还残留着 `deployed=true`，这一次 Z 也必须是"进入快速专注"，
+			// 不能被下面的"已架着 → 解除专注"分支吃掉。
+			st.deployed = false;
+			st.focusRamp = 0;
+			fromRoll = true;
+		}
+		// **滑铲中点 Z = `sliding_fast_ready` 中断滑铲、进蹲射**（用户 2026-10-17）：收掉滑铲 → 下面按
+		// `AIM_SLIDE` 进（客户端这一段播作者新加的 `sliding_fast_ready`）。
+		boolean fromSlide = st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY;
+		if (fromSlide) {
+			lockAimAfterDodge(st, now);
+			st.slideUntil = 0;
+			st.slideMeasuring = false;
+			finishBackpackSpecialThrust(player, now);
+			st.lastSlideFastFocusAt = now;
+			st.state = TkGun.State.IDLE;
+			st.stateUntil = 0;
+		}
+		if (!TkGun.holdingGun(player)) {
+			TkGunTexts.say(player, TkGunTexts.FOCUS_NO_GUN, true);
+			return false;
+		}
+		if (now < st.overheatUntil) {
+			playSound(player, TkGun.SND_VENT, 0.7F, 1.1F);
+			TkGunTexts.say(player, TkGunTexts.FOCUS_OVERHEATED, true);
+			return false;
+		}
+		if (st.deployed) {                 // 已经架着 → 再按一次 = 解除（省得"按了没反应"）
+			stopFocus(player);
+			return false;
+		}
+		clearDodgeCooldownsForFocus(st);
+		st.deployed = true;
+		st.focusShots = 0;
+		st.shotIndex = 1;
+		st.lastFocusAmmo = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
+		// 快速蹲射意图已经兑现，关掉宽限窗，避免之后一段普通按 Z 还被误判成翻滚快档。
+		st.rollFocusUntil = 0;
+		st.rollFocusRequested = false;
+		st.rollFocusAt = 0;
+		st.rollStartedFromFocus = false;
+		st.rollQuickFocusEligible = false;
+		// **进蹲射 = 立即装填弹匣**（用户 2026-10-17："将进入蹲射状态添加立即装填弹匣的效果"）：
+		// `mag` 是"弹夹里已经打出去几发"，清零 = 满弹夹；顺手清掉装填窗口（不然刚进蹲射还会被
+		// "装填中…" 拦着开火）。下面 `setState` 广播的包里带着新的 `mag`，客户端的弹夹计数/弹链
+		// 会跟着一起刷新。
+		st.heat = 0.0F;
+		st.reloadUntil = 0;
+		// **进蹲射会重置"翻滚/滑铲交替"循环**（用户 2026-10-17）：下一次 Alt 重新从翻滚开始，
+		// 顺便把上一次循环留下的 1 秒屏蔽也清掉。
+		st.lastDodgeKind = 0;
+		st.dodgeBlockUntil = 0;
+		// 进入动画 = 作者的 `Focus_ready`（起枪 → 落到架枪定格），播完 tickAll 接到 AIM_HOLD 保持。
+		// ⚠️ 2026-10-16 用户把两段过门动画的用途定死了：**进入 = Focus_ready、退出 = Focus_over**
+		//    （"按下进入专注模式，再次输入则退出并使用 Focus_over 动画"）—— 所以这里不再是 OVER。
+		// **冲刺加成窗口里按 Z → 准备动作换成 `fast_ready`**（用户 2026-10-17："在这段加成时间内如果
+		// 输入专注按键则使用 fast_ready 作为专注准备动画，此动画准备时间要快于通常准备动作，详情见
+		// 资源文件夹中的动画时间线"）。作者的时间线：`fast_ready` 0.6667s / `Focus_ready` 1.0s ——
+		// 所以状态时长 14 tick vs 24 tick（TkGun.AIM_TICKS_FAST / _NORMAL）；客户端 `pick` 里
+		// AIM_FAST 播的就是 `fast_ready`，准备音由动画关键帧自行上报。
+		// ⚠️ 2026-10-17 用户："取消加速状态下的快速专注功能" —— 冲刺窗口里按 Z 也走**普通**过门
+		// （`Focus_ready`，`AIM_TICKS_NORMAL`），不再切 `AIM_FAST`/`fast_ready`。（滑铲中按 Z 仍走
+		// `AIM_SLIDE` → `sliding_fast_ready`，那是另一条需求。）
+		if (now < st.dashUntil) {
+			TkGun.LOGGER.info("[mechaniciancombat] 进专注 -> 清空冲刺加成（原剩余 {} tick）玩家={}",
+					st.dashUntil - now, player.getName().getString());
+		}
+		st.dashUntil = 0;
+		st.speedBoostUntil = 0;
+		st.slideBoostApplied = false;
+		GunStateMachine.clearDash(player);
+		if (fromSlide) {
+			applySlideFastFocusInertia(player, st, now);
+		}
+		// 0.38 秒预输入兑现后直接进入 AIM_ROLL，播放新版 rolling_fast_ready。
+		TkGun.State aimState = fromSlide ? TkGun.State.AIM_SLIDE
+				: (fromRoll ? TkGun.State.AIM_ROLL : TkGun.State.AIM);
+		int aimStateTicks = fromSlide ? TkGun.AIM_TICKS_SLIDE
+				: (fromRoll ? TkGun.AIM_TICKS_ROLL : TkGun.AIM_TICKS_NORMAL);
+		if (fromRoll) {
+			lockAimAfterDodge(st, now);
+		}
+		st.quickFocusGuardUntil = (fromRoll || fromSlide) ? now + 4 : 0;
+		setState(server, player, aimState, aimStateTicks);
+		// 蹲射准备音由动画关键帧上报，经服务端广播；点位和动画倍速保持一致。
+		ServerWorld world = player.getServerWorld();
+		// 表现：起手一簇火星（⚠️ 2026-10-15 用户："不要使用那个傀儡的、它的那个攻击特效" ——
+		// 原来这里放的是 `energy_converge`，那是从**傀儡**那包 粒子.zip 里切出来的，已撤掉）
+		world.spawnParticles(ParticleTypes.CRIT,
+				player.getX(), player.getY() + 1.1, player.getZ(), 10, 0.25, 0.3, 0.25, 0.06);
+		world.spawnParticles(ParticleTypes.ELECTRIC_SPARK,
+				player.getX(), player.getY() + 1.05, player.getZ(), 12, 0.3, 0.35, 0.3, 0.12);
+		TkGunTexts.say(player, TkGunTexts.focusEnterText(), true);
+		TkGun.LOGGER.info("[mechaniciancombat] 进入专注状态（{}，过门 {} tick，此后按住左键全自动、射速/伤害递增）玩家={}",
+				aimState, aimStateTicks, player.getName().getString());
+		return true;
+	}
+
+	private static void applySlideFastFocusInertia(ServerPlayerEntity player,
+												 PState st, long now) {
+		double forwardX = st.slideDirX;
+		double forwardZ = st.slideDirZ;
+		double lengthSquared = forwardX * forwardX + forwardZ * forwardZ;
+		if (lengthSquared < 1.0E-6D) {
+			double yaw = Math.toRadians(player.getYaw());
+			forwardX = -Math.sin(yaw);
+			forwardZ = Math.cos(yaw);
+			lengthSquared = 1.0D;
+		}
+		double length = Math.sqrt(lengthSquared);
+		st.slideFastFocusStart = now;
+		st.slideFastFocusUntil = now + TkGun.AIM_TICKS_SLIDE;
+		st.slideFastFocusDirX = forwardX / length;
+		st.slideFastFocusDirZ = forwardZ / length;
+		Vec3d velocity = player.getVelocity();
+		double currentSpeed = st.slideCurrentSpeed;
+		if (currentSpeed <= 1.0E-6D) {
+			currentSpeed = Math.max(0.0D,
+					velocity.x * st.slideFastFocusDirX
+							+ velocity.z * st.slideFastFocusDirZ);
+		}
+		int duration = Math.max(1, TkGun.AIM_TICKS_SLIDE);
+		st.slideFastFocusStartSpeed = Math.max(0.0D, currentSpeed);
+		st.slideFastFocusFadeTicks = st.slideFastFocusStartSpeed <= 1.0E-6D
+				? 1
+				: Math.min(duration, Math.max(1, (int) Math.ceil(
+						TkGun.SLIDE_FAST_FOCUS_MAX_DISTANCE * 2.0D
+								/ st.slideFastFocusStartSpeed)));
+		st.slideFastFocusTraveled = 0.0D;
+		st.slideFastFocusLastX = player.getX();
+		st.slideFastFocusLastZ = player.getZ();
+		applySlideFastFocusInertia(player, st);
+	}
+
+	private static void applySlideFastFocusInertia(ServerPlayerEntity player, PState st) {
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(
+				st.slideFastFocusDirX * st.slideFastFocusStartSpeed,
+				velocity.y,
+				st.slideFastFocusDirZ * st.slideFastFocusStartSpeed);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		TkGun.LOGGER.info("[mechaniciancombat] 滑铲 -> sliding_fast_ready：继承速度 {} 格/tick，前移上限 {} 格 玩家={}",
+				round3(st.slideFastFocusStartSpeed),
+				round3(TkGun.SLIDE_FAST_FOCUS_MAX_DISTANCE),
+				player.getName().getString());
+	}
+
+	/** 解除专注；由 Z 切换、过热或收枪触发，并按 Focus_over 过渡收尾。 */
+	/**
+	 * A one-shot velocity is consumed by the next movement update after the
+	 * client-side focus input lock zeroes the movement keys. Reapply a decaying
+	 * velocity for exactly the sliding_fast_ready transition.
+	 */
+	private static void tickSlideFastFocusInertia(ServerPlayerEntity player,
+												 PState st, long now) {
+		if (st.slideFastFocusUntil == 0) {
+			return;
+		}
+		if (st.state != TkGun.State.AIM_SLIDE) {
+			st.slideFastFocusStart = 0;
+			st.slideFastFocusUntil = 0;
+			st.slideFastFocusStartSpeed = 0.0D;
+			st.slideFastFocusFadeTicks = 0;
+			st.slideFastFocusTraveled = 0.0D;
+			return;
+		}
+		double dx = player.getX() - st.slideFastFocusLastX;
+		double dz = player.getZ() - st.slideFastFocusLastZ;
+		st.slideFastFocusLastX = player.getX();
+		st.slideFastFocusLastZ = player.getZ();
+		st.slideFastFocusTraveled += Math.max(0.0D,
+				dx * st.slideFastFocusDirX + dz * st.slideFastFocusDirZ);
+		double remaining = Math.max(0.0D,
+				TkGun.SLIDE_FAST_FOCUS_MAX_DISTANCE
+						- st.slideFastFocusTraveled);
+		if (now >= st.slideFastFocusUntil || remaining <= 0.05D) {
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			st.slideFastFocusStart = 0;
+			st.slideFastFocusUntil = 0;
+			st.slideFastFocusStartSpeed = 0.0D;
+			st.slideFastFocusFadeTicks = 0;
+			st.slideFastFocusTraveled = 0.0D;
+			return;
+		}
+		int fadeTicks = Math.max(1, st.slideFastFocusFadeTicks);
+		double progress = Math.min(1.0D,
+				(now - st.slideFastFocusStart) / (double) fadeTicks);
+		double speed = Math.min(remaining,
+				st.slideFastFocusStartSpeed * (1.0D - progress));
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(
+				st.slideFastFocusDirX * speed,
+				velocity.y,
+				st.slideFastFocusDirZ * speed);
+		player.velocityModified = true;
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+	}
+
+	public static void stopFocus(ServerPlayerEntity player) {
+		PState st = state(player);
+		if (!st.deployed) {
+			return;
+		}
+		clearPendingShots(player, st, "退出专注");
+		restoreLastFocusAmmoSelection(player, st);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.heat = 0.0F;
+		st.focusRamp = 0;
+		st.rollFocusUntil = 0;          // 退出专注会消费掉所有快速蹲射意图
+		st.rollFocusRequested = false;
+		st.rollFocusAt = 0;
+		// **退出专注 = 挂"缓慢 10"**（用户 2026-10-17："将缓慢效果绑定退出专注状态以及过热两种状态"）。
+		// 时长 = 退出过门动画（`Focus_over`）那么长；翻滚会立刻清掉它（见 CombatRollHook）。
+		// "缓慢"等级 = 放大器 + 1（原版 HUD 显示规则）：放大器 9 → 显示"缓慢 10"。
+		// 隐藏粒子、保留图标，免得玩家以为中了别的东西。
+		player.addStatusEffect(new net.minecraft.entity.effect.StatusEffectInstance(
+				net.minecraft.entity.effect.StatusEffects.SLOWNESS,
+				TkGun.focusExitTicks(player), TkGun.SLOW_ON_EXIT_AMPLIFIER,
+				false, false, true));
+		MinecraftServer server = player.getServer();
+		if (server != null && TkGun.holdingGun(player) && st.state != TkGun.State.OVERHEAT) {
+			// 退出动画 = 作者的 `Focus_over`（用户 2026-10-16："再次输入则退出并使用 Focus_over 动画"）。
+			// 客户端把 OVER 播成 `Focus_over`；播完 `tickAll` 的状态到期分支发现 deployed=false → 回 IDLE。
+			setState(server, player, TkGun.State.OVER,
+					TkGun.focusExitTicks(player));
+		} else if (server != null) {
+			st.state = TkGun.State.IDLE;
+			st.stateUntil = 0;
+			broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+		}
+		TkGunTexts.say(player, TkGunTexts.FOCUS_EXIT, true);
+		TkGun.LOGGER.info("[mechaniciancombat] 专注解除 玩家={}", player.getName().getString());
+	}
+
+	/** 调试/运维：强制进入某个状态（/mechaniciancombat state）。 */
+	public static void forceState(ServerPlayerEntity player, TkGun.State state, int ticks) {
+		MinecraftServer server = player.getServer();
+		if (server != null) {
+			setState(server, player, state, ticks);
+		}
+	}
+
+	private static float rangedDamage(ServerPlayerEntity player) {
+		return TkGun.definition(player).baseDamage();
+	}
+
+	/** 服务端看玩家这一 tick 是否还有移动输入（翻滚收尾选 idle/run 过渡用）。 */
+	private static boolean wantsMove(ServerPlayerEntity player) {
+		return Math.abs(player.forwardSpeed) > 0.01F || Math.abs(player.sidewaysSpeed) > 0.01F;
+	}
+
+	/** 动作结束：从这一 tick 起再屏蔽右键瞄准 1 秒。只延长，不缩短已有窗口。 */
+	private static void lockAimAfterDodge(PState st, long now) {
+		st.aimLockUntil = Math.max(st.aimLockUntil, now + AIM_LOCK_AFTER_DODGE_TICKS);
+	}
+
+	/**
+	 * 滑铲真正开始时消费 Alt+Z / 潜行+Z 的组合专注意图。
+	 * 与翻滚不同，Z 在滑铲里没有 0.38s 门槛：直接进入 `AIM_SLIDE`（sliding_fast_ready）。
+	 */
+	private static void consumeSlideFocus(ServerPlayerEntity player, PState st, long now) {
+		if (!st.dodgeFocusQueued) {
+			return;
+		}
+		boolean valid = now <= st.dodgeFocusQueuedAt + DODGE_COMBO_BUFFER_TICKS;
+		st.dodgeFocusQueued = false;
+		st.dodgeFocusQueuedAt = 0;
+		if (valid && st.state == TkGun.State.SLIDE && TkGun.holdingGun(player)) {
+			TkGun.LOGGER.info("[mechaniciancombat] SLIDE 开始，接收 Z+闪避组合预输入 -> sliding_fast_ready 玩家={}",
+					player.getName().getString());
+			startFocus(player);
+		}
+	}
+
+	// ---------------------------------------------------------------- 每 tick
+	private static void tickAll(MinecraftServer server) {
+		MeleeImpactService.tick(server);
+		FortressSkillKnockbackService.tick(server);
+		tickBolts();
+		tickBackpackProjectiles(server);
+		tickBackpackStates(server);
+		tickWarBannerLights(server);
+		tickWarBannerKnockbacks(server);
+		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+			enforceLauncherOffhandStorage(player);
+			removeGunFromOffhand(player);
+			PState st = state(player);
+			long now = player.getWorld().getTime();
+			tickWarBannerCast(player, st, now);
+			tickHunterSpearDeploy(player, st, now);
+			tickRollFallback(player, st, now);
+			boolean holdingGunNow = TkGun.holdingGun(player);
+			syncBetterCombatAttackFlag(player, holdingGunNow);
+			if (holdingGunNow) {
+				ItemStack held = com.tk.gun.item.GunAmmoData.heldGun(player);
+				if (!held.isEmpty()) {
+					GunDefinition heldDefinition = TkGun.definition(held);
+					if (st.gunDefinitionId != null
+							&& !st.gunDefinitionId.equals(heldDefinition.id())) {
+						st.deployed = false;
+						st.focusShots = 0;
+						st.shotIndex = 1;
+						player.stopUsingItem();
+						clearPendingShots(player, st, "切换枪种");
+						if (st.state != TkGun.State.ROLL && st.state != TkGun.State.SLIDE) {
+							setState(server, player, TkGun.State.IDLE, 1);
+						}
+						TkGun.LOGGER.info("[mechaniciancombat] 枪种 {} -> {}，已重置专注状态 玩家={}",
+								st.gunDefinitionId, heldDefinition.id(), player.getName().getString());
+					}
+					st.gunDefinitionId = heldDefinition.id();
+					if (!st.magLoaded || st.lastHeldGun != held) {
+						st.lastHeldGun = held;
+						loadMagazineFromGun(player, st);
+						st.magLoaded = true;
+						rebroadcast(player);
+					} else {
+						st.lastHeldGun = held;
+					}
+				}
+			} else {
+				st.magLoaded = false;
+			}
+			st.heldGunLastTick = holdingGunNow;
+			if (holdingGunNow && st.magLoaded && !st.deployed) {
+				persistHipMagazine(player, st);
+			}
+
+			// 翻滚/滑铲及结束后 1 秒：右键是完全屏蔽的。玩家可能在这之前已经按住右键，
+			// 仅让 `BowgunItem#use` 返回 fail 不会结束已经开始的 use，所以这里每 tick 权威兜底。
+			if (aimInputLocked(player) && player.isUsingItem()
+					&& player.getActiveHand() == Hand.MAIN_HAND
+					&& TkGun.isGun(player.getActiveItem())) {
+				player.stopUsingItem();
+			}
+
+			// 过热冷却
+			if (st.overheatUntil > 0 && now >= st.overheatUntil) {
+				st.overheatUntil = 0;
+				st.heat = 0.0F;
+				rebroadcast(player);
+			}
+			if (!st.deployed && now >= st.overheatUntil) {
+				st.heat = Math.max(0.0F, st.heat - TkGun.HEAT_COOL);
+			}
+			// 连射窗口过期就把计数清掉：`/mechaniciancombat status` 里看到的"连射"才不是过期数字
+			if (st.combo > 0 && now > st.comboWindowUntil) {
+				st.combo = 0;
+			}
+			// 拉栓计时仅作为射击节奏闸；每发之后不额外播放栓声。
+			// ⚠️ `boltAt` 本身还在用：它是"上一发的拉栓没走完之前不许出下一发"的节奏闸（见 tickShots），
+			// 只把音效去掉，计时别删。
+			if (st.boltAt > 0 && now >= st.boltAt) {
+				st.boltAt = 0;
+			}
+			if (st.aimSoundAt > 0 && now >= st.aimSoundAt) {
+				st.aimSoundAt = 0;
+				if (TkGun.State.isAiming(st.state) && TkGun.holdingGun(player)) {
+					playSound(player, isQuietStorm(player)
+							? TkGun.SND_TENDRIL_CLICKS4 : TkGun.SND_BOLT,
+							1.0F, 1.0F);
+				}
+			}
+			if (st.reloadAuxSoundAt > 0 && now >= st.reloadAuxSoundAt) {
+				st.reloadAuxSoundAt = 0;
+				if (isQuietStorm(player) && st.state == TkGun.State.RELOAD
+						&& TkGun.holdingGun(player)) {
+					playSound(player, TkGun.SND_NEARBY_CLOSEST2, 1.0F, 1.0F);
+				}
+			}
+			// 换弹第二声：弹夹到位（v4 素材 `换弹2.ogg`，动画里埋在 0.833s 处）
+			if (st.reloadClickAt > 0 && now >= st.reloadClickAt) {
+				st.reloadClickAt = 0;
+				playSound(player, TkGun.SND_RELOAD2, 0.9F, 1.0F);
+			}
+			// 连发节奏（攻击帧出膛 + 逐发排队，见 tickShots）
+			tickShots(player, st, now);
+			// —— 专注（架枪）：把枪收起来就自动解除，并**立刻重播一包**（客户端靠 focus 位挑动画）——
+			if (st.deployed && !TkGun.holdingGun(player)) {
+				st.deployed = false;
+				TkGun.LOGGER.info("[mechaniciancombat] 收枪了 -> 专注自动解除 玩家={}", player.getName().getString());
+				rebroadcast(player);
+			}
+			// 枪离手时立即清理射击队列、动画与拉栓计时，禁止切换物品后继续补射。
+			if (!TkGun.holdingGun(player)
+					&& (!st.shotQueue.isEmpty() || st.shotAnimating || st.boltAt > 0)) {
+				TkGun.LOGGER.info("[mechaniciancombat] 枪离手 -> 清掉排队的 {} 发（不再补射）玩家={}",
+						st.shotQueue.size(), player.getName().getString());
+				clearPendingShots(player, st, "枪离手");
+			}
+			// 空弹匣不会自动装填；装填入口仅为 GunReloadPayload。专注移动锁见 FocusMovementLockMixin，
+			// 缓慢效果仅由退出专注和过热施加。
+			// **翻滚的兜底检测**（2026-10-17）：用户报"翻滚（alt键）中断效果未能生效" —— 如果
+			// combat_roll 的事件没到（按键被别的 mod 抢了、或它自己没触发），这里用"水平速度突然很大"
+			// 来认这次翻滚。（事件正常触发时这条不会重复执行 —— 那时状态已经变成 ROLL 了。）
+			// ⚠️ 阈值不能再用 0.35：冲刺加成 +50% 之后疾跑约 0.42 格/tick，会把"加速疾跑"误判成翻滚
+			// （表现：过热 / Focus_over 动画被突然打断）。见 GunStateMachine#ROLL_DETECT_SPEED。
+			// 冲刺加成窗口（`dashUntil`）里的高速也**不算**翻滚 —— 那本来就是我们自己给的奖励。
+			if ((st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER)
+					&& now >= st.dashUntil
+					&& player.getVelocity().horizontalLength() > GunStateMachine.ROLL_DETECT_SPEED) {
+				interruptForRoll(player, st, "高速位移兜底");
+			}
+			//
+			// ⚠️ 2026-10-17：服务端这条"按住左键自动连发"（靠扳机状态包）**删掉了** —— 用户报
+			//    "按压一次打出两发"：那条包只要晚到/丢释放包，服务端就以为扳机还按着，于是自己又补一发；
+			//    而客户端在专注里本来就会（按住超过 6 tick 后）每 5 tick 补一个**开火包**。
+			//    现在连发只有一个来源（客户端补包），单击 = 一发，不会再出现"一下两发"。
+			// 过热"不可移动" + 翻滚后的 3 秒加速冲刺（规则都在 GunStateMachine）
+			GunStateMachine.tickImmovable(player, st, now);
+			GunStateMachine.tickAtk3MovementLock(player, st);
+			boolean armorDodgeChanged = tickArmorDodge(st, now);
+			boolean dashChanged = GunStateMachine.tickDash(player, st, now);
+			if (armorDodgeChanged || dashChanged) {
+				rebroadcast(player);
+			}
+			GunStateMachine.tickNoJump(player, st, now);      // 散热期间屏蔽跳跃（属性修饰符）
+			GunStateMachine.tickGunStepHeight(player);        // 持枪移动时自动跨 1 格
+			// Alt 没有真正滚起来（被闪避锁/其它状态拒绝）时，别把 Z 永远吞掉：
+			// 缓冲过期后退回普通专注切换。
+			if (st.dodgeFocusQueued
+					&& now > st.dodgeFocusQueuedAt + DODGE_COMBO_BUFFER_TICKS
+					&& st.state != TkGun.State.ROLL
+					&& st.state != TkGun.State.SLIDE
+					&& st.state != TkGun.State.SLIDE_READY) {
+				st.dodgeFocusQueued = false;
+				st.dodgeFocusQueuedAt = 0;
+				TkGun.LOGGER.info("[mechaniciancombat] Z+闪避组合缓冲过期（动作未开始）-> 按普通 Z 处理 玩家={}",
+						player.getName().getString());
+				startFocus(player);
+			}
+			// **翻滚快速蹲射预输入到点**：0.38s 前按下的 Z 在这里兑现。
+			// 必须放在"状态自然结束"之前，否则 10 tick 的 ROLL 会先收成 IDLE，
+			// 预输入就变成了普通举枪。
+			if (st.state == TkGun.State.ROLL && st.rollFocusRequested
+					&& st.rollFocusAt > 0 && now >= st.rollFocusAt) {
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚快速蹲射预输入到点 -> 执行（第 {} tick）玩家={}",
+						now - st.stateStarted, player.getName().getString());
+				startFocus(player);
+			}
+			if (st.state == TkGun.State.ROLL && wantsMove(player)) {
+				st.rollMoveIntent = true;
+			}
+			// Movement can begin after the single roll-end check. Exit the
+			// recovery transition immediately instead of forcing a 4-tick
+			// roll_to_idle segment before walking/running can take over.
+			if (st.state == TkGun.State.ROLL_TO_IDLE
+					&& TkGun.holdingGun(player) && wantsMove(player)) {
+				st.stateUntil = 0;
+				st.state = TkGun.State.IDLE;
+				if (now < st.dashUntil) {
+					player.setSprinting(true);
+				}
+				lockAimAfterDodge(st, now);
+				broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				TkGun.LOGGER.info("[mechaniciancombat] 翻滚收势期间出现移动输入 -> 立即切回行走/奔跑 玩家={}",
+						player.getName().getString());
+			}
+			if (st.state == TkGun.State.ROLL_TO_RUN && now < st.dashUntil) {
+				player.setSprinting(true);
+			}
+			tickFortressSkill(player, st, now);
+			st.lastX = player.getX();
+			st.lastZ = player.getZ();
+			tickMelee(player, st, now);
+			// 状态自然结束
+			if (st.stateUntil > 0 && now >= st.stateUntil) {
+				TkGun.State ended = st.state;
+				st.stateUntil = 0;
+				st.state = TkGun.State.IDLE;
+				boolean holding = TkGun.holdingGun(player);
+				// 快速蹲射过门结束：立即解除翻滚/滑铲留下的右键瞄准锁。
+				if (ended == TkGun.State.AIM_ROLL || ended == TkGun.State.AIM_SLIDE) {
+					st.aimLockUntil = 0;
+				}
+				// 翻滚收尾：站定播放 `roll_to_idle`；已在移动则直接交给 IDLE/run。
+				// 快速专注只能由翻滚 0.38 秒处的组合输入进入，不再经过额外过渡动作。
+				// Overheat final frame chains into the authored Focus_over state.
+				if (ended == TkGun.State.OVERHEAT) {
+					st.overheatUntil = 0;
+					st.heat = 0.0F;
+					if (holding) {
+						setState(server, player, TkGun.State.OVER,
+								TkGun.focusExitTicks(player));
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0,
+								st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_LOAD) {
+					if (holdingFortressDestroyer(player)) {
+						st.fortressSkillLevel = 0;
+						setState(server, player,
+								TkGun.State.FORTRESS_SKILL_READY_GATHER,
+								TkGun.FORTRESS_SKILL_READY_GATHER_TICKS);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_READY_GATHER) {
+					if (holdingFortressDestroyer(player)) {
+						setState(server, player,
+								TkGun.State.FORTRESS_SKILL_GATHER,
+								TkGun.FORTRESS_SKILL_GATHER_TICKS);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_GATHER) {
+					if (holdingFortressDestroyer(player)) {
+						startFortressSkillHit(player, st, 3, null);
+					} else {
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					}
+				} else if (ended == TkGun.State.FORTRESS_SKILL_HIT) {
+					st.fortressSkillFromFocus = false;
+					st.overheatUntil = 0;
+					st.heat = 0.0F;
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				} else if (ended == TkGun.State.MELEE) {
+					if (st.kineticSwordReturn) {
+						st.kineticSwordReturn = false;
+						st.kineticSwordAttack = false;
+						st.kineticSwordQueued = false;
+						st.meleeReturning = false;
+						st.meleeInputHeld = false;
+						st.meleeInputPressedAt = 0L;
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+					} else if (st.meleeDashAttack) {
+						int returnStep = st.meleeCombo;
+						boolean returnToRun = finishDashMelee(player, st);
+						beginMeleeReturn(player, st, returnStep, true, returnToRun);
+					} else if (st.meleeReturning) {
+						st.meleeReturning = false;
+						st.meleeDashReturn = false;
+						st.meleeReturnToRun = false;
+						if (st.meleeQueued) {
+							beginMelee(player, st, now,
+									nextMeleeTap(st.meleeCombo), false);
+						} else {
+							st.meleeInputHeld = false;
+							st.meleeInputPressedAt = 0L;
+							broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+						}
+					} else if (st.meleeCombo == 3) {
+						beginMelee(player, st, now, 4, st.meleeInputHeld);
+					} else if (st.meleeCombo == 1 && isMeleeLongPress(st, now)) {
+						TkGun.LOGGER.info("[mechaniciancombat] ATK_1 long press -> ATK_3 hold chain player={}",
+								player.getName().getString());
+						beginMelee(player, st, now, 3, false);
+					} else if (st.meleeCombo == 2 && isMeleeLongPress(st, now)) {
+						beginMelee(player, st, now, 3, false);
+					} else if (st.meleeQueued) {
+						beginMelee(player, st, now, nextMeleeTap(st.meleeCombo), false);
+					} else {
+						beginMeleeReturn(player, st, st.meleeCombo, false, false);
+					}
+				} else if (ended == TkGun.State.ROLL) {
+					boolean resumedMovement = st.rollMoveIntent || wantsMove(player);
+					st.rollMoveIntent = false;
+					if (holding && resumedMovement
+							&& st.rollQuickFocusEligible) {
+						if (now < st.dashUntil) {
+							player.setSprinting(true);
+						}
+						lockAimAfterDodge(st, now);
+						setState(server, player, TkGun.State.ROLL_TO_RUN,
+								CombatRollHook.FOCUS_ROLL_RUN_TICKS);
+						TkGun.LOGGER.info("[mechaniciancombat] 专注翻滚结束 -> focus-roll-run 进入奔跑 玩家={}",
+								player.getName().getString());
+					} else if (holding && isVeritasMainHand(player)) {
+						if (resumedMovement && now < st.dashUntil) {
+							player.setSprinting(true);
+						}
+						lockAimAfterDodge(st, now);
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+						TkGun.LOGGER.info("[mechaniciancombat] 枢德翻滚结束 -> 跳过 roll_to_idle 玩家={}",
+								player.getName().getString());
+					} else if (holding && resumedMovement) {
+						if (now < st.dashUntil) {
+							player.setSprinting(true);
+						}
+						lockAimAfterDodge(st, now);
+						broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+						TkGun.LOGGER.info("[mechaniciancombat] 翻滚结束（检测到移动意图）-> 直接进入加速奔跑 玩家={}",
+								player.getName().getString());
+					} else {
+						TkGun.LOGGER.info("[mechaniciancombat] 翻滚结束（站定）-> roll_to_idle 玩家={}",
+								player.getName().getString());
+						setState(server, player, TkGun.State.ROLL_TO_IDLE,
+								CombatRollHook.ROLL_TO_IDLE_TICKS);
+					}
+				} else if (ended == TkGun.State.ROLL_TO_IDLE) {
+					lockAimAfterDodge(st, now);
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				} else if (ended == TkGun.State.ROLL_TO_RUN) {
+					st.rollStartedFromFocus = false;
+					st.rollQuickFocusEligible = false;
+					if (now < st.dashUntil) {
+						player.setSprinting(true);
+					}
+					lockAimAfterDodge(st, now);
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				} else if (ended == TkGun.State.SLIDE || ended == TkGun.State.SLIDE_READY) {
+					lockAimAfterDodge(st, now);
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				} else if (st.deployed && holding && st.shotQueue.isEmpty()) {
+					if (ended == TkGun.State.RELOAD || ended == TkGun.State.OVER) {
+						// ⚠️ 2026-10-15 用户报的"换完弹之后不会恢复到架枪状态，直接离开架枪状态"就是这里：
+						//    换弹动画（`reload`）的尾帧是"人侧身、枪端在胸前"，**不是架枪姿势** ——
+						//    以前这里跟打完一发一样直接发 AIM_HOLD（= 客户端 CONTINUE 保持尾帧），
+						//    保持住的自然是那个换弹尾帧。所以换完弹要**显式再举一次枪**：
+						//    播作者的快速起枪 `fast_ready`（0.667 秒），它的尾帧就是架枪定格。
+						//
+						// 退出专注后必须显式重播举枪动画，不能保持 Focus_over 的站姿尾帧。
+						//    进入专注的过门动画 `Focus_over` 的**尾帧也是站姿**（实测 `body.position` 末帧
+						//    = [0,0,0]，而架枪姿势 `fast_ready`/`Focus_ready` 的末帧是 `[0,-8,0]` 蹲着）
+						//    → OVER 结束也必须**显式再举一次枪**，不能直接 AIM_HOLD 保持 Focus_over 的尾针。
+						setState(server, player, TkGun.State.AIM_FAST, TkGun.AIM_TICKS_FAST);
+					} else {
+						// 打完了还架着枪 → **保持**在这一发动画的尾帧（别重播举枪动作）
+						setState(server, player, TkGun.State.AIM_HOLD, 600);
+					}
+				} else {
+					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
+				}
+			}
+			// （检视的定时音效/粒子点随旧素材的 `simple` 一起作废：新素材里没有 simple 了，
+			//   INSPECT 现在播作者的 Focus_over_shooting 样品，它自己没有埋音效事件。）
+
+			tickSlideFastFocusInertia(player, st, now);
+			tickSlide(player, st, now);
+			tickSlideReady(player, st, now);
+			tickAimSlow(player, st);
+			tickSkillJump(player, st, now);
+			tickSkillFallAttack(player, st, now);
+			tickLongAirborne(player, st, now);
+		}
+	}
+
+	private static void tickFortressSkill(ServerPlayerEntity player, PState st,
+										  long now) {
+		if (isFortressSkillState(st.state)) {
+			playFortressSkillSounds(player, st,
+					Math.max(0L, now - st.stateStarted));
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD) {
+			player.setSprinting(false);
+			if (st.fortressSkillFromSlide) {
+				player.forwardSpeed = 0.0F;
+				player.sidewaysSpeed = 0.0F;
+				player.upwardSpeed = 0.0F;
+				long elapsed = Math.max(0L, now - st.stateStarted);
+				double progress = Math.min(1.0D,
+						elapsed / (double) Math.max(1,
+								TkGun.FORTRESS_SKILL_LOAD_TICKS - 1));
+				double speed = st.fortressSkillSlideSpeed * (1.0D - progress);
+				Vec3d velocity = player.getVelocity();
+				player.setVelocity(
+						st.fortressSkillSlideDirX * speed,
+						velocity.y,
+						st.fortressSkillSlideDirZ * speed);
+				player.velocityModified = true;
+			} else if (st.fortressSkillFromFocus) {
+				player.forwardSpeed = 0.0F;
+				player.sidewaysSpeed = 0.0F;
+				player.upwardSpeed = 0.0F;
+				Vec3d velocity = player.getVelocity();
+				player.setVelocity(0.0D, velocity.y, 0.0D);
+				player.velocityModified = true;
+			}
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+			}
+			return;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			if (!holdingFortressDestroyer(player)) {
+				st.stateUntil = now;
+				return;
+			}
+			if (st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER) {
+				return;
+			}
+			long elapsed = now - st.stateStarted;
+			if (elapsed >= TkGun.FORTRESS_SKILL_GATHER_TICKS - 1L) {
+				startFortressSkillHit(player, st, 3, null);
+			}
+			return;
+		}
+		if (st.state != TkGun.State.FORTRESS_SKILL_HIT) {
+			return;
+		}
+		long elapsed = now - st.stateStarted;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		if (elapsed >= TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS) {
+			Vec3d velocity = player.getVelocity();
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+			player.velocityModified = true;
+			return;
+		}
+		// Feed the authored speed curve forward without recalculating it from
+		// the measured position every tick. Position-error correction creates
+		// visible low-speed pulses in the second half of the retreat.
+		double previousTarget = fortressHitDistanceAfterTicks(elapsed);
+		double nextTarget = fortressHitDistanceAfterTicks(elapsed + 1L);
+		double speed = Math.max(0.0D, nextTarget - previousTarget)
+				/ holdOverMovementFriction(player);
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(st.fortressSkillHitDirX * speed, velocity.y,
+				st.fortressSkillHitDirZ * speed);
+		player.velocityModified = true;
+	}
+
+	private static boolean isFortressSkillState(TkGun.State state) {
+		return state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_HIT;
+	}
+
+	private static void playFortressSkillSounds(ServerPlayerEntity player,
+			PState st, long elapsed) {
+		int[] ticks;
+		String[] keys;
+		switch (st.state) {
+			case FORTRESS_SKILL_LOAD -> {
+				ticks = TkGun.FORTRESS_SKILL_LOAD_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_LOAD_SOUND_KEYS;
+			}
+			case FORTRESS_SKILL_READY_GATHER -> {
+				ticks = new int[]{0};
+				keys = new String[]{TkGun.FORTRESS_SKILL_READY_SOUND_KEY};
+			}
+			case FORTRESS_SKILL_GATHER -> {
+				ticks = TkGun.FORTRESS_SKILL_GATHER_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_GATHER_SOUND_KEYS;
+			}
+			case FORTRESS_SKILL_HIT -> {
+				ticks = TkGun.FORTRESS_SKILL_HIT_SOUND_TICKS;
+				keys = TkGun.FORTRESS_SKILL_HIT_SOUND_KEYS;
+			}
+			default -> {
+				return;
+			}
+		}
+		for (int i = 0; i < ticks.length; i++) {
+			int bit = 1 << i;
+			if ((st.fortressSkillSoundMask & bit) != 0
+					|| elapsed < ticks[i]) {
+				continue;
+			}
+			st.fortressSkillSoundMask |= bit;
+			TkGun.KeyframeSound sound = TkGun.KEYFRAME_SOUNDS.get(keys[i]);
+			if (sound != null) {
+				playSound(player, sound.id(), sound.volume(), sound.pitch());
+			}
+		}
+	}
+
+	/**
+	 * Retreat profile. Damage itself stays on the authored hit frame; speed
+	 * ramps to its peak at 0.625 s, then falls to zero before 1.5 s.
+	 */
+	private static double fortressHitDistanceAfterTicks(long ticks) {
+		int clamped = (int) Math.max(0L,
+				Math.min(TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS, ticks));
+		double totalWeight = 0.0D;
+		double travelledWeight = 0.0D;
+		for (int interval = 0;
+				interval < TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS; interval++) {
+			double weight = fortressHitSpeedWeight(interval + 0.5D);
+			totalWeight += weight;
+			if (interval < clamped) {
+				travelledWeight += weight;
+			}
+		}
+		return TkGun.FORTRESS_SKILL_HIT_DISTANCE
+				* travelledWeight / totalWeight;
+	}
+
+	private static double fortressHitSpeedWeight(double intervalMidpoint) {
+		double peakMidpoint = TkGun.FORTRESS_SKILL_HIT_PEAK_TICK + 0.5D;
+		if (intervalMidpoint <= peakMidpoint) {
+			return Math.sin(intervalMidpoint / peakMidpoint * Math.PI * 0.5D);
+		}
+		double decayStart = peakMidpoint;
+		double decayTicks =
+				TkGun.FORTRESS_SKILL_HIT_MOVE_TICKS - decayStart;
+		double progress = Math.max(0.0D,
+				Math.min(1.0D, (intervalMidpoint - decayStart) / decayTicks));
+		return 0.5D * (1.0D + Math.cos(progress * Math.PI));
+	}
+
+	/** Maintains the Silent Storm leap until the first landing after takeoff. */
+	private static void tickSkillJump(ServerPlayerEntity player, PState st, long now) {
+		if (st.state != TkGun.State.SKILL_JUMP) {
+			return;
+		}
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		if (st.skillJumpHovering) {
+			player.upwardSpeed = 0.0F;
+			player.setNoGravity(true);
+			player.fallDistance = 0.0F;
+			player.setVelocity(0.0D, 0.0D, 0.0D);
+			player.velocityModified = true;
+			if (now < st.skillJumpHoverUntil) {
+				return;
+			}
+			endSkillJumpHover(player, st);
+			if (st.skillFallAttackQueued) {
+				startSkillFallAttack(player, st, now, true);
+				return;
+			}
+			TkGun.LOGGER.info("[mechaniciancombat] Silent Storm thruster hover ended -> fall player={}",
+					player.getName().getString());
+		}
+		if (!player.isOnGround()) {
+			st.skillJumpAirborne = true;
+			Vec3d velocity = player.getVelocity();
+			if (!st.skillJumpFalling && velocity.y <= 0.01D) {
+				if (!st.skillJumpHoverConsumed) {
+					st.skillJumpHoverConsumed = true;
+					if (startSkillJumpHover(player, st, now)) {
+						return;
+					}
+				}
+				if (st.skillFallAttackQueued) {
+					startSkillFallAttack(player, st, now);
+					return;
+				}
+				st.skillJumpFalling = true;
+				player.setVelocity(
+						velocity.x * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+						velocity.y,
+						velocity.z * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER);
+				player.velocityModified = true;
+				TkGun.LOGGER.info("[mechaniciancombat] Silent Storm fall inertia x{} player={}",
+						TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+						player.getName().getString());
+			}
+		} else if (st.skillJumpAirborne
+				|| now >= st.skillJumpStartedAt + 2L) {
+			if (st.skillJumpThrusterFlight) {
+				finishBackpackSpecialThrust(player, now);
+				st.skillJumpThrusterFlight = false;
+			}
+			completeDodgeCooldownAfterSkillJump(st);
+			if (st.skillJumpResumeSprint) {
+				player.setSprinting(true);
+			}
+			st.skillJumpResumeSprint = false;
+			st.stateUntil = now;
+			TkGun.LOGGER.info("[mechaniciancombat] Silent Storm landing -> dodge cooldown complete player={}",
+					player.getName().getString());
+		}
+		long jumpLifetime = st.skillJumpThrusterFlight
+				? TkGun.SKILL_JUMP_THRUSTER_MAX_TICKS
+				: TkGun.SKILL_JUMP_MAX_TICKS;
+		if (now >= st.skillJumpStartedAt + jumpLifetime) {
+			if (st.skillJumpThrusterFlight) {
+				finishBackpackSpecialThrust(player, now);
+				st.skillJumpThrusterFlight = false;
+				player.setNoGravity(false);
+			}
+			st.stateUntil = now;
+		}
+	}
+
+	private static boolean startSkillJumpHover(ServerPlayerEntity player,
+			PState st, long now) {
+		if (!holdingSilentStorm(player)
+				|| !com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
+						com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
+			return false;
+		}
+		long activeUntil = st.skillJumpStartedAt
+				+ TkGun.SKILL_JUMP_THRUSTER_MAX_TICKS;
+		if (!beginBackpackSpecialThrust(player, now, activeUntil)) {
+			return false;
+		}
+		st.skillJumpHovering = true;
+		st.skillJumpHoverUntil = now + TkGun.SKILL_JUMP_HOVER_TICKS;
+		st.skillJumpThrusterFlight = true;
+		player.setNoGravity(true);
+		player.fallDistance = 0.0F;
+		player.setVelocity(0.0D, 0.0D, 0.0D);
+		player.velocityModified = true;
+		rebroadcast(player);
+		TkGun.LOGGER.info("[mechaniciancombat] Silent Storm apex hover {} tick with jump thruster player={}",
+				TkGun.SKILL_JUMP_HOVER_TICKS, player.getName().getString());
+		return true;
+	}
+
+	private static void endSkillJumpHover(ServerPlayerEntity player, PState st) {
+		st.skillJumpHovering = false;
+		st.skillJumpHoverUntil = 0L;
+		st.skillJumpFalling = true;
+		player.setNoGravity(false);
+		player.setVelocity(0.0D, -0.08D, 0.0D);
+		player.velocityModified = true;
+		rebroadcast(player);
+	}
+
+	private static void startSkillFallAttack(ServerPlayerEntity player,
+											 PState st, long now) {
+		startSkillFallAttack(player, st, now, false);
+	}
+
+	private static void startSkillFallAttack(ServerPlayerEntity player,
+											 PState st, long now,
+											 boolean extendedDetection) {
+		if (st.state != TkGun.State.SKILL_JUMP || !holdingSilentStorm(player)
+				|| st.skillFallImpactDone) {
+			return;
+		}
+		st.skillJumpFalling = true;
+		st.skillFallAttackQueued = false;
+		st.skillFallDiveStarted = false;
+		st.skillFallImpactDone = false;
+		st.skillFallHeatEffectStarted = false;
+		st.skillFallExtendedDetection = extendedDetection;
+		st.skillFallTailPose = extendedDetection;
+		st.skillFallSlowUntil = now + TkGun.SKILL_FALL_SLOW_TICKS;
+		st.skillFallTargetUuid = null;
+		player.addStatusEffect(new StatusEffectInstance(
+				StatusEffects.SLOW_FALLING, TkGun.SKILL_FALL_SLOW_TICKS,
+				0, false, false, false));
+		player.fallDistance = 0.0F;
+		setState(player.getServer(), player, TkGun.State.FALL_ATTACK,
+				TkGun.SKILL_FALL_ATTACK_MAX_TICKS);
+		TkGun.LOGGER.info("[mechaniciancombat] fall_attack started, slow={} ticks player={}",
+				TkGun.SKILL_FALL_SLOW_TICKS, player.getName().getString());
+	}
+
+	private static void tickSkillFallAttack(ServerPlayerEntity player,
+											PState st, long now) {
+		if (st.state == TkGun.State.FALL_ATTACK_RECOVERY) {
+			player.setSprinting(false);
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			Vec3d velocity = player.getVelocity();
+			if (Math.abs(velocity.x) > 1.0E-7D
+					|| Math.abs(velocity.z) > 1.0E-7D) {
+				player.setVelocity(0.0D, velocity.y, 0.0D);
+				player.velocityModified = true;
+			}
+			return;
+		}
+		if (st.state != TkGun.State.FALL_ATTACK || st.skillFallImpactDone) {
+			return;
+		}
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		// The dive owns vertical and horizontal motion and can never deal fall damage.
+		player.fallDistance = 0.0F;
+
+		long elapsed = Math.max(0L, now - st.stateStarted);
+		if (elapsed >= TkGun.SKILL_FALL_ATTACK_MAX_TICKS) {
+			finishSkillFallAttack(player, st, now);
+			return;
+		}
+		if (now < st.skillFallSlowUntil) {
+			return;
+		}
+		player.removeStatusEffect(StatusEffects.SLOW_FALLING);
+
+		LivingEntity target = null;
+		if (st.skillFallTargetUuid != null) {
+			Entity found = player.getServerWorld().getEntity(st.skillFallTargetUuid);
+			if (found instanceof LivingEntity living && living.isAlive()
+					&& CombatTargeting.isTargetable(living)) {
+				target = living;
+			}
+		}
+		if (!st.skillFallDiveStarted) {
+			st.skillFallDiveStarted = true;
+			target = findFallAttackTarget(player, st.skillFallExtendedDetection);
+			st.skillFallTargetUuid = target == null ? null : target.getUuid();
+			TkGun.LOGGER.info("[mechaniciancombat] fall_attack target={} player={}",
+					target == null ? "none" : target.getName().getString(),
+					player.getName().getString());
+		}
+
+		if (player.isOnGround()) {
+			finishSkillFallAttack(player, st, now);
+			return;
+		}
+		if (!st.skillFallHeatEffectStarted) {
+			st.skillFallHeatEffectStarted = true;
+			startFallAttackHeatEffect(player);
+		}
+
+		Vec3d from = player.getBoundingBox().getCenter();
+		Vec3d direction;
+		if (target != null) {
+			direction = target.getBoundingBox().getCenter().subtract(from);
+		} else {
+			Vec3d current = player.getVelocity();
+			Vec3d horizontal = new Vec3d(current.x, 0.0D, current.z);
+			if (horizontal.lengthSquared() < 1.0E-6D) {
+				double yaw = Math.toRadians(player.getYaw());
+				horizontal = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw));
+			}
+			direction = horizontal.normalize().multiply(0.35D)
+					.add(0.0D, -1.0D, 0.0D);
+		}
+		direction = direction.lengthSquared() < 1.0E-8D
+				? new Vec3d(0.0D, -1.0D, 0.0D) : direction.normalize();
+		player.setVelocity(direction.multiply(TkGun.SKILL_FALL_DIVE_SPEED));
+		player.velocityModified = true;
+		if (target != null && direction.horizontalLengthSquared() > 1.0E-6D) {
+			float yaw = (float) Math.toDegrees(
+					Math.atan2(-direction.x, direction.z));
+			player.setYaw(yaw);
+			player.setHeadYaw(yaw);
+			player.setBodyYaw(yaw);
+		}
+	}
+
+	private static void startFallAttackHeatEffect(ServerPlayerEntity player) {
+		ServerWorld world = player.getServerWorld();
+		world.playSound(null, player.getX(), player.getY(), player.getZ(),
+				SoundEvents.BLOCK_SCULK_SHRIEKER_SHRIEK,
+				SoundCategory.PLAYERS, 1.0F, 1.0F);
+		com.tk.gun.net.GunLocatorVentPayload payload =
+				new com.tk.gun.net.GunLocatorVentPayload(
+						player.getId(), player.getX(), player.getY() + 1.0D,
+						player.getZ());
+		for (ServerPlayerEntity viewer :
+				player.getServer().getPlayerManager().getPlayerList()) {
+			if (viewer.getServerWorld() == world) {
+				ServerPlayNetworking.send(viewer, payload);
+			}
+		}
+	}
+
+	private static LivingEntity findFallAttackTarget(ServerPlayerEntity player,
+			boolean extendedDetection) {
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw))
+				.normalize();
+		double searchLength = TkGun.SKILL_FALL_SEARCH_LENGTH
+				* (extendedDetection ? 2.0D : 1.0D);
+		Vec3d center = player.getPos().add(
+				forward.multiply(searchLength * 0.5D));
+		double halfWidth = TkGun.SKILL_FALL_SEARCH_WIDTH * 0.5D;
+		ServerWorld world = player.getServerWorld();
+		net.minecraft.util.math.Box area = new net.minecraft.util.math.Box(
+				center.x - halfWidth, world.getBottomY(), center.z - halfWidth,
+				center.x + halfWidth, player.getY(), center.z + halfWidth);
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		Vec3d eye = player.getEyePos();
+		for (Entity candidate : world.getOtherEntities(player, area,
+				entity -> entity instanceof LivingEntity && entity.isAlive()
+						&& entity.canHit() && !entity.isSpectator()
+						&& !CombatTargeting.isGolem(entity)
+						&& CombatTargeting.isTargetable(entity))) {
+			Vec3d targetCenter = candidate.getBoundingBox().getCenter();
+			if (targetCenter.y >= player.getY()
+					|| !hasBlockLineOfSight(player, eye, targetCenter)) {
+				continue;
+			}
+			double distance = targetCenter.squaredDistanceTo(eye);
+			if (distance < nearestDistance) {
+				nearestDistance = distance;
+				nearest = (LivingEntity) candidate;
+			}
+		}
+		return nearest;
+	}
+
+	private static void finishSkillFallAttack(ServerPlayerEntity player,
+											  PState st, long now) {
+		if (st.skillFallImpactDone) {
+			return;
+		}
+		st.skillFallImpactDone = true;
+		if (st.skillJumpThrusterFlight) {
+			finishBackpackSpecialThrust(player, now);
+			st.skillJumpThrusterFlight = false;
+		}
+		st.skillFallTargetUuid = null;
+		refillMagazineAfterFallAttack(player, st);
+		player.removeStatusEffect(StatusEffects.SLOW_FALLING);
+		player.fallDistance = 0.0F;
+		player.setVelocity(0.0D, 0.0D, 0.0D);
+		player.velocityModified = true;
+
+		ServerWorld world = player.getServerWorld();
+		Vec3d center = player.getBoundingBox().getCenter();
+		world.playSound(null, player.getX(), player.getY(), player.getZ(),
+				SoundEvent.of(TkGun.id("golem_explosion")),
+				SoundCategory.PLAYERS, 1.1F, 1.0F);
+		world.spawnParticles(ParticleTypes.EXPLOSION_EMITTER,
+				center.x, center.y, center.z, 1,
+				0.0D, 0.0D, 0.0D, 0.0D);
+		double radius = TkGun.SKILL_FALL_EXPLOSION_RADIUS;
+		net.minecraft.util.math.Box area = net.minecraft.util.math.Box.of(
+				center, radius * 2.0D, radius * 2.0D, radius * 2.0D);
+		for (LivingEntity target : world.getEntitiesByClass(
+				LivingEntity.class, area,
+				entity -> entity != player && entity.isAlive()
+						&& !entity.isSpectator() && !CombatTargeting.isGolem(entity)
+						&& CombatTargeting.isTargetable(entity))) {
+			Vec3d targetCenter = target.getBoundingBox().getCenter();
+			double distance = targetCenter.distanceTo(center);
+			if (distance > radius) {
+				continue;
+			}
+			double falloff = 1.0D - distance / radius;
+			target.damage(player.getDamageSources().playerAttack(player),
+					TkGun.SKILL_FALL_EXPLOSION_DAMAGE * (float) falloff);
+			Vec3d push = targetCenter.subtract(center);
+			Vec3d horizontal = new Vec3d(push.x, 0.0D, push.z);
+			if (horizontal.lengthSquared() > 1.0E-6D) {
+				horizontal = horizontal.normalize();
+				target.takeKnockback(1.4D * falloff,
+						horizontal.x, horizontal.z);
+			}
+		}
+		st.skillJumpResumeSprint = false;
+		completeDodgeCooldownAfterSkillJump(st);
+		setState(player.getServer(), player,
+				TkGun.State.FALL_ATTACK_RECOVERY,
+				TkGun.SKILL_FALL_RECOVERY_TICKS);
+		TkGun.LOGGER.info("[mechaniciancombat] fall_attack landed -> recovery player={}",
+				player.getName().getString());
+	}
+
+	private static void refillMagazineAfterFallAttack(ServerPlayerEntity player,
+													  PState st) {
+		int capacity = TkGun.magazineCapacity(player, false);
+		int needed = Math.max(0, Math.min(capacity, st.mag));
+		if (needed <= 0) {
+			return;
+		}
+		String ammoId = st.magAmmo;
+		if (ammoId == null || ammoId.isEmpty()) {
+			ammoId = com.tk.gun.item.GunAmmoData.selectedAmmoId(player);
+			needed = capacity;
+		}
+		if (ammoId.isEmpty()
+				|| !com.tk.gun.item.GunAmmoData.consumeExpected(
+						player, ammoId, needed)) {
+			return;
+		}
+		if (!ammoId.equals(st.magAmmo)) {
+			st.magAmmo = ammoId;
+			st.magAmmoStack =
+					com.tk.gun.item.GunAmmoData.selectedAmmo(player).copyWithCount(1);
+			st.magExplosive =
+					com.tk.gun.item.GunAmmoData.selectedIsExplosive(player);
+			st.lastSavedAmmo = ammoId;
+		}
+		st.mag = 0;
+		persistHipMagazine(player, st, true);
+		TkGun.LOGGER.info("[mechaniciancombat] fall_attack landed -> refilled {} rounds of {} player={}",
+				needed, ammoId, player.getName().getString());
+	}
+
+	/** Handles ordinary long-airborne idle and the landing-roll fallback. */
+	private static void tickLongAirborne(ServerPlayerEntity player, PState st, long now) {
+		if (player.isOnGround()) {
+			boolean landingRoll = player.isAlive() && TkGun.holdingGun(player)
+					&& st.landingRollArmed && !st.airborneDisqualified
+					&& !isAirborneActionState(st.state);
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			st.airborneDisqualified = false;
+			if (landingRoll) {
+				startAirborneLandingRoll(player, st, now);
+			} else if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (!GunAirborneRules.isOrdinaryAirborne(player) || isAirborneActionState(st.state)) {
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			st.airborneDisqualified = true;
+			if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (!TkGun.holdingGun(player)) {
+			boolean wasIdle = st.airborneIdle;
+			st.airborneIdle = false;
+			st.landingRollArmed = false;
+			if (wasIdle) {
+				rebroadcast(player);
+			}
+			return;
+		}
+
+		if (st.airborneDisqualified) {
+			return;
+		}
+		boolean shouldIdle = player.fallDistance > GunAirborneRules.IDLE_AFTER_DISTANCE;
+		if (shouldIdle != st.airborneIdle) {
+			st.airborneIdle = shouldIdle;
+			rebroadcast(player);
+			if (shouldIdle) {
+				TkGun.LOGGER.info("[mechaniciancombat] gun airborne over one block -> idle player={}",
+						player.getName().getString());
+			}
+		}
+	}
+
+	private static boolean isAirborneActionState(TkGun.State state) {
+		return state == TkGun.State.ROLL || state == TkGun.State.ROLL_TO_IDLE
+				|| state == TkGun.State.ROLL_TO_RUN
+				|| state == TkGun.State.SLIDE || state == TkGun.State.SLIDE_READY
+				|| state == TkGun.State.AIM_ROLL || state == TkGun.State.AIM_SLIDE
+				|| state == TkGun.State.OVERHEAT || state == TkGun.State.OVER
+				|| state == TkGun.State.SKILL_JUMP
+				|| state == TkGun.State.FALL_ATTACK
+				|| state == TkGun.State.FALL_ATTACK_RECOVERY
+				|| state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_GATHER
+				|| state == TkGun.State.FORTRESS_SKILL_HIT;
+	}
+
+	private static void startAirborneLandingRoll(ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null || !player.isAlive() || !TkGun.holdingGun(player)) {
+			return;
+		}
+		float yaw = (float) Math.toRadians(player.getYaw());
+		Vec3d facing = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
+
+		boolean wasOverheat = st.state == TkGun.State.OVERHEAT;
+		clearPendingShots(player, st, "long airborne landing roll");
+		player.stopUsingItem();
+		player.removeStatusEffect(StatusEffects.SLOWNESS);
+		restoreLastFocusAmmoSelection(player, st);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		if (wasOverheat) {
+			st.overheatUntil = 0;
+			st.heat = 0.0F;
+		}
+
+		// Automatic rolls ignore the manual dodge lock, but retain the normal
+		// roll speed window so the landing does not become a no-op.
+		st.lastDodgeAt = now;
+		st.speedBoostUntil = 0;
+		st.slideBoostApplied = false;
+		st.lastDodgeKind = 1;
+		st.dashUntil = now + GunStateMachine.dashTicksFor(player);
+		st.rollRequestX = facing.x;
+		st.rollRequestZ = facing.z;
+		startFallbackRoll(player, st, now);
+		TkGun.LOGGER.info("[mechaniciancombat] long airborne landing -> facing roll player={}",
+				player.getName().getString());
+	}
+
+	private static void tickSlide(ServerPlayerEntity player, PState st, long now) {
+		MinecraftServer server = player.getServer();
+		int slideDuration = Math.max(TkGun.SLIDE_TICKS, st.slideDurationTicks);
+		double slideDistance = TkGun.SLIDE_DISTANCE
+				* Math.max(1.0D, st.slideDistanceMultiplier);
+		if (now < st.slideUntil) {
+			player.forwardSpeed = 0.0F;
+			player.sidewaysSpeed = 0.0F;
+			player.upwardSpeed = 0.0F;
+			if (now != st.slideLastProcessedTick) {
+				st.slideLastProcessedTick = now;
+				st.slideElapsedTicks = Math.min(slideDuration,
+						st.slideElapsedTicks + 1);
+				double dx = player.getX() - st.slideFromX;
+				double dz = player.getZ() - st.slideFromZ;
+				double projected = dx * st.slideDirX + dz * st.slideDirZ;
+				if (projected >= slideDistance - 0.05D) {
+					st.slideUntil = now;
+					st.slideCurrentSpeed = 0.0D;
+					finishBackpackSpecialThrust(player, now);
+				} else {
+					double speed = slideTickSpeed(slideDistance, slideDuration,
+							st.slideElapsedTicks);
+					st.slideCurrentSpeed = speed;
+					Vec3d velocity = player.getVelocity();
+					player.setVelocity(st.slideDirX * speed, velocity.y,
+							st.slideDirZ * speed);
+					player.velocityModified = true;
+				}
+			}
+			if (player.getWorld().getTime() % 2 == 0) {
+				player.getServerWorld().spawnParticles(ParticleTypes.CLOUD,
+						player.getX(), player.getY() + 0.15, player.getZ(), 2, 0.2, 0.05, 0.2, 0.02);
+			}
+		} else if (st.slideMeasuring) {
+			// 滑完把**实测位移**打进日志：用户要 3~4 格，这条数字就是验收标准，别靠看
+			st.slideMeasuring = false;
+			finishBackpackSpecialThrust(player, now);
+			GunStateMachine.extendSpeedBoostAfterSlide(player, st, now);
+			// 滑铲结束后再锁 1 秒；从起铲时刻算会让最后一段滑行吃掉冷却。
+			st.dodgeBlockUntil = Math.max(st.dodgeBlockUntil, now + 20);
+			double dx = player.getX() - st.slideFromX;
+			double dz = player.getZ() - st.slideFromZ;
+			TkGun.LOGGER.info("[mechaniciancombat] 滑铲结束：实测位移 {}(水平 {}) 格，理论 {} 格，时长 {} tick",
+					round3(Math.sqrt(dx * dx + dz * dz)),
+					round3(dx * st.slideDirX + dz * st.slideDirZ),
+					round3(slideDistance), slideDuration);
+			st.slideDistanceMultiplier = 1.0D;
+			st.slideDurationTicks = TkGun.SLIDE_TICKS;
+			st.slideCurrentSpeed = 0.0D;
+			// 滑到终点时右键仍按着则播放 sliding_ready 收势；滑行中右键走 startSlideBrace。
+			if (TkGun.holdingGun(player) && player.isUsingItem() && !TkGun.State.isAiming(st.state)) {
+				TkGun.LOGGER.info("[mechaniciancombat] 滑铲自然结束且右键仍按着 -> 播收势 sliding_ready 玩家={}",
+						player.getName().getString());
+				startSlideReady(player);
+			}
+		}
+	}
+
+	/**
+	 * Closed-form distance curve D * (2s - s^2). Consecutive values give an
+	 * exactly distance-limited impulse without feeding collision correction or
+	 * off-axis movement back into the controller.
+	 */
+	private static double slideTickSpeed(double distance, int duration, int tick) {
+		double before = MathHelper.clamp((tick - 1) / (double) duration,
+				0.0D, 1.0D);
+		double after = MathHelper.clamp(tick / (double) duration,
+				0.0D, 1.0D);
+		double beforeDistance = distance * before * (2.0D - before);
+		double afterDistance = distance * after * (2.0D - after);
+		return Math.max(0.0D, afterDistance - beforeDistance);
+	}
+
+	/** 玩家现在是不是在滑铲里（给 BowgunItem 判断"滑到一半按右键 = 收势接举枪"）。 */
+	/** 调试/验收用：跳过"疾跑+蹲+落地"的输入判定直接起一次滑铲（/mechaniciancombat slide）。 */
+	public static void forceSlide(ServerPlayerEntity player) {
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		st.lastDodgeKind = 2;
+		st.slideUntil = 0;                 // 允许立刻起铲
+		st.slideCooldownUntil = 0;
+		Vec3d look = player.getRotationVec(1.0F);
+		Vec3d flat = new Vec3d(look.x, 0.0, look.z).normalize();
+		st.slideDurationTicks = TkGun.SLIDE_TICKS;
+		st.slideUntil = now + st.slideDurationTicks;
+		st.slideDirX = flat.x;
+		st.slideDirZ = flat.z;
+		st.slideStart = now;
+		st.slideFromX = player.getX();
+		st.slideFromZ = player.getZ();
+		st.slideMeasuring = true;
+		st.slideBoostApplied = false;
+		st.slideDistanceMultiplier = 1.0D;
+		int thrusterDuration = TkGun.SLIDE_TICKS
+				* TkGun.SLIDE_THRUSTER_DURATION_MULTIPLIER;
+		if (beginBackpackSpecialThrust(player, now, now + thrusterDuration)) {
+			st.slideDistanceMultiplier = TkGun.SLIDE_THRUSTER_DISTANCE_MULTIPLIER;
+			st.slideDurationTicks = thrusterDuration;
+			st.slideUntil = now + st.slideDurationTicks;
+		}
+		st.slideElapsedTicks = 0;
+		st.slideLastProcessedTick = now;
+		double v0 = slideTickSpeed(TkGun.SLIDE_DISTANCE
+				* st.slideDistanceMultiplier, st.slideDurationTicks, 1);
+		st.slideCurrentSpeed = v0;
+		player.setVelocity(flat.x * v0, player.getVelocity().y, flat.z * v0);
+		player.velocityModified = true;
+		setState(player.getServer(), player, TkGun.State.SLIDE, st.slideDurationTicks);
+		consumeSlideFocus(player, st, now);
+		playSound(player, TkGun.SND_VENT, 0.5F, 1.6F);
+	}
+
+	public static boolean isSliding(ServerPlayerEntity player) {
+		PState st = state(player);
+		return player.getWorld().getTime() < st.slideUntil;
+	}
+
+	/**
+	 * 滑铲收势：播放 {@code sliding_ready}，结束后回到 IDLE 或重新举枪。
+	 *
+	 * <p>触发条件是"**滑铲自然滑到终点时右键还按着**"（见 {@code tickSlide} 里滑完那一下）。
+	 * 滑铲中按右键走更快的 {@link #startSlideBrace} 路径。
+	 */
+	public static void startSlideReady(ServerPlayerEntity player) {
+		PState st = state(player);
+		st.slideUntil = 0;                      // 立刻结束滑行
+		finishBackpackSpecialThrust(player, player.getWorld().getTime());
+		// 收势之后的一小段时间内右键 = 快速部署（AIM_FAST）——"滑铲里按右键更快进架枪"
+		st.fastAimUntil = player.getWorld().getTime() + 60;
+		setState(player.getServer(), player, TkGun.State.SLIDE_READY, TkGun.SLIDE_READY_TICKS);
+		playSound(player, TkGun.SND_BOLT, 0.5F, 1.3F);
+	}
+
+	/** 收势结束后恢复 IDLE；若仍处于专注则重新进入快速举枪。 */
+	private static void tickSlideReady(ServerPlayerEntity player, PState st, long now) {
+		if (st.state != TkGun.State.SLIDE_READY || now < st.stateUntil) {
+			return;
+		}
+		st.state = TkGun.State.IDLE;
+		st.stateUntil = 0;
+		// 仅当服务端仍标记为专注时重新举枪；普通滑铲结束直接回 IDLE。
+		if (st.deployed && TkGun.holdingGun(player)) {
+			st.fastAimUntil = now + 60;
+			startAim(player);
+		}
+	}
+
+	/** 举枪时减速（原版只对 BOW/CROSSBOW 这类 useAction 减速，我们自己的物品要手写）。 */
+	private static void tickAimSlow(ServerPlayerEntity player, PState st) {
+		if (!TkGun.holdingGun(player)) {
+			return;
+		}
+		if (aimInputLocked(player)) {
+			return;
+		}
+		boolean aiming = player.isUsingItem() && player.getActiveHand() == Hand.MAIN_HAND;
+		if (!aiming || player.getWorld().getTime() < st.slideUntil) {
+			return;
+		}
+		// **蹲射预备 / 翻滚 / 滑铲 / 翻滚加速期间，长按右键都不减速**（用户 2026-10-17）：
+		// 这些状态下右手按着右键只是"顺手"，不该把速度和动作按住；HUD/准星那套不受影响。
+		if (TkGun.State.isAiming(st.state) || st.state == TkGun.State.ROLL
+				|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY) {
+			return;
+		}
+		// **翻滚后的加速冲刺期间不算瞄准**（用户 2026-10-17 保留的那半）：
+		// 疾跑不再挡瞄准 —— 用户："撤销原版疾跑不允许瞄准的设定，在原版疾跑状态下瞄准会终止疾跑并
+		// 进入站立射击状态"；终止疾跑由下面的 `player.setSprinting(false)` 负责（客户端也同步压一次）。
+		if (player.getWorld().getTime() < st.dashUntil) {
+			return;
+		}
+		// **瞄着就取消疾跑**（用户 2026-10-17："将原版疾跑状态下按瞄准按键调整为取消疾跑"）。
+		// 原版自己就不允许"用着物品还疾跑"（拉弓/吃东西都是），我们这把枪是自定义物品，得手写这一条。
+		// ⚠️ 必须放在下面那个"速度 > 0.03 才处理"的判断**外面**：站着不动时按瞄准也得把疾跑清掉，
+		//    否则一走动又直接是疾跑（客户端那边同步也做了一份，见 TkGunClient#trackMovement）。
+		player.setSprinting(false);
+		Vec3d v = player.getVelocity();
+		Vec3d flat = new Vec3d(v.x, 0.0, v.z);
+		if (flat.length() > 0.03D) {
+			Vec3d slowed = flat.multiply(0.45D);
+			player.setVelocity(slowed.x, v.y, slowed.z);
+			player.velocityModified = true;
+		}
+	}
+
+	/** 给别的 mod（比如战利品/成就）用：玩家附近掉落的子弹壳。 */
+	public static void scatterShell(ServerPlayerEntity player, ItemStack shell) {
+		ItemEntity e = new ItemEntity(player.getServerWorld(), player.getX(), player.getY() + 1.0, player.getZ(), shell);
+		player.getServerWorld().spawnEntity(e);
+	}
+
+	/**
+	 * **翻滚打断"过热 / Focus_over"**：清掉缓慢、复位专注标记、过热顺带清掉过热计时，
+	 * 然后广播 ROLL（动画就被翻滚接管了）。
+	 *
+	 * <p>两条路径共用：① combat_roll 的翻滚事件（{@link #onRollStarted}）；
+	 * ② `tickAll` 里的"高速位移兜底"（事件万一没到，Alt 翻滚也得能打断）。
+	 *
+	 * <p>用户 2026-10-17："Overheat 和 Focus_over 状态下输入翻滚将会中断动画并清空缓慢效果"。
+	 */
+	private static void interruptForRoll(ServerPlayerEntity player, PState st, String reason) {
+		boolean wasOverheat = st.state == TkGun.State.OVERHEAT;
+		st.rollStartedFromFocus = st.deployed;
+		clearPendingShots(player, st, "翻滚离开专注");
+		player.removeStatusEffect(net.minecraft.entity.effect.StatusEffects.SLOWNESS);
+		restoreLastFocusAmmoSelection(player, st);
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.stateUntil = 0;
+		if (wasOverheat) {
+			st.overheatUntil = 0;                      // 翻滚把过热也打断（不然凉下来还会自己接着连发）
+			st.heat = 0.0F;
+		}
+		broadcastRoll(player, com.tk.gun.CombatRollHook.ROLL_DURATION);
+		TkGun.LOGGER.info("[mechaniciancombat] {} 里翻滚（{}）-> 打断动画 + 清掉缓慢 玩家={}",
+				wasOverheat ? "过热" : "Focus_over 过门", reason, player.getName().getString());
+	}
+
+	/**
+	 * **防滚一次后的"强制位移滑铲"**（用户 2026-10-17："添加一段强制位移并使用 sliding 动画…
+	 * 翻滚一次后不允许使用模组翻滚并执行 sliding 状态"）。
+	 *
+	 * <p>和 `tickSlide` 的起手完全同一套数：沿水平视线给一次初速（`2×SLIDE_DISTANCE/SLIDE_TICKS`），
+	 * 状态切 `SLIDE`（客户端播 `sliding`），`slideUntil` 管减速与收尾。
+	 */
+	private static void startModSlide(ServerPlayerEntity player, PState st, long now) {
+		Vec3d flat = new Vec3d(st.rollRequestX, 0.0D, st.rollRequestZ);
+		if (flat.lengthSquared() < 1.0E-4D) {
+			Vec3d velocity = player.getVelocity();
+			flat = new Vec3d(velocity.x, 0.0D, velocity.z);
+		}
+		if (flat.lengthSquared() < 1.0E-4D) {
+			Vec3d look = player.getRotationVec(1.0F);
+			flat = new Vec3d(look.x, 0.0D, look.z);
+		}
+		if (flat.lengthSquared() < 1.0E-6D || player.getServer() == null) {
+			return;
+		}
+		flat = flat.normalize();
+		// The request is camera-relative on the client. Commit the matching
+		// body yaw so a decoupled camera cannot leave the model facing elsewhere.
+		float slideYaw = (float) Math.toDegrees(Math.atan2(-flat.x, flat.z));
+		player.setYaw(slideYaw);
+		player.setBodyYaw(slideYaw);
+		player.setHeadYaw(slideYaw);
+		st.slideDistanceMultiplier = 1.0D;
+		st.slideDurationTicks = TkGun.SLIDE_TICKS;
+		int thrusterDuration = TkGun.SLIDE_TICKS
+				* TkGun.SLIDE_THRUSTER_DURATION_MULTIPLIER;
+		if (beginBackpackSpecialThrust(player, now, now + thrusterDuration)) {
+			st.slideDistanceMultiplier = TkGun.SLIDE_THRUSTER_DISTANCE_MULTIPLIER;
+			st.slideDurationTicks = thrusterDuration;
+		}
+		st.slideElapsedTicks = 0;
+		st.slideLastProcessedTick = now;
+		double v0 = slideTickSpeed(TkGun.SLIDE_DISTANCE
+				* st.slideDistanceMultiplier, st.slideDurationTicks, 1);
+		st.slideCurrentSpeed = v0;
+		player.setVelocity(flat.x * v0, player.getVelocity().y, flat.z * v0);
+		player.velocityModified = true;
+		// 和 tickSlide 的自然滑铲保持同一套完整状态；否则后续 tick 会读到默认 0 方向，
+		// 第一帧就把速度压成 0，表现成“刚滑一下就停”。
+		clearPendingShots(player, st, "滑铲离开专注");
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.slideDirX = flat.x;
+		st.slideDirZ = flat.z;
+		st.slideFromX = player.getX();
+		st.slideFromZ = player.getZ();
+		st.slideStart = now;
+		st.slideUntil = now + st.slideDurationTicks;
+		st.slideCooldownUntil = now + TkGun.SLIDE_COOLDOWN;
+		st.slideMeasuring = true;
+		st.slideBoostApplied = false;
+		setState(player.getServer(), player, TkGun.State.SLIDE, st.slideDurationTicks);
+		consumeSlideFocus(player, st, now);
+		playSound(player, TkGun.SND_VENT, 0.5F, 1.6F);   // 铲地摩擦（和原滑铲同一套音）
+		TkGun.LOGGER.info("[mechaniciancombat] 翻滚后再按 Alt -> 强制位移滑铲（sliding 动画）+ 屏蔽翻滚/滑铲 20 tick（1 秒）玩家={}",
+				player.getName().getString());
+	}
+
+	private static void startFallbackRoll(ServerPlayerEntity player, PState st, long now) {
+		Vec3d direction = new Vec3d(st.rollRequestX, 0.0D, st.rollRequestZ);
+		if (direction.lengthSquared() < 1.0E-4D) {
+			Vec3d velocity = player.getVelocity();
+			direction = new Vec3d(velocity.x, 0.0D, velocity.z);
+		}
+		if (direction.lengthSquared() < 1.0E-4D) {
+			direction = new Vec3d(player.sidewaysSpeed, 0.0D, player.forwardSpeed)
+					.rotateY(-(float) Math.toRadians(player.getYaw()));
+		}
+		if (direction.lengthSquared() < 1.0E-4D) {
+			Vec3d look = player.getRotationVec(1.0F);
+			direction = new Vec3d(look.x, 0.0D, look.z);
+		}
+		if (direction.lengthSquared() < 1.0E-6D) {
+			return;
+		}
+		direction = direction.normalize();
+		double dashSpeed = rollDashSpeed(direction);
+		st.rollRequestX = 0.0D;
+		st.rollRequestZ = 0.0D;
+		player.setVelocity(direction.x * dashSpeed,
+				player.getVelocity().y, direction.z * dashSpeed);
+		player.velocityModified = true;
+		st.fallbackRollReadyAt = now + FALLBACK_ROLL_COOLDOWN_TICKS;
+		spawnNativeRollVisuals(player);
+		broadcastRoll(player, CombatRollHook.ROLL_DURATION);
+		TkGun.LOGGER.info("[mechaniciancombat] 无 Combat Roll：执行模组内置翻滚，速度={} 冷却 {} tick 玩家={}",
+				dashSpeed, FALLBACK_ROLL_COOLDOWN_TICKS, player.getName().getString());
+	}
+
+	/**
+	 * Full-suit input outside the gun state machine. Combat Roll owns the physical
+	 * animation when installed; otherwise this path supplies the same dash impulse.
+	 */
+	private static void handleArmorDodgeRequest(ServerPlayerEntity player, PState st,
+												float directionX, float directionZ) {
+		long now = player.getWorld().getTime();
+		st.rollRequestX = directionX;
+		st.rollRequestZ = directionZ;
+		if (armorDodgeUnavailable(st, now)) {
+			return;
+		}
+		if (!CombatRollHook.isInstalled()) {
+			startArmorDodge(player, st, now, true);
+		}
+	}
+
+	/** Entry point for Combat Roll's server event when no gun is held. */
+	public static boolean onArmorRollStarted(ServerPlayerEntity player) {
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		if (TkGun.holdingGun(player)
+				|| !com.tk.gun.item.MechanicianUndersuitItem
+						.canUseArmorDodge(player)) {
+			return false;
+		}
+		return startArmorDodge(player, st, now, false);
+	}
+
+	private static boolean startArmorDodge(ServerPlayerEntity player, PState st,
+										  long now, boolean fallbackRoll) {
+		if (st.lastArmorDodgeAt == now) {
+			return true;
+		}
+		if (armorDodgeUnavailable(st, now)) {
+			return false;
+		}
+		st.lastArmorDodgeAt = now;
+		st.armorDodgeCooldownPending = true;
+		st.armorDodgeCooldownUntil = 0L;
+		st.armorDodgeBoostUntil = now + GunStateMachine.DASH_TICKS;
+		st.speedBoostUntil = 0L;
+		st.slideBoostApplied = false;
+		// Full armor outside a gun never enters ROLL/SLIDE gun states or the
+		// roll-to-slide cycle. It only receives the roll and its speed reward.
+		st.state = TkGun.State.IDLE;
+		st.stateUntil = 0L;
+		st.deployed = false;
+		GunStateMachine.tickDash(player, st, now);
+		if (fallbackRoll) {
+			startArmorFallbackRoll(player, st, now);
+		}
+		rebroadcast(player);
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] 全套盔甲翻滚 -> 加速 {} tick，加速结束后冷却 {} tick 玩家={}",
+				GunStateMachine.DASH_TICKS, ARMOR_DODGE_COOLDOWN_TICKS,
+				player.getName().getString());
+		return true;
+	}
+
+	private static boolean armorDodgeUnavailable(PState st, long now) {
+		return now < st.armorDodgeCooldownUntil
+				|| st.armorDodgeCooldownPending
+				|| now < st.armorDodgeBoostUntil;
+	}
+
+	private static void startArmorFallbackRoll(ServerPlayerEntity player,
+											  PState st, long now) {
+		Vec3d direction = new Vec3d(st.rollRequestX, 0.0D, st.rollRequestZ);
+		st.rollRequestX = 0.0D;
+		st.rollRequestZ = 0.0D;
+		if (direction.lengthSquared() < 1.0E-4D) {
+			Vec3d velocity = player.getVelocity();
+			direction = new Vec3d(velocity.x, 0.0D, velocity.z);
+		}
+		if (direction.lengthSquared() < 1.0E-4D) {
+			Vec3d look = player.getRotationVec(1.0F);
+			direction = new Vec3d(look.x, 0.0D, look.z);
+		}
+		if (direction.lengthSquared() < 1.0E-6D) {
+			return;
+		}
+		direction = direction.normalize();
+		double speed = rollDashSpeed(direction);
+		player.setVelocity(direction.x * speed, player.getVelocity().y,
+				direction.z * speed);
+		player.velocityModified = true;
+		spawnNativeRollVisuals(player);
+		TkGun.LOGGER.info("[mechaniciancombat] 全套盔甲内置翻滚 速度={} 玩家={}",
+				speed, player.getName().getString());
+	}
+
+	/** Advances the armor-only sequence: reward first, cooldown second. */
+	private static boolean tickArmorDodge(PState st, long now) {
+		if (st.armorDodgeCooldownPending
+				&& now >= st.armorDodgeBoostUntil) {
+			st.armorDodgeCooldownPending = false;
+			st.armorDodgeBoostUntil = 0L;
+			st.armorDodgeCooldownUntil = now + ARMOR_DODGE_COOLDOWN_TICKS;
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] 全套盔甲加速结束 -> 进入闪避冷却 {} tick",
+					ARMOR_DODGE_COOLDOWN_TICKS);
+			return true;
+		}
+		if (st.armorDodgeCooldownUntil > 0L
+				&& now >= st.armorDodgeCooldownUntil) {
+			st.armorDodgeCooldownUntil = 0L;
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] 全套盔甲闪避冷却结束 -> 可再次翻滚");
+			return true;
+		}
+		return false;
+	}
+
+	private static void spawnNativeRollVisuals(ServerPlayerEntity player) {
+		ServerWorld world = player.getServerWorld();
+		for (int i = 0; i < 10; i++) {
+			double angle = i * Math.PI / 5.0D;
+			world.spawnParticles(net.minecraft.particle.ParticleTypes.CLOUD,
+					player.getX() + Math.cos(angle) * 0.8D,
+					player.getY() + 0.9D,
+					player.getZ() + Math.sin(angle) * 0.8D,
+					1, 0.0D, 0.0D, 0.0D, 0.02D);
+		}
+	}
+
+	/** Falls back only when Combat Roll did not deliver its own physical-roll event in time. */
+	private static void tickRollFallback(ServerPlayerEntity player, PState st, long now) {
+		if (!st.rollFallbackPending || now < st.rollFallbackAt) {
+			return;
+		}
+		st.rollFallbackPending = false;
+		st.rollFallbackAt = 0;
+		if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+				|| st.state == TkGun.State.ROLL_TO_RUN
+				|| st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY
+				|| player.getVelocity().horizontalLength() >= 0.15D) {
+			return;
+		}
+		Vec3d flat = new Vec3d(st.rollRequestX, 0.0D, st.rollRequestZ);
+		if (flat.lengthSquared() < 1.0E-4D) {
+			Vec3d look = player.getRotationVec(1.0F);
+			flat = new Vec3d(look.x, 0.0D, look.z);
+		}
+		st.rollRequestX = 0.0D;
+		st.rollRequestZ = 0.0D;
+		if (flat.lengthSquared() > 1.0E-6D) {
+			flat = flat.normalize();
+			flat = flat.multiply(rollDashSpeed(flat));
+			player.setVelocity(flat.x, player.getVelocity().y, flat.z);
+			player.velocityModified = true;
+		}
+		broadcastRoll(player, CombatRollHook.ROLL_DURATION);
+		TkGun.LOGGER.info("[mechaniciancombat] Combat Roll 未启动物理翻滚 -> 延迟 {} tick 后执行兜底冲刺 玩家={}",
+				2, player.getName().getString());
+	}
+
+	private static double rollDashSpeed(Vec3d direction) {
+		double lateralWeight = Math.min(1.0D, Math.abs(direction.x));
+		return TkGun.ROLL_DASH_SPEED
+				* (1.0D + lateralWeight * (TkGun.ROLL_SIDE_SPEED_MULTIPLIER - 1.0D));
+	}
+
+	public static void broadcastRoll(ServerPlayerEntity player, int ticks) {
+		MinecraftServer server = player.getServer();
+		if (server != null) {
+			PState st = state(player);
+			long now = player.getWorld().getTime();
+			int gameplayTicks = Math.max(1, ticks);
+			int stateTicks = Math.max(gameplayTicks,
+					CombatRollHook.ROLL_STATE_TICKS);
+			// 每次真正开始翻滚都重开预输入。Alt+Z 的组合输入可能比 ROLL 状态先到，
+			// 先把队列里的专注意图转成“0.38s 预输入”；没有组合输入才清空。
+			boolean queuedFocus = st.dodgeFocusQueued
+					&& now <= st.dodgeFocusQueuedAt + DODGE_COMBO_BUFFER_TICKS;
+			boolean enteringRoll = st.state != TkGun.State.ROLL
+					&& st.state != TkGun.State.ROLL_TO_IDLE
+					&& st.state != TkGun.State.ROLL_TO_RUN;
+			if (enteringRoll) {
+				st.rollMoveIntent = false;
+				st.rollQuickFocusEligible = st.rollStartedFromFocus
+						&& TkGun.holdingGun(player);
+			}
+			st.rollFocusRequested = queuedFocus && st.rollQuickFocusEligible;
+			st.dodgeFocusQueued = false;
+			st.dodgeFocusQueuedAt = 0;
+			st.rollInputAccepted = false;
+			st.rollFocusAt = now + com.tk.gun.CombatRollHook.ROLL_FAST_FOCUS_TICKS;
+			// 快速蹲射宽限从"翻滚玩法窗口结束"再往后算。多次路径（combat_roll 事件 / 按键兜底 /
+			// 高速位移兜底）在同一 tick 重复进来也只延长窗口，不会缩短或重复扣奖励。
+			st.rollFocusUntil = Math.max(st.rollFocusUntil,
+					now + stateTicks + ROLL_FAST_FOCUS_GRACE_TICKS);
+			if (queuedFocus) {
+				TkGun.LOGGER.info("[mechaniciancombat] ROLL 开始，专注翻滚组合预输入={} -> 0.38s 快速蹲射判定 玩家={}",
+						st.rollQuickFocusEligible, player.getName().getString());
+			}
+			st.rollStartedFromFocus = st.rollQuickFocusEligible;
+			setState(server, player, TkGun.State.ROLL, stateTicks);
+		}
+	}
+
+	/**
+	 * **翻滚开始**（`CombatRollHook` 调）：走状态机那一关 ——
+	 * 连锁闪避（翻滚↔滑铲 连着来）会被锁；每次翻滚给 3 秒加速冲刺；翻滚 = 离开专注射击。
+	 * 翻滚本身的位移/动画归 combat_roll，我们只管枪这边。
+	 */
+	public static void onRollStarted(ServerPlayerEntity player) {
+		PState st = state(player);
+		boolean startingFromFocus = st.deployed;
+		long now = player.getWorld().getTime();
+		if (SoulAnchorSkillService.isActive(player)) {
+			return;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_HIT) {
+			if (now - st.stateStarted < TkGun.FORTRESS_SKILL_HIT_DODGE_TICK) {
+				return;
+			}
+			st.overheatUntil = 0;
+			st.heat = 0.0F;
+		}
+		if (st.state == TkGun.State.FORTRESS_SKILL_LOAD
+				|| st.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
+				|| st.state == TkGun.State.FORTRESS_SKILL_GATHER) {
+			return;
+		}
+		// 滑铲/收势不能被 combat_roll 的翻滚事件半路顶掉；滑铲结束后的 1 秒锁由 dodgeBlockUntil 管。
+		if (st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY) {
+			TkGun.LOGGER.info("[mechaniciancombat] 滑铲/收势中 -> 忽略翻滚事件 玩家={}", player.getName().getString());
+			return;
+		}
+		if (st.state == TkGun.State.AIM || st.state == TkGun.State.AIM_FAST
+				|| st.state == TkGun.State.AIM_ROLL || st.state == TkGun.State.AIM_SLIDE) {
+			TkGun.LOGGER.info("[mechaniciancombat] 专注准备/快速专注中 -> 忽略迟到翻滚事件（当前 {}）玩家={}",
+					st.state, player.getName().getString());
+			return;
+		}
+		// 同一次翻滚的重复事件不重新广播/刷新状态。
+		if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+				|| st.state == TkGun.State.ROLL_TO_RUN) {
+			return;
+		}
+		// 非专注状态下，翻滚结束后的下一次 Alt 必须走滑铲。combat_roll 事件通常先于
+		// GunRollPayload 到达；这里不能抢先广播 ROLL，否则会把“滑铲”覆盖成第二次翻滚。
+		if (st.lastDodgeKind == 1 && !st.deployed && !st.rollInputAccepted
+				&& now < st.dashUntil && st.lastDodgeAt != now) {
+			TkGun.LOGGER.info("[mechaniciancombat] 翻滚事件：下一次 Alt 应由滑铲接管，事件先忽略 玩家={}",
+					player.getName().getString());
+			return;
+		}
+		if (st.lastDodgeKind == 1 && !st.deployed && now >= st.dashUntil) {
+			st.lastDodgeKind = 0;
+			TkGun.LOGGER.info("[mechaniciancombat] roll event: slide window expired -> restart roll cycle player={}",
+					player.getName().getString());
+		}
+		// 滑铲结束后的 1 秒锁同样约束 combat_roll 自己触发的事件。
+		// 过热 / Focus_over 仍允许翻滚打断，避免恢复流程被锁死。
+		if (now < st.dodgeBlockUntil && st.state != TkGun.State.OVERHEAT
+				&& st.state != TkGun.State.OVER) {
+			TkGun.LOGGER.info("[mechaniciancombat] 翻滚事件：滑铲后冷却中，忽略 玩家={}", player.getName().getString());
+			return;
+		}
+		// **先按"一次闪避"结算**：3 秒 +30% 加速冲刺。
+		// 用户 2026-10-17："将专注状态下进行翻滚和过热状态下的翻滚后给予上文提过的翻滚后获得的相同效果"
+		// —— 也就是三种翻滚（普通 / 专注里 / 过热里）都要拿到同一套冲刺奖励。
+		// 以前这里把过热分支放在前面**直接 return**，那两种翻滚就少了这个奖励。
+		// （连锁闪避冷却里 `onDodgeStarted` 自己会拒绝并给提示，返回 true = 锁着）
+		boolean rewardAlreadyGranted = st.rollFallbackPending || st.rollInputAccepted;
+		st.rollFallbackPending = false;
+		st.rollFallbackAt = 0;
+		boolean locked = rewardAlreadyGranted
+				? false : GunStateMachine.onDodgeStarted(player, st, now, true);
+		// **过热 / Focus_over 里翻滚 = 打断动画 + 清掉缓慢**
+		// （用户 2026-10-17："同时 Overheat 和 Focus_over 状态下输入翻滚将会中断动画并清空缓慢效果"）。
+		// 这两段过门/结算动画本来就不该挡住闪避，所以这里一定打断（即使闪避键在冷却）。
+		if (st.state == TkGun.State.OVERHEAT || st.state == TkGun.State.OVER) {
+			interruptForRoll(player, st, "翻滚事件");
+			return;
+		}
+		if (locked) {
+			st.rollStartedFromFocus = false;
+			TkGun.LOGGER.info("[mechaniciancombat] 闪避被锁（连锁冷却中）-> 这次翻滚不给冲刺/不切枪状态 玩家={}",
+					player.getName().getString());
+			return;
+		}
+		st.rollStartedFromFocus = startingFromFocus;
+		clearPendingShots(player, st, "翻滚离开专注");
+		st.deployed = false;                 // 翻滚 = 离开专注射击
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		broadcastRoll(player, com.tk.gun.CombatRollHook.ROLL_DURATION);
+	}
+
+	/** 让别的系统也能查到玩家当前状态（客户端只读镜像）。 */
+	public static Map<UUID, PState> all() {
+		return STATES;
+	}
+
+	/**
+	 * Hitscan entity detection with a horizontal radius.
+	 *
+	 * <p>原版 {@code ProjectileUtil.raycast} 只检测实体自身碰撞箱；这里把实体碰撞箱
+	 * 向外扩 {@code radius} 格，形成"射线 + 水平判定半径"的判定。仍要求到实体碰撞箱中心
+	 * 的视线不被方块挡住，避免隔墙命中。
+	 */
+	private static net.minecraft.util.hit.EntityHitResult raycastEntityWithinRadius(
+			ServerWorld world, ServerPlayerEntity player, Vec3d start, Vec3d end, double radius) {
+		Vec3d delta = end.subtract(start);
+		double length = delta.length();
+		if (length < 1.0E-6D) {
+			return null;
+		}
+		Vec3d direction = delta.multiply(1.0D / length);
+		net.minecraft.util.math.Box search = net.minecraft.util.math.Box.from(start)
+				.stretch(delta).expand(radius);
+		net.minecraft.util.hit.EntityHitResult best = null;
+		double bestDistance = Double.MAX_VALUE;
+		for (Entity entity : world.getOtherEntities(player, search,
+				e -> e.isAlive() && !e.isSpectator() && e != player && e.canHit()
+						&& !CombatTargeting.isGolem(e))) {
+			net.minecraft.util.math.Box bounds = entity.getBoundingBox();
+			Vec3d center = bounds.getCenter();
+			double along = center.subtract(start).dotProduct(direction);
+			if (along < 0.0D) {
+				continue;                       // 只判定枪口前方，避免背后 1 格误伤
+			}
+			java.util.Optional<Vec3d> direct = bounds.raycast(start, end);
+			along = Math.min(length, along);
+			Vec3d closest = start.add(direction.multiply(along));
+			double dx = Math.max(Math.max(bounds.minX - closest.x, 0.0D), closest.x - bounds.maxX);
+			double dz = Math.max(Math.max(bounds.minZ - closest.z, 0.0D), closest.z - bounds.maxZ);
+			double gap = Math.sqrt(dx * dx + dz * dz);
+			if (gap > radius) {
+				continue;
+			}
+			Vec3d point;
+			double distance;
+			if (direct.isPresent()) {
+				point = direct.get();
+				distance = start.distanceTo(point);
+			} else {
+				// 半径命中时把落点放在目标中心，避免粒子停在目标前方 1 格。
+				point = center;
+				distance = Math.min(length, along);
+			}
+			if (distance >= bestDistance) {
+				continue;
+			}
+			net.minecraft.util.hit.BlockHitResult los = world.raycast(new RaycastContext(start, center,
+					RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+			if (los.getType() != net.minecraft.util.hit.HitResult.Type.MISS
+					&& start.distanceTo(los.getPos()) < start.distanceTo(center) - 0.05D) {
+				continue;
+			}
+			bestDistance = distance;
+			best = new net.minecraft.util.hit.EntityHitResult(entity, point);
+		}
+		return best;
+	}
+
+	/**
+	 * **一次真实出膛**：量到的枪口 + 朝向 → 射线命中（hitscan）→ 伤害 / 落点爆裂 / 弹道粒子 / 枪口粒子。
+	 *
+	 * <p>2026-10-14 从 {@link #releaseShot} 里抽出来，因为**强化的过载连射**要复用同一份：
+	 * 普通单发是"服务端排队 + 出伤帧出膛"；强化连射是"客户端按 `Focus_over_shooting` 里枪口焰的
+	 * 节奏连发 7 个开火包"，服务端每收到一个包就当场调这里一次（见 {@link #tryOverFire}）。
+	 *
+	 * @param damageMult 伤害倍率（现在只有普通单发 1.0 这一个调用方；留参数是为了以后加"蓄力/过载"类效果）
+	 */
+	private static void fireOnce(ServerPlayerEntity player, PState st, float damageMult, String ammoId,
+								 ItemStack ammoStack) {
+		MeleeImpactService.sendGunShotShake(player);
+		String ammoPath = "";
+		try {
+			ammoPath = net.minecraft.util.Identifier.tryParse(ammoId).getPath();
+		} catch (RuntimeException ignored) {
+		}
+		boolean explosive = "bolt".equals(ammoPath) || "explosive_bolt".equals(ammoPath);
+		boolean cutting = "cutting_bolt".equals(ammoPath);
+		boolean sculk = "sculk_bolt".equals(ammoPath);
+		boolean roseQuartz = "rose_quartz_bolt".equals(ammoPath);
+		// —— 枪口 / 枪管朝向 ——
+		// 优先用**客户端渲染 locator 骨骼时量出来的**（真正看得见的枪口/枪管）；
+		// 没有或不合理（离玩家太远 = 乱报）就退回服务端按 bodyYaw 算的老办法。
+		Vec3d muzzle;
+		Vec3d dir;
+		boolean usedClientMuzzle = st.fireMuzzleOk;
+		if (usedClientMuzzle) {
+			muzzle = new Vec3d(st.fireMx, st.fireMy, st.fireMz);
+			dir = new Vec3d(st.fireDx, st.fireDy, st.fireDz);
+		} else {
+			muzzle = muzzlePos(player);
+			dir = muzzleDir(player);
+		}
+		// ⚠️ 这里**不要**清 `fireMuzzleOk`！（2026-10-14 用户："第一发是对的，后面几发不在枪口"）
+		// 客户端发枪口数据是"扣扳机那一下"发的，而第 2..N 发是排队十几 tick 后才出膛的 ——
+		// 每发清一次标志的话，后面几发就会退回用服务端**固定推算**的枪口（MUZZLE_SIDE=-0.25 → 偏到枪口左边）。
+		// 保留标志 = 整梭子都用客户端量出来的真实枪口（下一发扣扳机时客户端会再刷新一次）。
+		dir = dir.normalize();
+
+		ServerWorld world = player.getServerWorld();
+		// —— v4 素材（2026-10-16）新加的 `二级加速弹壳` 粒子 ——
+		// 作者给的那 6 帧弹壳，配的动画是"整梭连射（射速越打越快）"，在我们的状态机里对应
+		// **专注里 ramp 上来之后**的那几发：从枪身右侧（抛壳口大概位置 = 枪口往回收 0.6 格）甩出去。
+		if (st.focusRamp >= TkGun.FOCUS_SHOT2_RAMP) {
+			double yaw = Math.toRadians(-player.getYaw());
+			Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, Math.sin(yaw));
+			world.spawnParticles(TkGunParticles.SHELL_BOOST,
+					muzzle.x - dir.x * 0.6D + right.x * 0.2D, muzzle.y + 0.15D,
+					muzzle.z - dir.z * 0.6D + right.z * 0.2D, 1,
+					right.x * 0.35D, 0.2D, right.z * 0.35D, 0.7D);
+		}
+		// ⚠️ 枪口在**模型自己的高度**上（作者把炮扛在腰/胯位置，实测离脚底只有 0.1~0.6 格），
+		//    贴着斜坡/台阶时这个点可能正好在一个方块里面 → 射线 0 距离就"撞"停，像卡壳。
+		//    这里沿枪管方向一点点往前挪，直到离开方块（最多 1.5 格），观感上还是从枪口出来。
+		int nudges = 0;
+		while (nudges < 15 && !world.getBlockState(net.minecraft.util.math.BlockPos.ofFloored(muzzle)).isAir()) {
+			muzzle = muzzle.add(dir.multiply(0.1D));
+			nudges++;
+		}
+		// 枪口自发光：与模型 fire1..4 的 0.2083s 枪口焰同寿命，5 tick 内由亮到暗。
+		// 位置稍微沿枪管前移，避免辉光中心被枪管挡住。
+		Vec3d glowPos = muzzle.add(dir.multiply(0.06D));
+		world.spawnParticles(TkGunParticles.MUZZLE_GLOW,
+				glowPos.x, glowPos.y, glowPos.z, 1, 0.0D, 0.0D, 0.0D, 0.0D);
+		// 熔铁矢：从枪口定位器发射满蓄力三叉戟，走真实弹丸/附魔/回收。
+		if ("bolt".equals(ammoPath)) {
+			spawnMoltenTrident(world, player, muzzle, dir, ammoStack);
+			return;
+		}
+		if ("armor_piercing_bolt".equals(ammoPath)) {
+			spawnGrapeshot(world, player, muzzle, dir, damageMult);
+			return;
+		}
+		if (roseQuartz) {
+			spawnRoseQuartz(world, player, muzzle, dir, damageMult);
+			return;
+		}
+		// —— 射线（hitscan）：先看方块、再看实体，取更近的那个 ——
+		Vec3d end = muzzle.add(dir.multiply(TkGun.HITSCAN_RANGE));
+		net.minecraft.util.hit.BlockHitResult blockHit = world.raycast(new RaycastContext(muzzle, end,
+				RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
+		double blockDist = blockHit.getType() == net.minecraft.util.hit.HitResult.Type.MISS
+				? TkGun.HITSCAN_RANGE : muzzle.distanceTo(blockHit.getPos());
+		// These three rounds use a 1.5-block horizontal cylinder around the shot ray.
+		double entityHitRadius = explosive || cutting || sculk ? 1.5D : 1.0D;
+		net.minecraft.util.hit.EntityHitResult entHit =
+				raycastEntityWithinRadius(world, player, muzzle, end, entityHitRadius);
+		double entDist = entHit == null ? Double.MAX_VALUE : muzzle.distanceTo(entHit.getPos());
+
+		Vec3d hitPos = blockHit.getType() == net.minecraft.util.hit.HitResult.Type.MISS ? end : blockHit.getPos();
+		boolean hitSomething = blockHit.getType() != net.minecraft.util.hit.HitResult.Type.MISS;
+		if (entHit != null && entDist <= blockDist) {
+			hitPos = entHit.getPos();
+			hitSomething = true;
+		}
+		net.minecraft.entity.Entity hitEntity =
+				entHit != null && entDist <= blockDist ? entHit.getEntity() : null;
+		Vec3d impactPos = hitPos;
+		boolean didHit = hitSomething;
+		Vec3d impactDir = dir;
+		if (PROBE_NEXT_SHOT) {
+			PROBE_NEXT_SHOT = false;
+			TkGun.LOGGER.info("[mechaniciancombat] 枪口实测: 枪口=({}, {}, {}) 玩家=({}, {}, {}) 相对高度={} 朝向=({}, {}, {}) 客户端量到={}",
+					round3(muzzle.x), round3(muzzle.y), round3(muzzle.z),
+					round3(player.getX()), round3(player.getY()), round3(player.getZ()),
+					round3(muzzle.y - player.getY()),
+					round3(dir.x), round3(dir.y), round3(dir.z), st.fireMuzzleOk);
+		}
+
+		// —— 落点：爆裂粒子 + 命中声 ——
+		// ⚠️ 2026-10-17 用户："删除弹头击中后的 minecraft 原版爆炸特效及其音效，并将声音替换为…imp1"：
+		//   * `world.createExplosion(...)`（非破坏性，但会**自动**放原版爆炸粒子 + 原版爆炸声）整段删掉；
+		//     那条爆炸带的**溅射伤害**也随之没有了（直伤 + 击退仍在上面的 hitscan 里）——
+		//     以后要溅射再单独写一份不带原版特效的版本。
+		//   * `ParticleTypes.EXPLOSION`（原版那团灰白爆炸云）删掉；素材自己的 `energy_xplo` + 火/烟/火花保留。
+		//   * 命中声 = 素材 `imp1.ogg`（`mechaniciancombat:imp1`），**服务端**在命中点放 → 分发后附近所有人都听得见。
+		// —— 弹道 ——
+		// ⚠️ 2026-10-15 用户："里面给了那个 bullet 的那个子弹模型，你用这个去代表那个弹丸" ——
+		//    所以那条 Flame/Smoke 铺出来的曳光粒子线**撤了**，改成真正飞出去的**子弹实体**
+		//    （`mechaniciancombat:bullet`，贴图 = 素材里的 `粒子/bullet.png`，3 帧循环）。
+		//    伤害依旧是上面这条 hitscan（瞬时、服务端权威），子弹只是画面上看得见的那颗。
+		double trail = muzzle.distanceTo(hitPos);
+		com.tk.gun.entity.BulletEntity visual =
+				spawnBullet(world, player, muzzle, dir, trail, ammoId);
+		Runnable impact = () -> applyBulletImpact(world, player, hitEntity, impactPos, didHit,
+				explosive, cutting, sculk, roseQuartz, damageMult, impactDir);
+		if (visual != null) {
+			visual.setImpactAction(impact);
+		} else {
+			impact.run();
+		}
+		TkGun.LOGGER.info("[mechaniciancombat] hitscan: 枪口=({}, {}, {}) 落点=({}, {}, {}) 距离={} 命中实体={} 客户端量到枪口={}",
+				round3(muzzle.x), round3(muzzle.y), round3(muzzle.z),
+				round3(hitPos.x), round3(hitPos.y), round3(hitPos.z), round3(trail), entHit != null,
+				usedClientMuzzle);
+
+		// —— 枪口特效 ——
+		// ⚠️ 2026-10-15 用户："**枪口，不要使用那个傀儡的、它的那个攻击特效**，因为枪口它本来就有了" ——
+		//    枪口焰本体（fire1..fire4 四段平面 + dash 速度线 + 弹壳 shell）是**作者模型自带**的，
+		//    客户端按动画里的 scale 关键帧翻出来。之前服务端在这上面又叠了一层
+		//    `energy_converge`（那是从**傀儡**那包 粒子.zip 里切出来的）+ 火焰/烟，
+		//    现在**全部撤掉**，枪口只留模型自己的表现。
+		// 弹壳本体由模型自带的 shell 骨骼和动画表现；开火时不再额外生成
+		// 原版黑灰色烟雾粒子。
+	}
+
+}

@@ -1,0 +1,27 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "CDC",
+    "ABA"
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:amethyst_shard"
+    },
+    "B": {
+      "item": "minecraft:shulker_shell"
+    },
+    "C": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    },
+    "D": {
+      "item": "minecraft:ender_chest"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:combat_backpack",
+    "count": 1
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "A A",
+    "BCB",
+    "AAA"
+  ],
+  "key": {
+    "A": {
+      "item": "mechaniciancombat:infused_leather"
+    },
+    "B": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "C": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:mechanician_undersuit",
+    "count": 1
+  }
+}

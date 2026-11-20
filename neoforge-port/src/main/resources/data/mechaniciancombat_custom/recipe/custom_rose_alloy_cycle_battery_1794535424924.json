@@ -1,0 +1,24 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    " A ",
+    "BCB",
+    " B "
+  ],
+  "key": {
+    "A": {
+      "item": "minecraft:dragon_breath"
+    },
+    "B": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "C": {
+      "item": "mechaniciancombat:rose_quartz_solution"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:rose_alloy_cycle_battery",
+    "count": 1
+  }
+}

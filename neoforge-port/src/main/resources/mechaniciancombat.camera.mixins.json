@@ -1,0 +1,41 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.tk.gun.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CombatRollCooldownMixin",
+    "GameRendererZoomMixin",
+    "FallbackShoulderCameraMixin",
+    "FallbackShoulderMouseMixin",
+    "SprintDirectionInputMixin",
+    "VanillaCrosshairMixin",
+    "ShoulderSurfingCrosshairMixin",
+    "FocusInputLockMixin",
+    "FocusMovementLockMixin",
+    "GunJumpLockMixin",
+    "AimMouseSensitivityMixin",
+    "GunAmmoScrollMixin",
+    "MiddleMouseReloadMixin",
+    "ItemCooldownProgressMixin",
+    "GunTooltipScreenMixin",
+    "GunTooltipBackgroundMixin",
+    "InventoryBackpackGuiMixin",
+    "CreativeInventoryBackpackGuiMixin",
+    "CreativeBackpackAmmoQuickMoveMixin",
+    "CreativeScreenHandlerAccessor",
+    "HandledScreenCoordinateAccessor",
+    "CreativeInventoryScreenAccessor",
+    "CombatRollInputGuardMixin",
+    "MeleeCameraShakeMixin",
+    "MeleeInputFreezeMixin",
+    "MeleeEntityFreezeRenderMixin",
+    "OffhandSwapGuardClientMixin",
+    "OffhandUseGuardClientMixin",
+    "OffhandStorageFirstPersonMixin",
+    "OffhandStorageThirdPersonMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

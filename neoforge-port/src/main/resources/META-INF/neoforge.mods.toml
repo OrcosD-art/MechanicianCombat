@@ -1,0 +1,70 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "MIT"
+issueTrackerURL = "https://github.com/3128194922/MechanicianCombat/issues"
+
+[[mods]]
+modId = "mechaniciancombat"
+version = "1.0.0-neoforge"
+displayName = "Mechanician Combat"
+authors = "codex (for slienceXUE)"
+description = '''
+Mechanician Combat NeoForge port for Minecraft 1.21.1.
+Includes third-person firearms, close combat, combat backpack attachments,
+mechanician armor, summoned constructs and their associated effects.
+'''
+
+[[mixins]]
+config = "mechaniciancombat.mixins.json"
+
+[[mixins]]
+config = "mechaniciancombat.camera.mixins.json"
+
+[[dependencies.mechaniciancombat]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1.150,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "geckolib"
+type = "required"
+versionRange = "[4.8.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "playeranimator"
+type = "required"
+versionRange = "*"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "accessories"
+type = "required"
+versionRange = "[1.1.0-beta.54,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "bettercombat"
+type = "optional"
+versionRange = "[2.4.0,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.mechaniciancombat]]
+modId = "cloth_config"
+type = "optional"
+versionRange = "*"
+ordering = "NONE"
+side = "BOTH"

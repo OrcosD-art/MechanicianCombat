@@ -1,0 +1,7 @@
+{
+  "type": "mechaniciancombat:brewing",
+  "input_item": "minecraft:leather",
+  "reagent_item": "minecraft:experience_bottle",
+  "output_item": "mechaniciancombat:infused_leather",
+  "output_count": 1
+}

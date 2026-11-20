@@ -1,0 +1,42 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.tk.gun.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ItemCooldownManagerAccessor",
+    "BrewingStandBlockEntityAccessor",
+    "MechanicianBrewingStandMixin",
+    "BrewingStandIngredientSlotMixin",
+    "BrewingStandPotionSlotMixin",
+    "TridentGravityMixin",
+    "BackpackLoyaltyPickupMixin",
+    "CreativeBackpackAmmoServerMixin",
+    "TridentEntityAccessor",
+    "FireworkRocketEntityAccessor",
+    "OffhandSwapGuardMixin",
+    "OffhandPlacementGuardMixin",
+    "BackpackFireworkSelfDamageMixin",
+    "PlayerBackpackAmmoSlotMixin",
+    "ScreenHandlerAddSlotAccessor",
+    "PlayerFallDamageMixin",
+    "GunCrouchPoseGuardMixin",
+    "OffhandUseGuardMixin"
+  ],
+  "client": [
+    "PlayerEntityRendererRigMixin",
+    "PlayerEntityRendererLayerAccessor",
+    "MechanicianVanillaArmorLayerMixin",
+    "GunMeleeAttackGuardMixin",
+    "GunVanillaAttackGuardMixin",
+    "ClientPlayerCrouchGuardMixin",
+    "ClientPlayerSprintGuardMixin",
+    "ClientPlayerSprintStartMixin",
+    "CombatPropFirstPersonMixin",
+    "BackpackMissileRenderMixin",
+    "EntityGlowColorMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

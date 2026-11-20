@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "mechaniciancombat:backpack_modification_table",
+    "mechaniciancombat:armor_modification_table",
+    "mechaniciancombat:arcane_alloy_block"
+  ]
+}

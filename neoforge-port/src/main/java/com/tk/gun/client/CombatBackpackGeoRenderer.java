@@ -1,0 +1,679 @@
+package com.tk.gun.client;
+
+import com.tk.gun.TkGun;
+import com.tk.gun.item.CombatBackpackItem;
+import com.tk.gun.item.CombatBackpackAnimation;
+import com.tk.gun.item.BackpackUpgradeData;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.LightmapTextureManager;
+import net.minecraft.client.render.RenderLayer;
+import net.minecraft.client.render.VertexConsumer;
+import net.minecraft.client.render.VertexConsumerProvider;
+import net.minecraft.client.render.model.json.ModelTransformationMode;
+import net.minecraft.client.util.math.MatrixStack;
+import net.minecraft.item.ItemStack;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Vec3d;
+import org.joml.Matrix4f;
+import org.joml.Matrix3f;
+import org.joml.Quaternionf;
+import org.joml.Vector3d;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
+import software.bernie.geckolib.cache.object.BakedGeoModel;
+import software.bernie.geckolib.cache.object.GeoBone;
+import software.bernie.geckolib.cache.object.GeoCube;
+import software.bernie.geckolib.cache.object.GeoQuad;
+import software.bernie.geckolib.cache.object.GeoVertex;
+import software.bernie.geckolib.cache.texture.AnimatableTexture;
+import software.bernie.geckolib.model.GeoModel;
+import software.bernie.geckolib.renderer.GeoItemRenderer;
+import software.bernie.geckolib.util.RenderUtil;
+
+import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
+
+/** Renders the wearable backpack at an already-transformed chest attachment point. */
+public final class CombatBackpackGeoRenderer extends GeoItemRenderer<CombatBackpackItem> {
+	private static final Identifier FLAME_TEXTURE =
+			TkGun.id("textures/entity/combat_backpack_flame.png");
+	/** Base geometry uses a 48x48 atlas; each animated flame frame is 16x16. */
+	private static final float FLAME_UV_SCALE = 3.0F;
+	private static CombatBackpackGeoRenderer accessoryInstance;
+	private static CombatBackpackGeoRenderer rigInstance;
+	private static CombatBackpackGeoRenderer previewInstance;
+	private static final java.util.Map<Integer, Vec3d> FRONT_POSITIONS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Vec3d> FRONT_LOCAL_OFFSETS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Long> FRONT_SAMPLE_TICKS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Vec3d> REAR_POSITIONS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Vec3d> REAR_LOCAL_OFFSETS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Long> REAR_SAMPLE_TICKS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Vec3d> SUMMON_LOCATORS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Long> SUMMON_LOCATOR_TICKS = new java.util.HashMap<>();
+	private static final java.util.Map<Integer,
+			java.util.Map<String, Vec3d>> MISSILE_PORT_POSITIONS =
+			new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Long> MISSILE_PORT_TICKS =
+			new java.util.HashMap<>();
+	private static final java.util.Map<Integer, Vec3d> CANONICAL_FRONT_OFFSETS =
+			new java.util.HashMap<>();
+	private static final java.util.Map<Integer, AimFilter> AIM_FILTERS =
+			new java.util.HashMap<>();
+	private static final Set<String> POSE_ISOLATION_DIAGNOSTICS = new HashSet<>();
+	private static final double AIM_DEADBAND_COS =
+			Math.cos(Math.toRadians(2.0D));
+	private static final double AIM_SMOOTHING = 0.25D;
+	private LivingEntity currentEntity;
+	private boolean suppressC3Cubes;
+	private boolean autoAimCubesOnly;
+	private boolean allowAutoAimCubeRender;
+	private boolean flamePass;
+	private boolean attachedCoreInstalled;
+	private boolean attachedMissileBox;
+	private BackpackUpgradeData.LauncherType attachedLauncherType =
+			BackpackUpgradeData.LauncherType.NONE;
+	private boolean attachedJumpThruster;
+
+	private static final class AimFilter {
+		int targetId = -1;
+		long tick = -1L;
+		Vec3d direction = Vec3d.ZERO;
+	}
+
+	private CombatBackpackGeoRenderer(GeoModel<CombatBackpackItem> model) {
+		super(model);
+	}
+
+	public static CombatBackpackGeoRenderer getAccessory() {
+		if (accessoryInstance == null) {
+			accessoryInstance = new CombatBackpackGeoRenderer(new CombatBackpackGeoModel());
+		}
+		return accessoryInstance;
+	}
+
+	public static CombatBackpackGeoRenderer getRig() {
+		if (rigInstance == null) {
+			rigInstance = new CombatBackpackGeoRenderer(new CombatBackpackRigGeoModel());
+		}
+		return rigInstance;
+	}
+
+	public static CombatBackpackGeoRenderer getPreview() {
+		if (previewInstance == null) {
+			previewInstance = new CombatBackpackGeoRenderer(new CombatBackpackGeoModel());
+		}
+		return previewInstance;
+	}
+
+	public static void clearPoseDiagnostics() {
+		POSE_ISOLATION_DIAGNOSTICS.clear();
+	}
+
+	/**
+	 * Draws the selected backpack through GeckoLib's item renderer while forcing
+	 * the Maintenance animation. The caller supplies the GUI transform and scissor.
+	 */
+	public void renderMaintenancePreview(
+			ItemStack stack,
+			MatrixStack matrices,
+			VertexConsumerProvider consumers,
+			int light,
+			int overlay) {
+		if (!(stack.getItem() instanceof CombatBackpackItem)) {
+			return;
+		}
+		this.attachedLauncherType = BackpackUpgradeData.canUseLauncher(stack)
+				? BackpackUpgradeData.launcherType(stack)
+				: BackpackUpgradeData.LauncherType.NONE;
+		this.attachedJumpThruster = this.attachedLauncherType
+				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
+		this.attachedMissileBox = BackpackUpgradeData.canUseMissileBox(stack);
+		CombatBackpackAnimation.beginModificationPreview();
+		try {
+			super.renderByItem(stack, ModelTransformationMode.GUI,
+					matrices, consumers, light, overlay);
+		} finally {
+			doPostRenderCleanup();
+			CombatBackpackAnimation.endModificationPreview();
+			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
+			this.attachedJumpThruster = false;
+			this.attachedCoreInstalled = false;
+			this.attachedMissileBox = false;
+		}
+	}
+
+	public void renderAttached(ItemStack stack, LivingEntity entity, MatrixStack matrices,
+							   VertexConsumerProvider consumers, int light, float tickDelta) {
+		if (!(stack.getItem() instanceof CombatBackpackItem item)) {
+			return;
+		}
+		this.currentEntity = entity;
+		CombatBackpackAnimation.setRenderingPlayer(entity.getId());
+		this.animatable = item;
+		this.currentItemStack = stack;
+		BackpackUpgradeData.LauncherType syncedType =
+				CombatBackpackClientState.launcherType(entity.getId());
+		this.attachedLauncherType = syncedType
+						!= BackpackUpgradeData.LauncherType.NONE
+				? syncedType
+				: (BackpackUpgradeData.canUseLauncher(stack)
+				? BackpackUpgradeData.launcherType(stack)
+				: BackpackUpgradeData.LauncherType.NONE);
+		this.attachedJumpThruster = this.attachedLauncherType
+				== BackpackUpgradeData.LauncherType.JUMP_THRUSTER;
+		this.attachedCoreInstalled = BackpackUpgradeData.hasCore(stack);
+		this.attachedMissileBox = BackpackUpgradeData.canUseMissileBox(stack);
+		// Only the jump backpack drives a full hand-sampled pose. Ordinary
+		// launchers must keep using the authored GeckoLib controller, including
+		// the B flap channels and their exact interpolation.
+		CombatBackpackAnimation.setManualJumpRendering(attachedJumpThruster);
+		this.renderPerspective = ModelTransformationMode.NONE;
+		try {
+			Identifier texture = getTextureLocation(item);
+			RenderLayer layer = getRenderType(item, texture, consumers, tickDelta);
+			VertexConsumer buffer = consumers.getBuffer(layer);
+			defaultRender(matrices, item, consumers, layer, buffer, tickDelta, tickDelta, light);
+			// GeoItemRenderer clears these after a completed render pass. Restore
+			// the attached stack before drawing the separate animated flame pass.
+			this.animatable = item;
+			this.currentItemStack = stack;
+			this.currentEntity = entity;
+			this.renderPerspective = ModelTransformationMode.NONE;
+			this.flamePass = true;
+			RenderLayer flameLayer = RenderLayer.getEntityCutoutNoCull(FLAME_TEXTURE);
+			VertexConsumer flameBuffer = consumers.getBuffer(flameLayer);
+			defaultRender(matrices, item, consumers, flameLayer, flameBuffer,
+					tickDelta, tickDelta, light);
+		} finally {
+			CombatBackpackAnimation.clearRenderingPlayer();
+			this.currentEntity = null;
+			this.attachedLauncherType = BackpackUpgradeData.LauncherType.NONE;
+			this.attachedJumpThruster = false;
+			this.attachedCoreInstalled = false;
+			this.attachedMissileBox = false;
+			this.flamePass = false;
+			doPostRenderCleanup();
+		}
+	}
+
+	public static Vec3d frontPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		net.minecraft.entity.Entity entity = client.world == null ? null
+				: client.world.getEntityById(playerId);
+		Vec3d canonical = CANONICAL_FRONT_OFFSETS.get(playerId);
+		if (canonical != null && entity != null) {
+			return entity.getPos().add(rotateY(canonical, modelYaw(entity)));
+		}
+		Vec3d exact = FRONT_POSITIONS.get(playerId);
+		Long sampleTick = FRONT_SAMPLE_TICKS.get(playerId);
+		if (entity != null && exact != null && sampleTick != null
+				&& Math.abs(client.world.getTime() - sampleTick) <= 2L) {
+			return exact;
+		}
+		Vec3d local = FRONT_LOCAL_OFFSETS.get(playerId);
+		if (local != null && entity != null) {
+			return entity.getPos().add(rotateY(local, modelYaw(entity)));
+		}
+		return exact;
+	}
+
+	/** Frozen portable-launcher, non-aim origin shared by every launcher state. */
+	public static Vec3d canonicalLaunchPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		net.minecraft.entity.Entity entity = client.world == null ? null
+				: client.world.getEntityById(playerId);
+		Vec3d canonical = CANONICAL_FRONT_OFFSETS.get(playerId);
+		if (canonical != null && entity != null) {
+			return entity.getPos().add(rotateY(canonical, modelYaw(entity)));
+		}
+		return frontPosition(playerId);
+	}
+
+	public static Vec3d rearPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		net.minecraft.entity.Entity entity = client.world == null ? null
+				: client.world.getEntityById(playerId);
+		Vec3d exact = REAR_POSITIONS.get(playerId);
+		Long sampleTick = REAR_SAMPLE_TICKS.get(playerId);
+		if (entity != null && exact != null && sampleTick != null
+				&& Math.abs(client.world.getTime() - sampleTick) <= 2L) {
+			return exact;
+		}
+		Vec3d local = REAR_LOCAL_OFFSETS.get(playerId);
+		if (local != null && entity != null) {
+			return entity.getPos().add(rotateY(local, modelYaw(entity)));
+		}
+		return exact;
+	}
+
+	public static Vec3d summonLocatorPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.world == null) {
+			return null;
+		}
+		Long tick = SUMMON_LOCATOR_TICKS.get(playerId);
+		if (tick == null || Math.abs(client.world.getTime() - tick) > 3L) {
+			return null;
+		}
+		return SUMMON_LOCATORS.get(playerId);
+	}
+
+	public static java.util.Map<String, Vec3d> missilePortPositions(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.world == null) {
+			return java.util.Map.of();
+		}
+		Long tick = MISSILE_PORT_TICKS.get(playerId);
+		if (tick == null || Math.abs(client.world.getTime() - tick) > 3L) {
+			return java.util.Map.of();
+		}
+		return java.util.Map.copyOf(MISSILE_PORT_POSITIONS.getOrDefault(
+				playerId, java.util.Map.of()));
+	}
+
+	@Override
+	public void actuallyRender(MatrixStack matrices, CombatBackpackItem animatable,
+							   BakedGeoModel model, RenderLayer renderType,
+							   VertexConsumerProvider consumers, VertexConsumer buffer,
+							   boolean isReRender, float tickDelta, int packedLight,
+							   int packedOverlay, int colour) {
+		// The jump backpack pose is sampled directly into the shared GeoBones.
+		// Running the item AnimationController in the same pass would mix its
+		// residual queue/snapshots with that pose. isReRender=true is GeckoLib's
+		// contract for rendering without calling GeoModel.handleAnimations.
+		super.actuallyRender(matrices, animatable, model, renderType, consumers,
+				buffer, attachedJumpThruster || isReRender, tickDelta, packedLight,
+				packedOverlay, colour);
+		if (attachedJumpThruster && currentEntity != null) {
+			CombatBackpackAnimation.Phase phase =
+					CombatBackpackAnimation.phase(currentEntity.getId());
+			String key = currentEntity.getId() + ":" + phase + ":"
+					+ (flamePass ? "flame" : "body");
+			if (POSE_ISOLATION_DIAGNOSTICS.add(key)) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] backpack pose isolated player={} phase={} clip={} "
+								+ "pass={} geckoController=skipped manualSampler=on ageTicks={}",
+						currentEntity.getId(), phase,
+						CombatBackpackPoseAnimation.clipName(
+								phase, attachedJumpThruster),
+						flamePass ? "flame" : "body",
+						CombatBackpackClientState.animationAgeTicks(
+								currentEntity.getId(), tickDelta));
+			}
+		}
+	}
+
+	@Override
+	public void updateAnimatedTextureFrame(CombatBackpackItem animatable) {
+		if (flamePass) {
+			// GeckoLib owns the current frame of an animated texture. A plain
+			// entity RenderLayer only binds it and would leave the flame on frame 0.
+			AnimatableTexture.setAndUpdate(FLAME_TEXTURE);
+			return;
+		}
+		super.updateAnimatedTextureFrame(animatable);
+	}
+
+	@Override
+	public void renderCube(MatrixStack matrices, GeoCube cube, VertexConsumer buffer,
+						   int packedLight, int packedOverlay, int colour) {
+		if (flamePass) {
+			super.renderCube(matrices, scaleFlameUvs(cube), buffer,
+					LightmapTextureManager.MAX_LIGHT_COORDINATE,
+					packedOverlay, colour);
+			return;
+		}
+		super.renderCube(matrices, cube, buffer, packedLight, packedOverlay, colour);
+	}
+
+	private static GeoCube scaleFlameUvs(GeoCube cube) {
+		GeoQuad[] source = cube.quads();
+		GeoQuad[] scaled = new GeoQuad[source.length];
+		for (int i = 0; i < source.length; i++) {
+			GeoQuad quad = source[i];
+			if (quad == null) {
+				continue;
+			}
+			GeoVertex[] vertices = quad.vertices();
+			GeoVertex[] updated = new GeoVertex[vertices.length];
+			for (int j = 0; j < vertices.length; j++) {
+				GeoVertex vertex = vertices[j];
+				updated[j] = vertex.withUVs(
+						vertex.texU() * FLAME_UV_SCALE,
+						vertex.texV() * FLAME_UV_SCALE);
+			}
+			scaled[i] = new GeoQuad(updated, quad.normal(), quad.direction());
+		}
+		return new GeoCube(scaled, cube.pivot(), cube.rotation(), cube.size(),
+				cube.inflate(), cube.mirror());
+	}
+
+	@Override
+	public void renderRecursively(MatrixStack matrices, CombatBackpackItem animatable, GeoBone bone,
+								  RenderLayer renderType, VertexConsumerProvider consumers,
+								  VertexConsumer buffer, boolean isReRender, float tickDelta,
+								  int packedLight, int packedOverlay, int colour) {
+		boolean coreInstalled = attachedCoreInstalled;
+		boolean launcherInstalled = coreInstalled
+				&& attachedLauncherType != BackpackUpgradeData.LauncherType.NONE;
+		boolean autoLauncher = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.AUTO;
+		boolean summonLauncher = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean battleBanner = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
+		boolean jumpThruster = attachedJumpThruster;
+		if ((jumpThruster || attachedMissileBox) && currentEntity != null) {
+			double seconds = CombatBackpackClientState.animationAgeTicks(
+					currentEntity.getId(), tickDelta) / 20.0D;
+			CombatBackpackPoseAnimation.apply(bone,
+					CombatBackpackAnimation.phase(currentEntity.getId()), seconds,
+					jumpThruster);
+			CombatBackpackPoseAnimation.applyMissileOverlay(bone,
+					CombatBackpackAnimation.missilePhase(currentEntity.getId()),
+					CombatBackpackClientState.missileAnimationAgeTicks(
+							currentEntity.getId(), tickDelta) / 20.0D);
+		}
+		Quaternionf aimRotation = null;
+		if (currentEntity != null && launcherInstalled && !summonLauncher
+				&& !jumpThruster && !battleBanner
+				&& CombatBackpackAnimation.phase(currentEntity.getId())
+				== CombatBackpackAnimation.Phase.AIM) {
+			if (autoLauncher && "C3".equals(bone.getName())) {
+				bone.updateRotation(0.0F, 0.0F, 0.0F);
+			} else if ((!autoLauncher && "C3".equals(bone.getName()))
+					|| (autoLauncher && "auto_C3".equals(bone.getName()))) {
+				aimRotation = calculateAimRotation(matrices, currentEntity, bone);
+				if (aimRotation != null) {
+					Vector3f euler = aimRotation.getEulerAnglesZYX(new Vector3f());
+					bone.updateRotation((float) Math.toDegrees(euler.x()),
+							(float) Math.toDegrees(euler.y()),
+							(float) Math.toDegrees(euler.z()));
+				}
+			}
+		}
+		switch (bone.getName()) {
+			case "core" -> bone.setHidden(!coreInstalled);
+			case "C1", "C2", "C3" ->
+					bone.setHidden(!launcherInstalled || autoLauncher
+							|| summonLauncher || jumpThruster
+							|| battleBanner);
+			case "auto_C1" -> bone.setHidden(!autoLauncher);
+			case "auto_ejector", "auto_box", "auto_sight", "auto_barrel" ->
+					bone.setHidden(!autoLauncher);
+			case "summon_C1", "summon_C2", "summon_C3", "summon_locator" ->
+					bone.setHidden(!summonLauncher);
+			case "jet_F", "jet_F2", "jet_right", "jet_left" ->
+					bone.setHidden(!jumpThruster);
+			case "jet_F2_flame", "jet_right_flame", "jet_left_flame" ->
+					bone.setHidden(!jumpThruster);
+			default -> {
+			}
+		}
+		if (aimRotation != null) {
+			renderC3Independently(matrices, bone, buffer, packedLight, packedOverlay,
+					colour, aimRotation);
+			boolean previousSuppress = suppressC3Cubes;
+			boolean previousAutoAimCubesOnly = autoAimCubesOnly;
+			boolean previousAllowAutoAimCubeRender = allowAutoAimCubeRender;
+			suppressC3Cubes = true;
+			autoAimCubesOnly = autoLauncher && "auto_C3".equals(bone.getName());
+			allowAutoAimCubeRender = false;
+			try {
+				super.renderRecursively(matrices, animatable, bone, renderType, consumers,
+						buffer, isReRender, tickDelta, packedLight, packedOverlay, colour);
+			} finally {
+				suppressC3Cubes = previousSuppress;
+				autoAimCubesOnly = previousAutoAimCubesOnly;
+				allowAutoAimCubeRender = previousAllowAutoAimCubeRender;
+			}
+		} else {
+			super.renderRecursively(matrices, animatable, bone, renderType, consumers, buffer,
+					isReRender, tickDelta, packedLight, packedOverlay, colour);
+		}
+		if (currentEntity != null) {
+			recordLocator(matrices, bone, currentEntity, autoLauncher);
+			if ("summon_locator".equals(bone.getName())) {
+				Vector3d position = bone.getWorldPosition();
+				SUMMON_LOCATORS.put(currentEntity.getId(),
+						new Vec3d(position.x, position.y, position.z));
+				SUMMON_LOCATOR_TICKS.put(currentEntity.getId(),
+						currentEntity.getWorld().getTime());
+			}
+		}
+	}
+
+	@Override
+	public void renderCubesOfBone(MatrixStack matrices, GeoBone bone, VertexConsumer buffer,
+								  int packedLight, int packedOverlay, int colour) {
+		boolean flameBone = bone.getName().endsWith("_flame");
+		if (flamePass != flameBone) {
+			return;
+		}
+		boolean autoLauncher = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.AUTO;
+		boolean summonLauncher = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.SUMMON_ANTENNA;
+		boolean battleBanner = attachedLauncherType
+				== BackpackUpgradeData.LauncherType.BATTLE_BANNER;
+		boolean jumpThruster = attachedJumpThruster;
+		if (!attachedMissileBox && (bone.getName().startsWith("missile_")
+				|| bone.getName().startsWith("port"))) {
+			return;
+		}
+		if (("C3".equals(bone.getName()) || "auto_C3".equals(bone.getName()))
+				&& suppressC3Cubes) {
+			return;
+		}
+		if (autoLauncher && autoAimCubesOnly
+				&& ("auto_ejector".equals(bone.getName())
+						|| "auto_box".equals(bone.getName())
+						|| "auto_sight".equals(bone.getName())
+						|| "auto_barrel".equals(bone.getName()))) {
+			return;
+		}
+		if (autoLauncher && "auto_C3".equals(bone.getName())
+				&& !allowAutoAimCubeRender) {
+			return;
+		}
+		if ((autoLauncher || summonLauncher || jumpThruster || battleBanner)
+				&& ("C1".equals(bone.getName())
+				|| "C2".equals(bone.getName())
+				|| "C3".equals(bone.getName()))) {
+			return;
+		}
+		super.renderCubesOfBone(matrices, bone, buffer, packedLight, packedOverlay, colour);
+	}
+
+	private void renderC3Independently(MatrixStack matrices, GeoBone bone,
+									   VertexConsumer buffer, int packedLight,
+									   int packedOverlay, int colour,
+									   Quaternionf rotation) {
+		boolean previousAllowAutoAimCubeRender = allowAutoAimCubeRender;
+		allowAutoAimCubeRender = true;
+		matrices.push();
+		try {
+			RenderUtil.translateMatrixToBone(matrices, bone);
+			RenderUtil.translateToPivotPoint(matrices, bone);
+			matrices.multiply(rotation);
+			RenderUtil.scaleMatrixForBone(matrices, bone);
+			RenderUtil.translateAwayFromPivotPoint(matrices, bone);
+			renderCubesOfBone(matrices, bone, buffer, packedLight, packedOverlay, colour);
+		} finally {
+			matrices.pop();
+			allowAutoAimCubeRender = previousAllowAutoAimCubeRender;
+		}
+	}
+
+	private static Quaternionf calculateAimRotation(MatrixStack matrices, LivingEntity entity,
+													 GeoBone c3) {
+		int targetId = CombatBackpackClientState.targetEntityId(entity.getId());
+		if (targetId < 0) {
+			AIM_FILTERS.remove(entity.getId());
+			return null;
+		}
+		MinecraftClient client = MinecraftClient.getInstance();
+		net.minecraft.entity.Entity targetEntity = client.world == null ? null
+				: client.world.getEntityById(targetId);
+		if (targetEntity == null) {
+			AIM_FILTERS.remove(entity.getId());
+			return null;
+		}
+		Vec3d targetWorld = targetEntity.getBoundingBox().getCenter();
+		// r306: filter a launcher-independent world direction, so turret motion
+		// cannot feed back into the next smoothing sample.
+		Vec3d aimOrigin = entity.getBoundingBox().getCenter();
+		Vec3d aimAxis = targetWorld.subtract(aimOrigin);
+		if (aimAxis.lengthSquared() < 1.0E-8D) {
+			return null;
+		}
+		// Shared by C3 and auto_C3, covering every launcher using this renderer.
+		Vec3d filteredDirection = filterAimDirection(
+				entity.getId(), targetId, aimAxis.normalize(),
+				entity.getWorld().getTime());
+
+		String frontName = "auto_C3".equals(c3.getName()) ? "auto_front" : "front";
+		String rearName = frontName.equals("auto_front") ? "auto_rear" : "rear";
+		GeoBone front = findBoneRecursive(c3, frontName);
+		GeoBone rear = findBoneRecursive(c3, rearName);
+		Vector3f localAxis = front != null && rear != null
+				? new Vector3f(
+						front.getPivotX() - rear.getPivotX(),
+						front.getPivotY() - rear.getPivotY(),
+						front.getPivotZ() - rear.getPivotZ()).normalize()
+				: new Vector3f(0.0F, 0.0F, -1.0F);
+		Matrix3f parentNormal = new Matrix3f(matrices.peek().getNormalMatrix());
+		Vector3f targetInParent = parentNormal.invert().transform(
+				new Vector3f((float) filteredDirection.x,
+						(float) filteredDirection.y, (float) filteredDirection.z))
+				.normalize();
+		return new Quaternionf().rotationTo(localAxis, targetInParent);
+	}
+
+	private static Vec3d filterAimDirection(int playerId, int targetId,
+											 Vec3d current, long tick) {
+		AimFilter filter = AIM_FILTERS.computeIfAbsent(playerId,
+				ignored -> new AimFilter());
+		if (filter.targetId != targetId) {
+			filter.targetId = targetId;
+			filter.tick = tick;
+			filter.direction = current;
+			return current;
+		}
+		if (filter.tick == tick) {
+			return filter.direction;
+		}
+		filter.tick = tick;
+		if (filter.direction.lengthSquared() < 1.0E-8D
+				|| filter.direction.dotProduct(current) >= AIM_DEADBAND_COS) {
+			return filter.direction;
+		}
+		filter.direction = filter.direction.multiply(1.0D - AIM_SMOOTHING)
+				.add(current.multiply(AIM_SMOOTHING))
+				.normalize();
+		return filter.direction;
+	}
+
+	private static GeoBone findBoneRecursive(GeoBone root, String name) {
+		if (root == null) {
+			return null;
+		}
+		if (name.equals(root.getName())) {
+			return root;
+		}
+		for (GeoBone child : root.getChildBones()) {
+			GeoBone found = findBoneRecursive(child, name);
+			if (found != null) {
+				return found;
+			}
+		}
+		return null;
+	}
+
+	private void recordLocator(MatrixStack matrices, GeoBone bone, LivingEntity entity,
+			boolean autoLauncher) {
+		String boneName = bone.getName();
+		boolean missilePort = boneName.matches("port[123]_(left|right)");
+		if (!boneName.equals("front") && !boneName.equals("rear")
+				&& !missilePort) {
+			return;
+		}
+		matrices.push();
+		Vector3f renderedPosition;
+		try {
+			RenderUtil.prepMatrixForBone(matrices, bone);
+			Vector4f point = matrices.peek().getPositionMatrix()
+					.transform(new Vector4f(0.0F, 0.0F, 0.0F, 1.0F));
+			renderedPosition = new Vector3f(point.x, point.y, point.z);
+		} finally {
+			matrices.pop();
+		}
+		Vec3d camera = MinecraftClient.getInstance().gameRenderer.getCamera().getPos();
+		Vec3d renderSpace = new Vec3d(
+				renderedPosition.x, renderedPosition.y, renderedPosition.z);
+		Vec3d worldPos = chooseLocatorWorldPosition(entity, renderSpace, camera);
+		Vec3d delta = worldPos.subtract(entity.getPos());
+		Vec3d local = rotateY(delta, -entity.getBodyYaw());
+		if ("front".equals(boneName)) {
+			FRONT_POSITIONS.put(entity.getId(), worldPos);
+			FRONT_LOCAL_OFFSETS.put(entity.getId(), local);
+			FRONT_SAMPLE_TICKS.put(entity.getId(), entity.getWorld().getTime());
+			if (autoLauncher || CombatBackpackAnimation.phase(entity.getId())
+					== CombatBackpackAnimation.Phase.READY) {
+				CANONICAL_FRONT_OFFSETS.put(entity.getId(), local);
+			}
+		} else if ("rear".equals(boneName)) {
+			REAR_POSITIONS.put(entity.getId(), worldPos);
+			REAR_LOCAL_OFFSETS.put(entity.getId(), local);
+			REAR_SAMPLE_TICKS.put(entity.getId(), entity.getWorld().getTime());
+		} else {
+			MISSILE_PORT_POSITIONS.computeIfAbsent(
+					entity.getId(), ignored -> new java.util.HashMap<>())
+					.put(boneName, worldPos);
+			MISSILE_PORT_TICKS.put(entity.getId(), entity.getWorld().getTime());
+		}
+	}
+
+	private static Vec3d chooseLocatorWorldPosition(LivingEntity entity,
+			Vec3d renderSpace, Vec3d camera) {
+		Vec3d entityAnchor = entity.getPos().add(0.0D, 1.0D, 0.0D);
+		Vec3d cameraRelative = renderSpace.add(camera);
+		Vec3d worldAbsolute = renderSpace;
+		Vec3d best = null;
+		double bestDistance = Double.MAX_VALUE;
+		for (Vec3d candidate : List.of(worldAbsolute, cameraRelative)) {
+			if (!Double.isFinite(candidate.x) || !Double.isFinite(candidate.y)
+					|| !Double.isFinite(candidate.z)) {
+				continue;
+			}
+			double distance = candidate.squaredDistanceTo(entityAnchor);
+			if (distance <= 16.0D && distance < bestDistance) {
+				best = candidate;
+				bestDistance = distance;
+			}
+		}
+		return best == null ? cameraRelative : best;
+	}
+
+	private static Vec3d rotateY(Vec3d value, float degrees) {
+		double radians = Math.toRadians(degrees);
+		double cos = Math.cos(radians);
+		double sin = Math.sin(radians);
+		return new Vec3d(value.x * cos - value.z * sin, value.y,
+				value.x * sin + value.z * cos);
+	}
+
+	private static float modelYaw(net.minecraft.entity.Entity entity) {
+		return entity instanceof LivingEntity living ? living.getBodyYaw() : entity.getYaw();
+	}
+
+	@Override
+	public void preRender(MatrixStack matrices, CombatBackpackItem animatable, BakedGeoModel model,
+						  VertexConsumerProvider consumers, VertexConsumer buffer, boolean isReRender,
+						  float tickDelta, int light, int overlay, int colour) {
+		this.itemRenderTranslations = new Matrix4f(matrices.peek().getPositionMatrix());
+	}
+}

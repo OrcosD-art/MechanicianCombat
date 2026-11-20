@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "ABA",
+    "A A"
+  ],
+  "key": {
+    "A": {
+      "item": "mechaniciancombat:arcane_alloy"
+    },
+    "B": {
+      "item": "mechaniciancombat:rose_alloy_cycle_battery"
+    }
+  },
+  "result": {
+    "id": "mechaniciancombat:mechanician_boots",
+    "count": 1
+  }
+}
