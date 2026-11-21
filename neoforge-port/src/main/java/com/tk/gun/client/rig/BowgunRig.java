@@ -607,6 +607,9 @@ public final class BowgunRig implements GeoReplacedEntity {
 					entity.getId(), entry.kineticSwordRunJump));
 		}
 		if (entry != null && entry.state == TkGun.State.MELEE) {
+			if (entry.meleeReturning) {
+				resetKineticRunAnimationBridges();
+			}
 			int step = Math.max(1, Math.min(6, entry.shotIndex));
 			String name;
 			if (entry.kineticSwordDraft && !entry.meleeReturning) {
@@ -790,8 +793,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 				return PlayState.STOP;
 			}
 			if (swordState != null
-					&& swordState.state == TkGun.State.MELEE
-					&& !swordState.meleeReturning) {
+					&& swordState.state == TkGun.State.MELEE) {
+				resetKineticRunAnimationBridges();
 				return PlayState.STOP;
 			}
 			boolean running = TkGunClient.isMoving(entity.getId())
