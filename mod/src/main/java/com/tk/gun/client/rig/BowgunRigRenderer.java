@@ -128,6 +128,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		addRenderLayer(new BowgunGunLayer(this));
 		addRenderLayer(new BowgunCloseCombatEffectLayer(this));
 		addRenderLayer(new BowgunEffectSkillLayer(this));
+		addRenderLayer(new KineticSwordEnergyLayer(this));
 		addRenderLayer(new CombatBackpackRigLayer(this));
 		// 原版 PlayerRenderer 继续负责皮肤第二层、盔甲、披风和 Curios。
 		// ⚠️ **气流那一层默认不开**（2026-10-16 用户实测反馈："枪口特效完全糊着、像管风琴一列一列
@@ -170,6 +171,9 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 								  float partialTick, int packedLight, int packedOverlay, int colour) {
 		String name = bone.getName();
 		Entity renderedEntity = getCurrentEntity();
+		if (KineticSwordEnergyEffect.isEnergyBone(name)) {
+			KineticSwordEnergyEffect.applyVisibility(bone, renderedEntity);
+		}
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
 		BowgunCloseCombatEffectLayer.applyScheduledVisibility(

@@ -84,6 +84,7 @@ public class BowgunGunLayer extends GeoRenderLayer<BowgunRig> {
 		if (BowgunRigRenderer.BODY_BONES.contains(bone.getName()) || bone.getCubes().isEmpty()
 				|| BowgunAirflowLayer.isAirflowBone(bone.getName())
 				|| BowgunEffectSkillLayer.isSkillEffectBone(bone.getName())
+				|| KineticSwordEnergyEffect.isEnergyBone(bone.getName())
 				|| BowgunCloseCombatEffectLayer.isEffectBone(bone.getName())) {
 			return;
 		}

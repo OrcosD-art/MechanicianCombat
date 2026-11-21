@@ -234,10 +234,10 @@ public final class TkGun {
 	public static final int[][] KINETIC_SWORD_DRAFT_DAMAGE_TICKS = {
 			{3, 10}, {4, 10}
 	};
-	/** Boost-consuming ATK5 at authored speed, with a 4-block path sweep. */
+	/** Boost-consuming ATK5 at authored speed, with a 2-block forward step. */
 	public static final int KINETIC_SWORD_ACCEL_ATTACK_TICKS = 11;
-	public static final int KINETIC_SWORD_ACCEL_MOVE_END_TICK = 11;
-	public static final double KINETIC_SWORD_ACCEL_DISTANCE = 4.0D;
+	public static final int KINETIC_SWORD_ACCEL_MOVE_END_TICK = 10;
+	public static final double KINETIC_SWORD_ACCEL_DISTANCE = 2.0D;
 	/** All six authored back-idle clips are 0.5 seconds. */
 	public static final int KINETIC_SWORD_BACK_IDLE_TICKS = 10;
 	public static final float KINETIC_SWORD_DAMAGE = 9.0F;

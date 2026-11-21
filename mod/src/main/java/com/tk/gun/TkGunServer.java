@@ -603,7 +603,6 @@ public class TkGunServer implements ModInitializer {
 		public boolean kineticSwordQueued;
 		public boolean kineticSwordDraft;
 		public boolean kineticSwordAccelerationAttack;
-		public final Set<UUID> kineticSwordAccelerationHits = new HashSet<>();
 		public double kineticSwordAccelerationInitialSpeed;
 		/** Buffered Kinetic Sword left click while a dodge transition still owns the state. */
 		public long kineticSwordSprintAttackQueuedUntil;
@@ -722,6 +721,7 @@ public class TkGunServer implements ModInitializer {
 	public static Item ENTITY_REMOVAL_TOOL;
 	public static Item SOUL_ANCHOR_FPA_MODEL;
 	public static Item SOUL_ANCHOR_PROJECTILE_MODEL;
+	public static Item KINETIC_SWORD_FPA_MODEL;
 	public static Item HUNTER_ANCHOR_FPA_MODEL;
 	public static Item PORTABLE_TURRET_FPA_MODEL;
 	public static Item AUTO_TURRET_FPA_MODEL;
@@ -1140,6 +1140,10 @@ public class TkGunServer implements ModInitializer {
 		SOUL_ANCHOR_FPA_MODEL = Registry.register(Registries.ITEM,
 				TkGun.id("soul_anchor_fpa_model"),
 				new com.tk.gun.item.SoulAnchorFpaItem(
+						new Item.Settings().maxCount(1)));
+		KINETIC_SWORD_FPA_MODEL = Registry.register(Registries.ITEM,
+				TkGun.id("kinetic_sword_fpa_model"),
+				new com.tk.gun.item.KineticSwordFpaItem(
 						new Item.Settings().maxCount(1)));
 		HUNTER_ANCHOR_FPA_MODEL = Registry.register(Registries.ITEM,
 				TkGun.id("hunter_anchor_fpa_model"),
@@ -4762,7 +4766,6 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = false;
-		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4831,7 +4834,6 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = true;
-		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4894,7 +4896,6 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = true;
 		st.kineticSwordDraft = true;
 		st.kineticSwordAccelerationAttack = false;
-		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4986,7 +4987,6 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordReturn = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = false;
-		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordHitIndex = 0;
 		st.kineticSwordMoveDistance = 0.0D;
 		st.kineticSwordMoveTraveled = 0.0D;
@@ -5063,12 +5063,10 @@ public class TkGunServer implements ModInitializer {
 		player.sidewaysSpeed = 0.0F;
 		player.upwardSpeed = 0.0F;
 
-		double fromX = st.kineticSwordMoveLastX;
-		double fromZ = st.kineticSwordMoveLastZ;
 		double toX = player.getX();
 		double toZ = player.getZ();
-		performKineticSwordAccelerationPathHit(
-				player, st, fromX, fromZ, toX, toZ);
+		double fromX = st.kineticSwordMoveLastX;
+		double fromZ = st.kineticSwordMoveLastZ;
 		st.kineticSwordMoveLastX = toX;
 		st.kineticSwordMoveLastZ = toZ;
 		st.kineticSwordMoveTraveled += Math.max(0.0D,
@@ -5090,7 +5088,7 @@ public class TkGunServer implements ModInitializer {
 							* holdOverMovementFriction(player)
 							/ Math.max(1.0E-4D, averagePace)));
 			// Preserve the captured sprint momentum as a front-loaded,
-			// smoothly decelerating profile while still capping the path at 4.
+			// smoothly decelerating profile while capping the step at 2 blocks.
 			double eased = 1.0D - Math.pow(1.0D - progress,
 					1.0D + momentum);
 			double cumulative = TkGun.KINETIC_SWORD_ACCEL_DISTANCE * eased;
@@ -5105,6 +5103,11 @@ public class TkGunServer implements ModInitializer {
 			player.setVelocity(0.0D, velocity.y, 0.0D);
 		}
 		player.velocityModified = true;
+		if (!st.meleeHitDone
+				&& elapsed >= TkGun.KINETIC_SWORD_DAMAGE_TICKS[4][0]) {
+			st.meleeHitDone = true;
+			performKineticSwordHit(player, st);
+		}
 		if (elapsed >= TkGun.KINETIC_SWORD_ACCEL_ATTACK_TICKS) {
 			beginKineticSwordRecovery(player, st, now);
 		}
@@ -5130,65 +5133,6 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		beginKineticSwordAccelerationAttack(player, st, now);
-	}
-
-	private static void performKineticSwordAccelerationPathHit(
-			ServerPlayerEntity player, PState st,
-			double fromX, double fromZ, double toX, double toZ) {
-		double segmentLength = Math.hypot(toX - fromX, toZ - fromZ);
-		if (segmentLength <= 1.0E-5D) {
-			return;
-		}
-		Vec3d forward = new Vec3d(
-				st.kineticSwordMoveDirX, 0.0D, st.kineticSwordMoveDirZ);
-		Vec3d right = new Vec3d(
-				-st.kineticSwordMoveDirZ, 0.0D,
-				st.kineticSwordMoveDirX);
-		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
-		double midX = (fromX + toX) * 0.5D;
-		double midZ = (fromZ + toZ) * 0.5D;
-		Vec3d center = new Vec3d(
-				midX, player.getY() + 1.0D, midZ)
-				.add(forward.multiply(1.5D));
-		double halfWidth = 1.5D;
-		double halfHeight = 1.5D;
-		double halfDepth = 2.0D + segmentLength * 0.5D;
-		double minX = Math.min(fromX, toX);
-		double maxX = Math.max(fromX, toX);
-		double minZ = Math.min(fromZ, toZ);
-		double maxZ = Math.max(fromZ, toZ);
-		net.minecraft.util.math.Box search = new net.minecraft.util.math.Box(
-				minX - 5.0D, player.getY() - 3.0D, minZ - 5.0D,
-				maxX + 5.0D, player.getY() + 4.0D, maxZ + 5.0D);
-		List<Entity> hitTargets = new ArrayList<>();
-		for (Entity entity : player.getServerWorld().getOtherEntities(
-				player, search,
-				candidate -> candidate.isAlive() && candidate.canHit()
-						&& !candidate.isSpectator()
-						&& !st.kineticSwordAccelerationHits.contains(
-								candidate.getUuid())
-						&& CombatTargeting.isTargetable(candidate))) {
-			if (!orientedBoxOverlaps(entity.getBoundingBox(), center,
-					right, up, forward, halfWidth, halfHeight, halfDepth)) {
-				continue;
-			}
-			st.kineticSwordAccelerationHits.add(entity.getUuid());
-			if (entity instanceof LivingEntity living) {
-				living.timeUntilRegen = 0;
-			}
-			if (entity.damage(player.getDamageSources().playerAttack(player),
-					TkGun.KINETIC_SWORD_DAMAGE)) {
-				hitTargets.add(entity);
-			}
-		}
-		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, st, hitTargets, forward,
-					MeleeImpactService.ATK_2_TICKS, false, false, false);
-			TkGun.LOGGER.info(
-					"[mechaniciancombat] kinetic sword accelerated ATK_5 "
-							+ "path hit {} targets player={}",
-					hitTargets.size(), player.getName().getString());
-		}
 	}
 
 	private static void tickKineticSwordAttackMotion(ServerPlayerEntity player,

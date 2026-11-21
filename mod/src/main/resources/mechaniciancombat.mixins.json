@@ -31,6 +31,7 @@
     "ClientPlayerSprintGuardMixin",
     "ClientPlayerSprintStartMixin",
     "CombatPropFirstPersonMixin",
+    "KineticSwordFirstPersonMixin",
     "BackpackMissileRenderMixin",
     "EntityGlowColorMixin"
   ],
