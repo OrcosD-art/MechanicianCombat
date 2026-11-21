@@ -66,6 +66,7 @@ public final class SoulAnchorSkillService {
 	private static final class Skill {
 		Stage stage = Stage.THROW;
 		boolean gun;
+		boolean sword;
 		long stageStart;
 		long stageEnd;
 		int anchorId = -1;
@@ -129,7 +130,8 @@ public final class SoulAnchorSkillService {
 				return false;
 			}
 		}
-		return startReady(player, gun, sprintingAtPress);
+		return startReady(player, gun, TkGun.isKineticSword(player),
+				sprintingAtPress);
 	}
 
 	public static void release(ServerPlayerEntity player) {
@@ -144,8 +146,8 @@ public final class SoulAnchorSkillService {
 		selectTarget(player, skill);
 		clearReadyTarget(player, skill);
 		beginStage(player, skill,
-				skill.gun ? Stage.GUN_THROWING : Stage.THROW,
-				skill.gun ? GUN_THROW_TICKS : THROW_TICKS);
+				usesGunMotion(skill) ? Stage.GUN_THROWING : Stage.THROW,
+				usesGunMotion(skill) ? GUN_THROW_TICKS : THROW_TICKS);
 	}
 
 	public static void cancel(ServerPlayerEntity player) {
@@ -169,17 +171,18 @@ public final class SoulAnchorSkillService {
 	}
 
 	private static boolean startReady(ServerPlayerEntity player, boolean gun,
-									  boolean sprintingAtPress) {
+									  boolean sword, boolean sprintingAtPress) {
 		if (SKILLS.containsKey(player.getUuid())) {
 			return false;
 		}
 		Skill skill = new Skill();
 		skill.gun = gun;
+		skill.sword = sword;
 		skill.stage = Stage.READY;
 		skill.stageStart = player.getWorld().getTime();
 		skill.stageEnd = skill.stageStart;
 		TkGunServer.PState gunState = TkGunServer.state(player);
-		skill.returnToRunAfterSlide = gun
+		skill.returnToRunAfterSlide = usesGunMotion(skill)
 				&& (sprintingAtPress || player.isSprinting()
 				|| skill.stageStart < gunState.dashUntil
 				|| skill.stageStart < gunState.speedBoostUntil);
@@ -210,7 +213,7 @@ public final class SoulAnchorSkillService {
 			selectTarget(player, skill);
 			return;
 		}
-		if (!skill.gun) {
+		if (!usesGunMotion(skill)) {
 			player.setSprinting(false);
 		}
 		if (!skill.throwSoundPlayed && now >= skill.stageStart + 3L
@@ -292,7 +295,8 @@ public final class SoulAnchorSkillService {
 		player.getServerWorld().spawnEntity(anchor);
 		skill.anchorId = anchor.getId();
 		skill.anchorLandedAt = 0L;
-		skill.stage = skill.gun ? Stage.GUN_FLYING : Stage.ANCHOR_FLYING;
+		skill.stage = usesGunMotion(skill)
+				? Stage.GUN_FLYING : Stage.ANCHOR_FLYING;
 		skill.stageStart = player.getWorld().getTime();
 		skill.stageEnd = skill.stageStart + ANCHOR_FLIGHT_TIMEOUT_TICKS;
 		// The authored throw clip is a hold-on-last-frame animation.  Keep its
@@ -339,7 +343,7 @@ public final class SoulAnchorSkillService {
 			skill.anchorLandedAt = now;
 			// Entity hooks never enter the gun-slide branch. Continue the
 			// acceleration clock immediately instead of staying paused.
-			if (skill.gun && anchor.hookedEntityId() >= 0) {
+			if (usesGunMotion(skill) && anchor.hookedEntityId() >= 0) {
 				resumeAccelerationCountdown(player, skill, now);
 			}
 			syncPhase(player, skill,
@@ -365,9 +369,10 @@ public final class SoulAnchorSkillService {
 			}
 			anchor.retrieve(player);
 			beginStage(player, skill,
-					skill.gun ? Stage.GUN_ENTITY_DRAG : Stage.ENTITY_DRAG,
+					usesGunMotion(skill)
+							? Stage.GUN_ENTITY_DRAG : Stage.ENTITY_DRAG,
 					ENTITY_DRAG_TICKS);
-		} else if (skill.gun) {
+		} else if (usesGunMotion(skill)) {
 			beginGunSliding(player, skill, anchor);
 		} else {
 			beginStage(player, skill, Stage.PLAYER_DRAG,
@@ -731,7 +736,7 @@ public final class SoulAnchorSkillService {
 			case PLAYER_DRAG -> SoulAnchorSkillPayload.DRAG;
 			case ENTITY_DRAG -> SoulAnchorSkillPayload.DRAG_ENTITY;
 			case GUN_ENTITY_DRAG -> SoulAnchorSkillPayload.GUN_DRAG_ENTITY;
-			case GUN_RECALL -> skill.gun
+			case GUN_RECALL -> usesGunMotion(skill)
 					? SoulAnchorSkillPayload.GUN_RECALL
 					: SoulAnchorSkillPayload.RECALL;
 			case GUN_SLIDING -> SoulAnchorSkillPayload.GUN_SLIDING;
@@ -739,7 +744,7 @@ public final class SoulAnchorSkillService {
 					SoulAnchorSkillPayload.GUN_SLIDING_TO_IDLE;
 			case GUN_SLIDING_TO_RUN ->
 					SoulAnchorSkillPayload.GUN_SLIDING_TO_RUN;
-			default -> skill.gun ? SoulAnchorSkillPayload.GUN_THROW
+			default -> usesGunMotion(skill) ? SoulAnchorSkillPayload.GUN_THROW
 					: SoulAnchorSkillPayload.THROW;
 		};
 		// Keep the last authored frame alive until the authoritative END packet
@@ -751,11 +756,15 @@ public final class SoulAnchorSkillService {
 		return ENTITY_DRAG_TICKS;
 	}
 
+	private static boolean usesGunMotion(Skill skill) {
+		return skill.gun && !skill.sword;
+	}
+
 	private static void syncPhase(ServerPlayerEntity player, Skill skill,
 			int phase, int duration) {
 		skill.lastPhase = phase;
 		SoulAnchorSkillPayload payload = new SoulAnchorSkillPayload(
-				player.getId(), phase, duration, skill.gun);
+				player.getId(), phase, duration, skill.gun, skill.sword);
 		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
 			if (viewer.squaredDistanceTo(player) <= 64.0D * 64.0D) {
 				ServerPlayNetworking.send(viewer, payload);
@@ -777,7 +786,8 @@ public final class SoulAnchorSkillService {
 			soul.discard();
 		}
 		SoulAnchorSkillPayload payload = new SoulAnchorSkillPayload(
-				player.getId(), SoulAnchorSkillPayload.END, 0, skill.gun);
+				player.getId(), SoulAnchorSkillPayload.END, 0,
+				skill.gun, skill.sword);
 		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
 			if (viewer.squaredDistanceTo(player) <= 64.0D * 64.0D) {
 				ServerPlayNetworking.send(viewer, payload);

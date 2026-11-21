@@ -221,9 +221,39 @@ public final class TkGun {
 	};
 	/** Safe authored-tail handoff for ATK_2 -> 3 and ATK_4 -> 5. */
 	public static final int KINETIC_SWORD_QUICK_CHAIN_TICK = 8;
+	/** Three 2-3-4-5 rounds, then ATK_6 ends the accelerated chain. */
+	public static final int KINETIC_SWORD_CHAIN_ROUNDS = 3;
+	/** 0.4 seconds at 20 TPS. Round 2 = 3 ticks, round 3 = 1 tick. */
+	public static final int KINETIC_SWORD_ROUND_REDUCTION_TICKS = 8;
+	/** Authored draft clips are 0.75 s; one final-pose tick plus a 2-tick gap. */
+	public static final int KINETIC_SWORD_DRAFT_CLIP_TICKS = 16;
+	public static final int KINETIC_SWORD_DRAFT_GAP_TICKS = 2;
+	public static final int KINETIC_SWORD_DRAFT_TICKS =
+			KINETIC_SWORD_DRAFT_CLIP_TICKS + KINETIC_SWORD_DRAFT_GAP_TICKS;
+	/** Damage timelines for GS_ATK_2-3_draft and GS_ATK_4-5_draft. */
+	public static final int[][] KINETIC_SWORD_DRAFT_DAMAGE_TICKS = {
+			{3, 10}, {4, 10}
+	};
+	/** Boost-consuming ATK5 at authored speed, with a 4-block path sweep. */
+	public static final int KINETIC_SWORD_ACCEL_ATTACK_TICKS = 11;
+	public static final int KINETIC_SWORD_ACCEL_MOVE_END_TICK = 11;
+	public static final double KINETIC_SWORD_ACCEL_DISTANCE = 4.0D;
 	/** All six authored back-idle clips are 0.5 seconds. */
-	public static final int KINETIC_SWORD_BACK_IDLE_TICKS = 11;
+	public static final int KINETIC_SWORD_BACK_IDLE_TICKS = 10;
 	public static final float KINETIC_SWORD_DAMAGE = 9.0F;
+
+	/** Effective state interval for one attack in the accelerated 2-5 loop. */
+	public static int kineticSwordAttackTicks(int combo, int round) {
+		if (combo < 2 || combo > 5) {
+			return KINETIC_SWORD_ATTACK_TICKS[
+					Math.max(0, Math.min(
+							KINETIC_SWORD_ATTACK_TICKS.length - 1, combo - 1))];
+		}
+		int clampedRound = Math.max(1,
+				Math.min(KINETIC_SWORD_CHAIN_ROUNDS, round));
+		return Math.max(1, KINETIC_SWORD_ATTACK_TICKS[combo - 1]
+				- (clampedRound - 1) * KINETIC_SWORD_ROUND_REDUCTION_TICKS);
+	}
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
 	/**
@@ -255,6 +285,16 @@ public final class TkGun {
 	public static final int SKILL_JUMP_HOVER_TICKS = 50;
 	/** Extended safety lifetime while the jump backpack may own the apex hover. */
 	public static final int SKILL_JUMP_THRUSTER_MAX_TICKS = 200;
+	/** Kinetic Sword leap, tuned against vanilla air drag for 4 high / 6 forward. */
+	public static final double KINETIC_SWORD_JUMP_HORIZONTAL_SPEED = 0.485D;
+	public static final double KINETIC_SWORD_JUMP_VERTICAL_SPEED = 0.8032D;
+	/** Sprint leap preserves its long horizontal arc with a 2-block apex. */
+	public static final double KINETIC_SWORD_RUN_JUMP_HORIZONTAL_SPEED = 1.4267D;
+	public static final double KINETIC_SWORD_RUN_JUMP_VERTICAL_SPEED = 0.544852D;
+	/** Per-tick horizontal fade during a Kinetic Sword descent. */
+	public static final double KINETIC_SWORD_JUMP_FALL_FADE = 0.78D;
+	/** Normal landing occurs in about 21 ticks; keep a short safety bound. */
+	public static final int KINETIC_SWORD_JUMP_MAX_TICKS = 30;
 	/** Jump thruster extends the gun slide to 10 blocks and doubles its duration. */
 	public static final double SLIDE_THRUSTER_DISTANCE = 10.0D;
 	public static final double SLIDE_THRUSTER_DISTANCE_MULTIPLIER =

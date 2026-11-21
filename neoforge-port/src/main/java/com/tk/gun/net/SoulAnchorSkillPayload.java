@@ -7,7 +7,8 @@ import net.minecraft.network.packet.CustomPayload;
 
 /** Client-visible phase for the chestplate Soul Anchor skill. */
 public record SoulAnchorSkillPayload(int playerEntityId, int phase,
-		int durationTicks, boolean gunHeld) implements CustomPayload {
+		int durationTicks, boolean gunHeld, boolean swordSkill)
+		implements CustomPayload {
 	public static final int THROW = 0;
 	public static final int DRAG = 1;
 	public static final int DRAG_ENTITY = 2;
@@ -32,10 +33,12 @@ public record SoulAnchorSkillPayload(int playerEntityId, int phase,
 						buf.writeVarInt(value.phase());
 						buf.writeVarInt(Math.max(0, value.durationTicks()));
 						buf.writeBoolean(value.gunHeld());
+						buf.writeBoolean(value.swordSkill());
 					},
 					buf -> new SoulAnchorSkillPayload(
 							buf.readVarInt(), buf.readVarInt(),
-							buf.readVarInt(), buf.readBoolean()));
+							buf.readVarInt(), buf.readBoolean(),
+							buf.readableBytes() > 0 && buf.readBoolean()));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

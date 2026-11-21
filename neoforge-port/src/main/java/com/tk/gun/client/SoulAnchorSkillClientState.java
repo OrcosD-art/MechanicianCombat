@@ -8,19 +8,28 @@ import java.util.Map;
 /** Per-player Soul Anchor skill animation phase. */
 public final class SoulAnchorSkillClientState {
 	public record Entry(int phase, long startedAt, long endsAt,
-			boolean gunHeld, long revision) {
+			boolean gunHeld, boolean swordSkill, long revision) {
 	}
 
 	private static final Map<Integer, Entry> ENTRIES = new HashMap<>();
+	/** Sword pulls retain their held tail after END until the player lands. */
+	private static final Map<Integer, Boolean> POST_SWORD_DRAG = new HashMap<>();
 	private static long ticks;
 	private static long revisions;
 
 	public static void apply(SoulAnchorSkillPayload payload) {
+		Entry previous = ENTRIES.get(payload.playerEntityId());
 		if (payload.phase() == SoulAnchorSkillPayload.END) {
 			ENTRIES.remove(payload.playerEntityId());
+			if (previous != null && previous.swordSkill()
+					&& previous.phase() == SoulAnchorSkillPayload.DRAG) {
+				POST_SWORD_DRAG.put(payload.playerEntityId(), Boolean.TRUE);
+			} else {
+				POST_SWORD_DRAG.remove(payload.playerEntityId());
+			}
 			return;
 		}
-		Entry previous = ENTRIES.get(payload.playerEntityId());
+		POST_SWORD_DRAG.remove(payload.playerEntityId());
 		long revision = previous == null
 				|| previous.phase() != payload.phase()
 				? ++revisions : previous.revision();
@@ -30,7 +39,7 @@ public final class SoulAnchorSkillClientState {
 		ENTRIES.put(payload.playerEntityId(), new Entry(
 				payload.phase(), startedAt,
 				ticks + payload.durationTicks(),
-				payload.gunHeld(), revision));
+				payload.gunHeld(), payload.swordSkill(), revision));
 	}
 
 	public static void tick() {
@@ -41,10 +50,12 @@ public final class SoulAnchorSkillClientState {
 
 	public static void clear(int playerId) {
 		ENTRIES.remove(playerId);
+		POST_SWORD_DRAG.remove(playerId);
 	}
 
 	public static void clearAll() {
 		ENTRIES.clear();
+		POST_SWORD_DRAG.clear();
 	}
 
 	public static Entry get(int playerId) {
@@ -57,8 +68,16 @@ public final class SoulAnchorSkillClientState {
 
 	public static boolean playerDragging(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		return entry != null && !entry.gunHeld()
+		return entry != null && (!entry.gunHeld() || entry.swordSkill())
 				&& entry.phase() == SoulAnchorSkillPayload.DRAG;
+	}
+
+	public static boolean postSwordDragActive(int playerId) {
+		return POST_SWORD_DRAG.containsKey(playerId);
+	}
+
+	public static void clearPostSwordDrag(int playerId) {
+		POST_SWORD_DRAG.remove(playerId);
 	}
 
 	public static boolean dragging(int playerId) {
@@ -147,12 +166,12 @@ public final class SoulAnchorSkillClientState {
 
 	public static boolean nonGunAnchorActive(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		return entry != null && !entry.gunHeld();
+		return entry != null && (!entry.gunHeld() || entry.swordSkill());
 	}
 
 	public static boolean firstPersonActive(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		if (entry == null) {
+		if (entry == null || entry.swordSkill()) {
 			return false;
 		}
 		if (entry.phase() == SoulAnchorSkillPayload.READY) {
@@ -167,7 +186,7 @@ public final class SoulAnchorSkillClientState {
 
 	public static boolean firstPersonThrowing(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		return entry != null
+		return entry != null && !entry.swordSkill()
 				&& (entry.phase() == SoulAnchorSkillPayload.THROW
 						|| entry.phase()
 								== SoulAnchorSkillPayload.GUN_THROW);
@@ -236,19 +255,25 @@ public final class SoulAnchorSkillClientState {
 			return null;
 		}
 		return switch (entry.phase()) {
-			case SoulAnchorSkillPayload.READY -> entry.gunHeld()
-					? "chain_ready_gun_upper" : "chain_ready";
+			case SoulAnchorSkillPayload.READY -> entry.swordSkill()
+					? "chain_ready_sword"
+					: entry.gunHeld() ? "chain_ready_gun_upper" : "chain_ready";
 			case SoulAnchorSkillPayload.RECALL -> "chain_drag_entity";
 			case SoulAnchorSkillPayload.GUN_RECALL ->
-					"chain_throw_gun_drag_upper";
-			case SoulAnchorSkillPayload.DRAG -> "chain_drag";
+					entry.swordSkill() ? "chain_drag_entity"
+							: "chain_throw_gun_drag_upper";
+			case SoulAnchorSkillPayload.DRAG -> entry.swordSkill()
+					? "chain_drag_sword" : "chain_drag";
 			case SoulAnchorSkillPayload.DRAG_ENTITY -> "chain_drag_entity";
-			case SoulAnchorSkillPayload.GUN_THROW -> entry.gunHeld()
-					? "chain_throw_gun_upper" : "chain_throw";
-			case SoulAnchorSkillPayload.ANCHOR_FLIGHT -> entry.gunHeld()
-					? "chain_throw_gun_upper" : "chain_throw";
-			case SoulAnchorSkillPayload.ANCHOR_STALL -> entry.gunHeld()
-					? "chain_throw_gun_upper" : "chain_throw";
+			case SoulAnchorSkillPayload.GUN_THROW -> entry.swordSkill()
+					? "chain_throw_sword"
+					: entry.gunHeld() ? "chain_throw_gun_upper" : "chain_throw";
+			case SoulAnchorSkillPayload.ANCHOR_FLIGHT -> entry.swordSkill()
+					? "chain_throw_sword"
+					: entry.gunHeld() ? "chain_throw_gun_upper" : "chain_throw";
+			case SoulAnchorSkillPayload.ANCHOR_STALL -> entry.swordSkill()
+					? "chain_throw_sword"
+					: entry.gunHeld() ? "chain_throw_gun_upper" : "chain_throw";
 			case SoulAnchorSkillPayload.GUN_DRAG_ENTITY ->
 					"chain_throw_gun_drag_upper";
 			case SoulAnchorSkillPayload.GUN_SLIDING ->
@@ -257,7 +282,7 @@ public final class SoulAnchorSkillClientState {
 					"chain_sliding_to_idle_upper";
 			case SoulAnchorSkillPayload.GUN_SLIDING_TO_RUN ->
 					"chain_sliding_to_run_upper";
-			default -> "chain_throw";
+			default -> entry.swordSkill() ? "chain_throw_sword" : "chain_throw";
 		};
 	}
 

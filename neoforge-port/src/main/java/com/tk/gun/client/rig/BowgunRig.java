@@ -571,7 +571,20 @@ public final class BowgunRig implements GeoReplacedEntity {
 	}
 
 	private int kineticRunTransitionUntil = -1;
+	private int kineticRunBackIdleUntil = -1;
+	private int kineticBackIdleShotSeq = Integer.MIN_VALUE;
 	private boolean kineticWasRunning;
+
+	/**
+	 * The Kinetic Sword leap and its landing recovery belong exclusively to
+	 * the base controller. Clear any stale sprint-start/stop bridge so the
+	 * upper controller cannot replay GS_run_back-idle over fall_back-idle.
+	 */
+	private void resetKineticRunAnimationBridges() {
+		kineticRunTransitionUntil = -1;
+		kineticRunBackIdleUntil = -1;
+		kineticWasRunning = false;
+	}
 
 	/** 播动画的统一入口（顺便记下名字给日志）。 */
 	private PlayState play(AnimationState<BowgunRig> state, String name) {
@@ -587,28 +600,77 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
 			return play(state, "idle");
 		}
+		if (entry != null && entry.state == TkGun.State.SKILL_JUMP) {
+			resetKineticRunAnimationBridges();
+			state.getController().transitionLength(0);
+			return play(state, GunClientState.kineticSwordJumpAnimation(
+					entity.getId(), entry.kineticSwordRunJump));
+		}
 		if (entry != null && entry.state == TkGun.State.MELEE) {
 			int step = Math.max(1, Math.min(6, entry.shotIndex));
-			String name = "GS_ATK_" + step
-					+ (entry.meleeReturning ? "_back-idle" : "");
+			String name;
+			if (entry.kineticSwordDraft && !entry.meleeReturning) {
+				name = entry.shotIndex == 2
+						? "GS_ATK_2-3_draft" : "GS_ATK_4-5_draft";
+			} else {
+				name = "GS_ATK_" + step
+						+ (entry.meleeReturning ? "_back-idle" : "");
+			}
+			if (entry.meleeReturning && name.endsWith("_back-idle")) {
+				if (entry.shotSeq == kineticBackIdleShotSeq) {
+					state.getController().transitionLength(0);
+					return PlayState.CONTINUE;
+				}
+				kineticBackIdleShotSeq = entry.shotSeq;
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] kinetic sword back-idle begin {} seq={} player={}",
+						name, entry.shotSeq, player.getName().getString());
+				state.getController().forceAnimationReset();
+			}
 			entry.lastMeleeAnimation = name;
 			state.getController().transitionLength(0);
 			return play(state, name);
+		}
+		if (!player.isOnGround()) {
+			state.getController().transitionLength(0);
+			return play(state,
+					GunClientState.skillJumpAnimation(entity.getId()));
+		}
+		if (entry != null && entry.state == TkGun.State.IDLE
+				&& TkGunClient.ticks() < entry.kineticSwordLandingIdleUntil) {
+			resetKineticRunAnimationBridges();
+			state.getController().transitionLength(0);
+			return play(state, "fall_back-idle");
 		}
 		String walk = TkGunClient.walkAnimation(entity.getId());
 		boolean moving = TkGunClient.isMoving(entity.getId())
 				|| TkGunClient.hasMovementInput(entity.getId());
 		boolean sprintInput = player.isSprinting();
+		boolean chainReady =
+				com.tk.gun.client.SoulAnchorSkillClientState
+						.ready(entity.getId());
 		net.minecraft.client.MinecraftClient client =
 				net.minecraft.client.MinecraftClient.getInstance();
 		if (entity == client.player) {
 			sprintInput = sprintInput || client.options.sprintKey.isPressed();
 		}
+		if (chainReady) {
+			// The chain-ready input shares the sprint key. While ready, the
+			// authored four-way walk set must own the legs instead of GS_run.
+			sprintInput = false;
+		}
 		double speed = player.getVelocity().horizontalLength();
-		boolean running = moving && (walk != null && "run".equals(walk)
-				|| sprintInput || speed >= 0.25D);
+		boolean dashForwardRun = chainReady
+				&& GunClientState.dashing(entity.getId())
+				&& "run".equals(walk);
+		boolean running = (!chainReady || dashForwardRun) && moving
+				&& (walk != null && "run".equals(walk)
+						|| sprintInput || speed >= 0.25D);
 		if (running && !kineticWasRunning) {
 			kineticRunTransitionUntil = TkGunClient.ticks() + 2;
+		}
+		if (!running && kineticWasRunning) {
+			kineticRunBackIdleUntil = TkGunClient.ticks() + 6;
 		}
 		kineticWasRunning = running;
 		if (running) {
@@ -651,6 +713,23 @@ public final class BowgunRig implements GeoReplacedEntity {
 						|| "GS_run".equals(currentAnimationName)
 						|| "veritas_accelerated_run".equals(currentAnimationName))) {
 			return TkGunClient.walkAnimationSpeed(player.getId());
+		}
+		if (TkGun.isKineticSword(player)
+				&& currentAnimationName != null
+				&& currentAnimationName.startsWith("GS_ATK_")) {
+			GunClientState.Entry sword = GunClientState.get(player.getId());
+			if (sword != null && sword.kineticSwordAccelerationAttack) {
+				return 1.0D;
+			}
+			if (sword != null && sword.kineticSwordDraft) {
+				return 1.0D;
+			}
+			if (sword != null && sword.state == TkGun.State.MELEE
+					&& sword.shotIndex >= 2 && sword.shotIndex <= 5) {
+				int baseTicks = TkGun.KINETIC_SWORD_ATTACK_TICKS[
+						sword.shotIndex - 1];
+				return baseTicks / (double) Math.max(1, sword.total);
+			}
 		}
 		// 架枪三档（慢/快/滑铲抢枪）都写在 GunClientState.speedFor 里，和 TkGun.AIM_TICKS_* 一套数
 		return GunClientState.speedFor(player.getId());
@@ -701,6 +780,15 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
 				&& TkGun.isMeleeWeapon(player)) {
 			GunClientState.Entry swordState = GunClientState.get(entity.getId());
+			if (!player.isOnGround()
+					|| swordState != null
+							&& (swordState.state == TkGun.State.SKILL_JUMP
+									|| swordState.state == TkGun.State.IDLE
+											&& TkGunClient.ticks()
+													< swordState.kineticSwordLandingIdleUntil)) {
+				resetKineticRunAnimationBridges();
+				return PlayState.STOP;
+			}
 			if (swordState != null
 					&& swordState.state == TkGun.State.MELEE
 					&& !swordState.meleeReturning) {
@@ -712,6 +800,11 @@ public final class BowgunRig implements GeoReplacedEntity {
 			if (running && TkGunClient.ticks() < kineticRunTransitionUntil) {
 				state.getController().transitionLength(0);
 				return state.setAndContinue(rawFor("idle_to_run"));
+			}
+			if (!running
+					&& TkGunClient.ticks() < kineticRunBackIdleUntil) {
+				state.getController().transitionLength(0);
+				return state.setAndContinue(rawFor("GS_run_back-idle"));
 			}
 			return PlayState.STOP;
 		}
@@ -797,9 +890,37 @@ public final class BowgunRig implements GeoReplacedEntity {
 				entity == null ? null
 						: com.tk.gun.client.SoulAnchorSkillClientState
 								.get(entity.getId());
-		if (soulAnchor != null && !soulAnchor.gunHeld()
-				&& soulAnchor.phase()
-						== com.tk.gun.net.SoulAnchorSkillPayload.DRAG) {
+		if (entity != null
+				&& com.tk.gun.client.SoulAnchorSkillClientState
+						.postSwordDragActive(entity.getId())) {
+			if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)
+					|| player.isOnGround() || !TkGun.isKineticSword(player)) {
+				com.tk.gun.client.SoulAnchorSkillClientState
+						.clearPostSwordDrag(entity.getId());
+			} else {
+				GunClientState.Entry gun = GunClientState.get(player.getId());
+				boolean combatOwnsPose = gun != null
+						&& gun.state != TkGun.State.IDLE
+						&& gun.state != TkGun.State.RUN;
+				if (combatOwnsPose) {
+					com.tk.gun.client.SoulAnchorSkillClientState
+							.clearPostSwordDrag(player.getId());
+				} else {
+					String name = player.getVelocity().y > 0.01D
+							? "chain_drag_sword"
+							: "chain_drag_sword_fall";
+					if (!name.equals(soulAnchorSkillName)) {
+						soulAnchorSkillName = name;
+						state.getController().transitionLength(0);
+						state.getController().forceAnimationReset();
+					}
+					return state.setAndContinue(rawFor(name));
+				}
+			}
+		}
+		if (soulAnchor != null && !soulAnchor.swordSkill()
+				&& com.tk.gun.client.SoulAnchorSkillClientState
+						.playerDragging(entity == null ? -1 : entity.getId())) {
 			// The base controller owns the full-body drag clip.
 			soulAnchorSkillName = null;
 			return PlayState.STOP;
@@ -1341,6 +1462,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 			// 同上：宁可给个待机姿势也不要 STOP（STOP = 整模型弹回 geo 初始姿势）
 			return play(state, "idle");
 		}
+		GunClientState.Entry e = GunClientState.get(entity.getId());
 		if (com.tk.gun.client.SoulAnchorSkillClientState
 				.gunSliding(entity.getId())
 				|| com.tk.gun.client.SoulAnchorSkillClientState
@@ -1365,11 +1487,20 @@ public final class BowgunRig implements GeoReplacedEntity {
 				baseAnchorRevision = soulAnchor.revision();
 				state.getController().forceAnimationReset();
 			}
+			if (soulAnchor != null && soulAnchor.swordSkill()) {
+				return pickKineticSword(state, e);
+			}
 			state.getController().transitionLength(0);
-			return play(state, "chain_drag");
+			return play(state,
+					com.tk.gun.client.SoulAnchorSkillClientState
+							.animationName(entity.getId()));
 		}
 		if (com.tk.gun.client.SoulAnchorSkillClientState
 				.ready(entity.getId())) {
+			if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+					&& TkGun.isMeleeWeapon(player)) {
+				return pickKineticSword(state, e);
+			}
 			String walk = TkGunClient.walkAnimation(entity.getId());
 			return play(state, walk == null ? "idle" : walk);
 		}
@@ -1377,7 +1508,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 			state.getController().transitionLength(0);
 			return play(state, "skill_flag_gun");
 		}
-		GunClientState.Entry e = GunClientState.get(entity.getId());
 		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
 				&& TkGun.isMeleeWeapon(player)) {
 			return pickKineticSword(state, e);
@@ -1648,9 +1778,21 @@ public final class BowgunRig implements GeoReplacedEntity {
 	 * (idle/idle_upper/close are common cases) otherwise hits setAnimation's
 	 * equality fast path and leaves the controller STOPPED indefinitely.
 	 */
-	private static void recoverStoppedController(AnimationState<BowgunRig> state) {
+	private void recoverStoppedController(AnimationState<BowgunRig> state) {
 		AnimationController<BowgunRig> controller = state.getController();
 		if (controller.getAnimationState() == AnimationController.State.STOPPED) {
+			Entity entity = entityOf(state);
+			GunClientState.Entry entry =
+					entity == null ? null
+							: GunClientState.get(entity.getId());
+			if (entry != null && entry.state == TkGun.State.MELEE
+					&& entry.meleeReturning
+					&& currentAnimationName != null
+					&& currentAnimationName.endsWith("_back-idle")) {
+				// The one-shot recovery already completed. Let the caller switch
+				// to idle instead of resetting and replaying the cached clip.
+				return;
+			}
 			controller.forceAnimationReset();
 		}
 	}

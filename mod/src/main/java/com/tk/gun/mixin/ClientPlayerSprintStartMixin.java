@@ -16,7 +16,9 @@ public abstract class ClientPlayerSprintStartMixin {
 	private void mechaniciancombat$blockArmedSprintStart(
 			CallbackInfoReturnable<Boolean> cir) {
 		ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
-		if ((TkGun.holdingGun(player) && !TkGun.isMeleeWeapon(player)
+		if ((TkGun.holdingGun(player)
+				&& (!TkGun.isMeleeWeapon(player)
+						|| TkGun.isKineticSword(player))
 				&& !GunClientState.dashing(player.getId()))
 				|| SoulAnchorSkillClientState.nonGunAnchorActive(
 						player.getId())) {

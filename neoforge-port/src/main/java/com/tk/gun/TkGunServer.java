@@ -495,6 +495,12 @@ public class TkGunServer implements ModInitializer {
 		public long dashUntil;
 		/** Speed-only tail after a completed slide; never controls dodge inputs or aim locks. */
 		public long speedBoostUntil;
+		/** Kinetic Sword acceleration persists while moving and ends on attack/standstill. */
+		public boolean kineticSwordDodgeBoost;
+		/** Sprint leap selects the authored GS_run_jump/GS_run_fall pair. */
+		public boolean kineticSwordRunJump;
+		public boolean kineticSwordMoveInput;
+		public long kineticSwordMoveInputAt;
 		/** A single slide may extend the speed modifier only once. */
 		public boolean slideBoostApplied;
 		/** Last dash-active value sent to clients; used to broadcast the expiry. */
@@ -595,6 +601,13 @@ public class TkGunServer implements ModInitializer {
 		public boolean kineticSwordAttack;
 		public boolean kineticSwordReturn;
 		public boolean kineticSwordQueued;
+		public boolean kineticSwordDraft;
+		public boolean kineticSwordAccelerationAttack;
+		public final Set<UUID> kineticSwordAccelerationHits = new HashSet<>();
+		public double kineticSwordAccelerationInitialSpeed;
+		/** Buffered Kinetic Sword left click while a dodge transition still owns the state. */
+		public long kineticSwordSprintAttackQueuedUntil;
+		public int kineticSwordRound = 1;
 		public int kineticSwordHitIndex;
 		public double kineticSwordMoveDirX;
 		public double kineticSwordMoveDirZ;
@@ -1315,6 +1328,9 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
 				com.tk.gun.net.GunJumpPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.KineticSwordMovementPayload.ID,
+				com.tk.gun.net.KineticSwordMovementPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
 				com.tk.gun.net.JumpBackpackPayload.ID,
 				com.tk.gun.net.JumpBackpackPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(
@@ -1351,6 +1367,14 @@ public class TkGunServer implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunJumpPayload.ID,
 				(payload, context) -> context.server().execute(() ->
 						startGunJumpAction(context.player())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.KineticSwordMovementPayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					PState st = state(context.player());
+					st.kineticSwordMoveInput = payload.moving();
+					st.kineticSwordMoveInputAt =
+							context.player().getWorld().getTime();
+				}));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.JumpBackpackPayload.ID,
 				(payload, context) -> context.server().execute(() ->
@@ -1502,8 +1526,15 @@ public class TkGunServer implements ModInitializer {
 					st.rollRequestX = payload.directionX();
 					st.rollRequestZ = payload.directionZ();
 					boolean startingFromFocus = st.deployed;
+					boolean kineticSword = TkGun.isKineticSword(p);
 					long rollNow = p.getWorld().getTime();
 					if (st.rollFallbackPending) {
+						return;
+					}
+					if (kineticSword && st.kineticSwordDodgeBoost) {
+						TkGun.LOGGER.info(
+								"[mechaniciancombat] Kinetic Sword boost active, Alt ignored player={}",
+								p.getName().getString());
 						return;
 					}
 					if (st.state == TkGun.State.SKILL_JUMP) {
@@ -1562,7 +1593,7 @@ public class TkGunServer implements ModInitializer {
 						TkGun.LOGGER.info("[mechaniciancombat] 翻滚键：蹲射准备中，忽略 玩家={}", p.getName().getString());
 						return;
 					}
-					if (st.state == TkGun.State.AIM_HOLD) {
+					if (!kineticSword && st.state == TkGun.State.AIM_HOLD) {
 						st.lastDodgeKind = 0;
 					}
 					// **蹲射准备期间不能翻滚**（用户 2026-10-17）：AIM / AIM_FAST / AIM_SLIDE 是"架枪过门"，
@@ -1582,10 +1613,11 @@ public class TkGunServer implements ModInitializer {
 					//   lastDodgeKind = 1（刚翻滚）→ 这次 Alt = **强制位移滑铲**（`sliding` 动画）；
 					//                      滑完把 kind 归 0，并屏蔽 20 tick（1 秒，两个都不能用）；
 					//   lastDodgeKind = 0/2     → 这次 Alt 走**翻滚**（下面原来的流程，含 combat_roll 的物理翻滚）。
-					if (rollNow < st.dodgeBlockUntil) {
+					if (!kineticSword && rollNow < st.dodgeBlockUntil) {
 						return;
 					}
-					if (st.lastDodgeKind == 1 && !forceRoll && rollNow < st.dashUntil) {
+					if (!kineticSword && st.lastDodgeKind == 1
+							&& !forceRoll && rollNow < st.dashUntil) {
 						// **只有翻滚播完才能滑铲**（用户 2026-10-17）：翻滚途中按 Alt 直接忽略（不打断动画）。
 						if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
 								|| st.state == TkGun.State.ROLL_TO_RUN) {
@@ -1597,7 +1629,7 @@ public class TkGunServer implements ModInitializer {
 						st.lastDodgeKind = 0;
 						return;
 					}
-					if (st.lastDodgeKind == 1) {
+					if (!kineticSword && st.lastDodgeKind == 1) {
 						st.lastDodgeKind = 0;
 						TkGun.LOGGER.info("[mechaniciancombat] roll dash window expired -> reset dodge cycle, this Alt starts a new roll player={}",
 								p.getName().getString());
@@ -1606,7 +1638,7 @@ public class TkGunServer implements ModInitializer {
 					// to the previous roll's dash window.
 					if (!CombatRollHook.isInstalled()
 							&& rollNow < st.fallbackRollReadyAt
-							&& !dashMeleeRecovery) {
+							&& !dashMeleeRecovery && !kineticSword) {
 						TkGun.LOGGER.info("[mechaniciancombat] 内置翻滚冷却中，拒绝 Alt（剩余 {} tick）玩家={}",
 								st.fallbackRollReadyAt - rollNow, p.getName().getString());
 						rebroadcast(p);
@@ -1909,11 +1941,17 @@ public class TkGunServer implements ModInitializer {
 				? armorCooldownTicks
 				: CombatRollHook.isInstalled()
 						? 0 : (int) Math.max(0, st.fallbackRollReadyAt - now);
+		boolean kineticSwordBoost = st.kineticSwordDodgeBoost;
+		boolean kineticSwordDraft = st.kineticSwordDraft;
+		boolean kineticSwordAccelerationAttack =
+				st.kineticSwordAccelerationAttack;
+		boolean kineticSwordRunJump = st.kineticSwordRunJump;
 		// "在装填窗口里吗" 跟着状态一起发：HUD 靠它显示"装填"，模型那边靠它知道弹夹正在插回去
 		GunStatePayload payload = new GunStatePayload(actor.getId(), state.id, ticks, (int) heat, shotIndex,
 				activeMag(st), now < st.reloadUntil,
 				st.deployed && TkGun.holdingGun(actor), st.shotSeq,
-				now < dashEnd, dashTicks, aimLockTicks, heatLockTicks, st.magAmmo,
+				now < dashEnd || kineticSwordBoost, dashTicks, aimLockTicks,
+				heatLockTicks, st.magAmmo,
 				rollCooldownTicks,
 				TkGun.magazineCapacity(actor, false),
 				TkGun.magazineCapacity(actor, true),
@@ -1926,7 +1964,9 @@ public class TkGunServer implements ModInitializer {
 						&& st.fortressSkillFromFocus,
 				state == TkGun.State.FORTRESS_SKILL_LOAD
 						&& st.fortressSkillFromSlide,
-				st.skillJumpHovering, st.skillFallTailPose);
+				st.skillJumpHovering, st.skillFallTailPose,
+				kineticSwordBoost, kineticSwordDraft,
+				kineticSwordAccelerationAttack, kineticSwordRunJump);
 		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(p, payload);
 		}
@@ -3311,6 +3351,8 @@ public class TkGunServer implements ModInitializer {
 		st.armorDodgeCooldownPending = false;
 		st.lastArmorDodgeAt = 0L;
 		st.fortressSkillReadyAt = 0L;
+		st.kineticSwordDodgeBoost = false;
+		st.kineticSwordRunJump = false;
 		GunStateMachine.clearDash(player);
 		rebroadcast(player);
 	}
@@ -4656,8 +4698,31 @@ public class TkGunServer implements ModInitializer {
 		if (!player.isOnGround() || player.isUsingItem()) {
 			return;
 		}
+		boolean sprintAttackIntent = st.kineticSwordDodgeBoost
+				&& (st.kineticSwordMoveInput
+						|| player.getVelocity().horizontalLength() > 0.03D);
+		if (sprintAttackIntent) {
+			st.kineticSwordSprintAttackQueuedUntil = now + 8L;
+			if (st.state == TkGun.State.IDLE || st.state == TkGun.State.RUN) {
+				beginKineticSwordAccelerationAttack(player, st, now);
+				return;
+			}
+			if (st.state == TkGun.State.ROLL
+					|| st.state == TkGun.State.ROLL_TO_IDLE
+					|| st.state == TkGun.State.ROLL_TO_RUN) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] buffered kinetic sword sprint attack "
+								+ "during {} player={}",
+						st.state, player.getName().getString());
+				return;
+			}
+		}
 		if (st.state == TkGun.State.MELEE) {
 			if (st.kineticSwordAttack && !st.kineticSwordReturn) {
+				if (st.kineticSwordDraft) {
+					st.kineticSwordQueued = true;
+					return;
+				}
 				int index = Math.max(0, Math.min(5, st.meleeCombo - 1));
 				long chainAt = st.stateStarted
 						+ TkGun.KINETIC_SWORD_ATTACK_TICKS[index];
@@ -4679,7 +4744,13 @@ public class TkGunServer implements ModInitializer {
 		if (player.getServer() == null) {
 			return;
 		}
+		stopKineticSwordDodgeBoost(player, st, "attack");
 		int combo = Math.max(1, Math.min(TkGun.KINETIC_SWORD_DAMAGE_TICKS.length, step));
+		if (combo == 1) {
+			st.kineticSwordRound = 1;
+		}
+		int attackTicks = TkGun.kineticSwordAttackTicks(
+				combo, st.kineticSwordRound);
 		st.meleeCombo = combo;
 		st.shotIndex = combo;
 		st.shotSeq++;
@@ -4694,6 +4765,9 @@ public class TkGunServer implements ModInitializer {
 		st.meleeReturning = false;
 		st.kineticSwordReturn = false;
 		st.kineticSwordAttack = true;
+		st.kineticSwordDraft = false;
+		st.kineticSwordAccelerationAttack = false;
+		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4708,7 +4782,7 @@ public class TkGunServer implements ModInitializer {
 				? TkGun.KINETIC_SWORD_DAMAGE_TICKS[0][0] : 0;
 		st.kineticSwordMoveEndTick =
 				Math.max(st.kineticSwordMoveStartTick + 1,
-						TkGun.KINETIC_SWORD_ATTACK_TICKS[combo - 1] - 1);
+						attackTicks - 1);
 		st.kineticSwordMoveLastX = player.getX();
 		st.kineticSwordMoveLastZ = player.getZ();
 		st.kineticSwordMoveTraveled = 0.0D;
@@ -4724,10 +4798,180 @@ public class TkGunServer implements ModInitializer {
 		player.setVelocity(0.0D, velocity.y, 0.0D);
 		player.velocityModified = true;
 		setState(player.getServer(), player, TkGun.State.MELEE,
-				TkGun.KINETIC_SWORD_ATTACK_TICKS[combo - 1]);
+				attackTicks);
 		playMeleeAnimationSounds(player, st, "GS_ATK_" + combo, 0.0D);
 		TkGun.LOGGER.info("[mechaniciancombat] kinetic sword attack {} started player={}",
 				combo, player.getName().getString());
+	}
+
+	private static void beginKineticSwordAccelerationAttack(
+			ServerPlayerEntity player, PState st, long now) {
+		if (player.getServer() == null || !player.isOnGround()
+				|| !holdingKineticSword(player)
+				|| !st.kineticSwordDodgeBoost) {
+			return;
+		}
+		Vec3d inheritedVelocity = player.getVelocity();
+		double inheritedSpeed = inheritedVelocity.horizontalLength();
+		if (inheritedSpeed <= 0.03D && !st.kineticSwordMoveInput) {
+			return;
+		}
+		stopKineticSwordDodgeBoost(player, st, "accelerated ATK_5");
+		st.kineticSwordSprintAttackQueuedUntil = 0L;
+		st.kineticSwordAccelerationInitialSpeed = inheritedSpeed;
+		st.kineticSwordRound = 1;
+		st.meleeCombo = 5;
+		st.shotIndex = 5;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleeHoldOver = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.meleeReturning = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordAttack = true;
+		st.kineticSwordDraft = false;
+		st.kineticSwordAccelerationAttack = true;
+		st.kineticSwordAccelerationHits.clear();
+		st.kineticSwordQueued = false;
+		st.kineticSwordHitIndex = 0;
+		double yaw = Math.toRadians(player.getYaw());
+		st.kineticSwordMoveDirX = -Math.sin(yaw);
+		st.kineticSwordMoveDirZ = Math.cos(yaw);
+		st.kineticSwordMoveDistance = TkGun.KINETIC_SWORD_ACCEL_DISTANCE;
+		st.kineticSwordMoveStartTick = 0;
+		st.kineticSwordMoveEndTick = TkGun.KINETIC_SWORD_ACCEL_MOVE_END_TICK;
+		st.kineticSwordMoveLastX = player.getX();
+		st.kineticSwordMoveLastZ = player.getZ();
+		st.kineticSwordMoveTraveled = 0.0D;
+		st.meleePlayedSoundCues.clear();
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		player.setVelocity(0.0D, inheritedVelocity.y, 0.0D);
+		player.velocityModified = true;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.KINETIC_SWORD_ACCEL_ATTACK_TICKS);
+		playMeleeAnimationSounds(player, st, "GS_ATK_5", 0.0D);
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] kinetic sword accelerated ATK_5 started: "
+						+ "speed={} distance={} player={}",
+				round3(inheritedSpeed), TkGun.KINETIC_SWORD_ACCEL_DISTANCE,
+				player.getName().getString());
+	}
+
+	private static String kineticSwordAnimation(PState st) {
+		if (!st.kineticSwordDraft) {
+			return "GS_ATK_" + st.meleeCombo;
+		}
+		return st.meleeCombo == 2
+				? "GS_ATK_2-3_draft" : "GS_ATK_4-5_draft";
+	}
+
+	/** Combined two-hit authored clip plus the required 0.1 s inter-loop gap. */
+	private static void beginKineticSwordDraft(ServerPlayerEntity player,
+			PState st, long now, int pair) {
+		if (player.getServer() == null || (pair != 2 && pair != 4)) {
+			return;
+		}
+		stopKineticSwordDodgeBoost(player, st, "attack");
+		st.meleeCombo = pair;
+		st.shotIndex = pair;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleeHoldOver = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.meleeReturning = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordAttack = true;
+		st.kineticSwordDraft = true;
+		st.kineticSwordAccelerationAttack = false;
+		st.kineticSwordAccelerationHits.clear();
+		st.kineticSwordQueued = false;
+		st.kineticSwordHitIndex = 0;
+		double yaw = Math.toRadians(player.getYaw());
+		st.kineticSwordMoveDirX = -Math.sin(yaw);
+		st.kineticSwordMoveDirZ = Math.cos(yaw);
+		st.kineticSwordMoveDistance = 1.0D;
+		st.kineticSwordMoveStartTick = 0;
+		st.kineticSwordMoveEndTick = TkGun.KINETIC_SWORD_DRAFT_CLIP_TICKS - 1;
+		st.kineticSwordMoveLastX = player.getX();
+		st.kineticSwordMoveLastZ = player.getZ();
+		st.kineticSwordMoveTraveled = 0.0D;
+		st.meleePlayedSoundCues.clear();
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		String animation = kineticSwordAnimation(st);
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				TkGun.KINETIC_SWORD_DRAFT_TICKS);
+		playMeleeAnimationSounds(player, st, animation, 0.0D);
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] kinetic sword draft {} round={} started player={}",
+				animation, st.kineticSwordRound,
+				player.getName().getString());
+	}
+
+	private static void tickKineticSwordDraft(ServerPlayerEntity player,
+			PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		tickKineticSwordAttackMotion(player, st, elapsed);
+		playMeleeAnimationSounds(player, st, kineticSwordAnimation(st),
+				elapsed / 20.0D);
+		int[] damageTicks = TkGun.KINETIC_SWORD_DRAFT_DAMAGE_TICKS[
+				st.meleeCombo == 2 ? 0 : 1];
+		while (st.kineticSwordHitIndex < damageTicks.length
+				&& elapsed >= damageTicks[st.kineticSwordHitIndex]) {
+			st.kineticSwordHitIndex++;
+			performKineticSwordHit(player, st);
+		}
+		if (elapsed < TkGun.KINETIC_SWORD_DRAFT_TICKS) {
+			return;
+		}
+		boolean wantsNext = st.meleeInputHeld || st.kineticSwordQueued;
+		if (st.meleeCombo == 2 && wantsNext) {
+			beginKineticSwordDraft(player, st, now, 4);
+			return;
+		}
+		if (st.meleeCombo == 4) {
+			if (st.kineticSwordRound >= TkGun.KINETIC_SWORD_CHAIN_ROUNDS) {
+				beginKineticSwordAttack(player, st, now, 6);
+				return;
+			}
+			if (wantsNext) {
+				st.kineticSwordRound++;
+				beginKineticSwordDraft(player, st, now, 2);
+				return;
+			}
+		}
+		beginKineticSwordRecovery(player, st, now);
 	}
 
 	private static void beginKineticSwordRecovery(ServerPlayerEntity player,
@@ -4735,21 +4979,32 @@ public class TkGunServer implements ModInitializer {
 		if (player.getServer() == null) {
 			return;
 		}
+		if (st.state == TkGun.State.MELEE && st.kineticSwordReturn
+				&& st.meleeReturning) {
+			return;
+		}
+		boolean draftRecovery = st.kineticSwordDraft;
+		int recoveryStep = draftRecovery
+				? st.meleeCombo + 1 : st.meleeCombo;
 		st.kineticSwordAttack = false;
 		st.kineticSwordQueued = false;
 		st.kineticSwordReturn = true;
+		st.kineticSwordDraft = false;
+		st.kineticSwordAccelerationAttack = false;
+		st.kineticSwordAccelerationHits.clear();
 		st.kineticSwordHitIndex = 0;
 		st.kineticSwordMoveDistance = 0.0D;
 		st.kineticSwordMoveTraveled = 0.0D;
 		st.meleeReturning = true;
-		st.shotIndex = Math.max(1, Math.min(6, st.meleeCombo));
+		st.shotIndex = Math.max(1, Math.min(6, recoveryStep));
 		st.shotSeq++;
 		st.meleeInputHeld = false;
 		st.meleeInputPressedAt = 0L;
 		setState(player.getServer(), player, TkGun.State.MELEE,
 				TkGun.KINETIC_SWORD_BACK_IDLE_TICKS);
-		TkGun.LOGGER.info("[mechaniciancombat] kinetic sword attack {} -> back-idle player={}",
-				st.meleeCombo, player.getName().getString());
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] kinetic sword attack {} -> back-idle {} player={}",
+				st.meleeCombo, st.shotIndex, player.getName().getString());
 	}
 
 	private static void tickKineticSwordAttack(ServerPlayerEntity player,
@@ -4770,22 +5025,172 @@ public class TkGunServer implements ModInitializer {
 				TkGun.KINETIC_SWORD_DAMAGE_TICKS.length - 1,
 				st.meleeCombo - 1));
 		int[] damageTicks = TkGun.KINETIC_SWORD_DAMAGE_TICKS[attackIndex];
+		int attackTicks = TkGun.kineticSwordAttackTicks(
+				st.meleeCombo, st.kineticSwordRound);
 		while (st.kineticSwordHitIndex < damageTicks.length
-				&& elapsed >= damageTicks[st.kineticSwordHitIndex]) {
+				&& elapsed >= Math.min(attackTicks,
+						damageTicks[st.kineticSwordHitIndex])) {
 			st.kineticSwordHitIndex++;
 			performKineticSwordHit(player, st);
 		}
 
-		if (st.kineticSwordQueued
-				&& st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length
-				&& elapsed >= (st.meleeCombo == 2 || st.meleeCombo == 4
-						? TkGun.KINETIC_SWORD_QUICK_CHAIN_TICK
-						: TkGun.KINETIC_SWORD_ATTACK_TICKS[attackIndex])) {
+		boolean finalRound = st.meleeCombo == 5
+				&& st.kineticSwordRound >= TkGun.KINETIC_SWORD_CHAIN_ROUNDS;
+		boolean wantsNext = st.meleeInputHeld || st.kineticSwordQueued
+				|| finalRound;
+		int transitionTick = st.meleeCombo == 2 || st.meleeCombo == 4
+				? Math.min(attackTicks, TkGun.KINETIC_SWORD_QUICK_CHAIN_TICK)
+				: attackTicks;
+		if (wantsNext && st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length
+				&& elapsed >= transitionTick) {
+			if (st.meleeCombo == 5) {
+				if (finalRound) {
+					beginKineticSwordAttack(player, st, now, 6);
+				} else {
+					st.kineticSwordRound++;
+					beginKineticSwordDraft(player, st, now, 2);
+				}
+				return;
+			}
 			beginKineticSwordAttack(player, st, now, st.meleeCombo + 1);
 			return;
 		}
-		if (elapsed >= TkGun.KINETIC_SWORD_ATTACK_TICKS[attackIndex]) {
+		if (elapsed >= attackTicks) {
 			beginKineticSwordRecovery(player, st, now);
+		}
+	}
+
+	private static void tickKineticSwordAccelerationAttack(
+			ServerPlayerEntity player, PState st, long now) {
+		long elapsed = now - st.stateStarted;
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+
+		double fromX = st.kineticSwordMoveLastX;
+		double fromZ = st.kineticSwordMoveLastZ;
+		double toX = player.getX();
+		double toZ = player.getZ();
+		performKineticSwordAccelerationPathHit(
+				player, st, fromX, fromZ, toX, toZ);
+		st.kineticSwordMoveLastX = toX;
+		st.kineticSwordMoveLastZ = toZ;
+		st.kineticSwordMoveTraveled += Math.max(0.0D,
+				(toX - fromX) * st.kineticSwordMoveDirX
+						+ (toZ - fromZ) * st.kineticSwordMoveDirZ);
+
+		playMeleeAnimationSounds(player, st, "GS_ATK_5",
+				elapsed / 20.0D);
+		Vec3d velocity = player.getVelocity();
+		if (elapsed < TkGun.KINETIC_SWORD_ACCEL_MOVE_END_TICK) {
+			long moveTicks = Math.max(1L,
+					TkGun.KINETIC_SWORD_ACCEL_MOVE_END_TICK - 1L);
+			double progress = Math.max(0.0D,
+					Math.min(1.0D, elapsed / (double) moveTicks));
+			double averagePace = TkGun.KINETIC_SWORD_ACCEL_DISTANCE
+					/ moveTicks;
+			double momentum = Math.max(0.0D, Math.min(1.0D,
+					st.kineticSwordAccelerationInitialSpeed
+							* holdOverMovementFriction(player)
+							/ Math.max(1.0E-4D, averagePace)));
+			double eased = 1.0D - Math.pow(1.0D - progress,
+					1.0D + momentum);
+			double cumulative = TkGun.KINETIC_SWORD_ACCEL_DISTANCE * eased;
+			double step = Math.max(0.0D, Math.min(
+					TkGun.KINETIC_SWORD_ACCEL_DISTANCE
+							- st.kineticSwordMoveTraveled,
+					cumulative - st.kineticSwordMoveTraveled));
+			double speed = step / holdOverMovementFriction(player);
+			player.setVelocity(st.kineticSwordMoveDirX * speed,
+					velocity.y, st.kineticSwordMoveDirZ * speed);
+		} else {
+			player.setVelocity(0.0D, velocity.y, 0.0D);
+		}
+		player.velocityModified = true;
+		if (elapsed >= TkGun.KINETIC_SWORD_ACCEL_ATTACK_TICKS) {
+			beginKineticSwordRecovery(player, st, now);
+		}
+	}
+
+	private static void tickKineticSwordSprintAttackQueue(
+			ServerPlayerEntity player, PState st, long now) {
+		if (st.kineticSwordSprintAttackQueuedUntil <= 0L) {
+			return;
+		}
+		if (now > st.kineticSwordSprintAttackQueuedUntil
+				|| !holdingKineticSword(player)
+				|| !st.kineticSwordDodgeBoost) {
+			st.kineticSwordSprintAttackQueuedUntil = 0L;
+			return;
+		}
+		if (st.state != TkGun.State.IDLE && st.state != TkGun.State.RUN) {
+			return;
+		}
+		if (!st.kineticSwordMoveInput
+				&& player.getVelocity().horizontalLength() <= 0.03D) {
+			st.kineticSwordSprintAttackQueuedUntil = 0L;
+			return;
+		}
+		beginKineticSwordAccelerationAttack(player, st, now);
+	}
+
+	private static void performKineticSwordAccelerationPathHit(
+			ServerPlayerEntity player, PState st,
+			double fromX, double fromZ, double toX, double toZ) {
+		double segmentLength = Math.hypot(toX - fromX, toZ - fromZ);
+		if (segmentLength <= 1.0E-5D) {
+			return;
+		}
+		Vec3d forward = new Vec3d(
+				st.kineticSwordMoveDirX, 0.0D, st.kineticSwordMoveDirZ);
+		Vec3d right = new Vec3d(
+				-st.kineticSwordMoveDirZ, 0.0D,
+				st.kineticSwordMoveDirX);
+		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		double midX = (fromX + toX) * 0.5D;
+		double midZ = (fromZ + toZ) * 0.5D;
+		Vec3d center = new Vec3d(
+				midX, player.getY() + 1.0D, midZ)
+				.add(forward.multiply(1.5D));
+		double halfWidth = 1.5D;
+		double halfHeight = 1.5D;
+		double halfDepth = 2.0D + segmentLength * 0.5D;
+		double minX = Math.min(fromX, toX);
+		double maxX = Math.max(fromX, toX);
+		double minZ = Math.min(fromZ, toZ);
+		double maxZ = Math.max(fromZ, toZ);
+		net.minecraft.util.math.Box search = new net.minecraft.util.math.Box(
+				minX - 5.0D, player.getY() - 3.0D, minZ - 5.0D,
+				maxX + 5.0D, player.getY() + 4.0D, maxZ + 5.0D);
+		List<Entity> hitTargets = new ArrayList<>();
+		for (Entity entity : player.getServerWorld().getOtherEntities(
+				player, search,
+				candidate -> candidate.isAlive() && candidate.canHit()
+						&& !candidate.isSpectator()
+						&& !st.kineticSwordAccelerationHits.contains(
+								candidate.getUuid())
+						&& CombatTargeting.isTargetable(candidate))) {
+			if (!orientedBoxOverlaps(entity.getBoundingBox(), center,
+					right, up, forward, halfWidth, halfHeight, halfDepth)) {
+				continue;
+			}
+			st.kineticSwordAccelerationHits.add(entity.getUuid());
+			if (entity instanceof LivingEntity living) {
+				living.timeUntilRegen = 0;
+			}
+			if (entity.damage(player.getDamageSources().playerAttack(player),
+					TkGun.KINETIC_SWORD_DAMAGE)) {
+				hitTargets.add(entity);
+			}
+		}
+		if (!hitTargets.isEmpty()) {
+			MeleeImpactService.apply(player, st, hitTargets, forward,
+					MeleeImpactService.ATK_2_TICKS, false, false, false);
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] kinetic sword accelerated ATK_5 "
+							+ "path hit {} targets player={}",
+					hitTargets.size(), player.getName().getString());
 		}
 	}
 
@@ -5074,7 +5479,13 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		if (st.kineticSwordAttack) {
-			tickKineticSwordAttack(player, st, now);
+			if (st.kineticSwordDraft) {
+				tickKineticSwordDraft(player, st, now);
+			} else if (st.kineticSwordAccelerationAttack) {
+				tickKineticSwordAccelerationAttack(player, st, now);
+			} else {
+				tickKineticSwordAttack(player, st, now);
+			}
 			return;
 		}
 		if (st.meleeReturning) {
@@ -6814,12 +7225,55 @@ public class TkGunServer implements ModInitializer {
 		st.dodgeFocusQueuedAt = 0;
 	}
 
+	/**
+	 * Kinetic Sword acceleration is condition-driven instead of timer-driven.
+	 * Dodge/roll/jump phases count as movement; starting a melee attack or
+	 * coming to rest ends the reward and makes the next dodge available.
+	 */
+	private static void tickKineticSwordDodgeBoost(ServerPlayerEntity player,
+			PState st, long now) {
+		if (!st.kineticSwordDodgeBoost) {
+			return;
+		}
+		if (!holdingKineticSword(player) || st.state == TkGun.State.MELEE) {
+			stopKineticSwordDodgeBoost(player, st, "attack or weapon change");
+			return;
+		}
+		if (st.state == TkGun.State.ROLL || st.state == TkGun.State.ROLL_TO_IDLE
+				|| st.state == TkGun.State.ROLL_TO_RUN
+				|| st.state == TkGun.State.SLIDE
+				|| st.state == TkGun.State.SLIDE_READY
+				|| st.state == TkGun.State.SKILL_JUMP) {
+			return;
+		}
+		boolean moving = st.kineticSwordMoveInput
+				|| player.getVelocity().horizontalLength() > 0.03D;
+		if (!moving) {
+			stopKineticSwordDodgeBoost(player, st, "standstill");
+		}
+	}
+
+	private static void stopKineticSwordDodgeBoost(ServerPlayerEntity player,
+			PState st, String reason) {
+		if (!st.kineticSwordDodgeBoost) {
+			return;
+		}
+		st.kineticSwordDodgeBoost = false;
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] Kinetic Sword boost ended ({}) player={}",
+				reason, player.getName().getString());
+	}
+
 	private static void startGunJumpAction(ServerPlayerEntity player) {
-		if (!TkGun.holdingGun(player) || TkGun.isMeleeWeapon(player)) {
+		if (!TkGun.holdingGun(player)) {
 			return;
 		}
 		Identifier gunId = TkGun.definition(player).id();
-		if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
+		if (gunId.equals(TkGun.id("kinetic_sword"))) {
+			startKineticSwordJump(player);
+		} else if (TkGun.isMeleeWeapon(player)) {
+			return;
+		} else if (gunId.equals(TkGun.id("abyssal_ancient_cannon"))) {
 			startSkillJump(player);
 		} else if (gunId.equals(TkGun.id("bowgun"))) {
 			startFortressSkill(player);
@@ -7074,6 +7528,84 @@ public class TkGunServer implements ModInitializer {
 						.equals(TkGun.id("abyssal_ancient_cannon"));
 	}
 
+	private static boolean holdingKineticSword(ServerPlayerEntity player) {
+		return TkGun.holdingGun(player)
+				&& TkGun.definition(player).id()
+						.equals(TkGun.id("kinetic_sword"));
+	}
+
+	/**
+	 * Kinetic Sword replaces the ordinary jump with a short authored leap.
+	 * It shares Silent Storm's ballistic state, but has its own 4 x 6 arc and
+	 * never enters the jump-backpack hover branch.
+	 */
+	private static void startKineticSwordJump(ServerPlayerEntity player) {
+		if (player.getServer() == null || !player.isAlive()
+				|| !player.isOnGround() || !holdingKineticSword(player)) {
+			return;
+		}
+		PState st = state(player);
+		if (st.state != TkGun.State.IDLE && st.state != TkGun.State.RUN) {
+			return;
+		}
+		long now = player.getWorld().getTime();
+		clearPendingShots(player, st, "kinetic sword jump");
+		player.stopUsingItem();
+		Vec3d inheritedVelocity = player.getVelocity();
+		double inheritedHorizontalSpeed =
+				inheritedVelocity.horizontalLength();
+		boolean sprintJump = player.isSprinting()
+				|| st.kineticSwordDodgeBoost && st.kineticSwordMoveInput;
+		st.kineticSwordRunJump = sprintJump;
+		double launchHorizontalSpeed = sprintJump
+				? TkGun.KINETIC_SWORD_RUN_JUMP_HORIZONTAL_SPEED
+				: TkGun.KINETIC_SWORD_JUMP_HORIZONTAL_SPEED;
+		double launchVerticalSpeed = sprintJump
+				? TkGun.KINETIC_SWORD_RUN_JUMP_VERTICAL_SPEED
+				: TkGun.KINETIC_SWORD_JUMP_VERTICAL_SPEED;
+		st.deployed = false;
+		st.focusShots = 0;
+		st.focusRamp = 0;
+		st.skillJumpStartedAt = now;
+		st.skillJumpAirborne = false;
+		st.skillJumpFalling = false;
+		// A Kinetic Sword jump always lands in idle instead of restoring sprint.
+		st.skillJumpResumeSprint = false;
+		st.skillJumpHovering = false;
+		st.skillJumpHoverConsumed = true;
+		st.skillJumpThrusterFlight = false;
+		st.skillJumpHoverUntil = 0L;
+		st.skillFallAttackQueued = false;
+		st.skillFallDiveStarted = false;
+		st.skillFallImpactDone = false;
+		st.skillFallExtendedDetection = false;
+		st.skillFallTailPose = false;
+		st.skillFallSlowUntil = 0L;
+		st.skillFallTargetUuid = null;
+
+		double yaw = Math.toRadians(player.getYaw());
+		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D,
+				Math.cos(yaw)).normalize();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		player.setVelocity(
+				forward.x * launchHorizontalSpeed,
+				launchVerticalSpeed,
+				forward.z * launchHorizontalSpeed);
+		player.velocityModified = true;
+		player.setOnGround(false);
+		player.fallDistance = 0.0F;
+		setState(player.getServer(), player, TkGun.State.SKILL_JUMP,
+				TkGun.KINETIC_SWORD_JUMP_MAX_TICKS);
+		TkGun.LOGGER.info("[mechaniciancombat] Kinetic Sword jump: vertical={}, "
+						+ "horizontal={}, inherited={}, sprintJump={}, player={}",
+				launchVerticalSpeed,
+				launchHorizontalSpeed, inheritedHorizontalSpeed, sprintJump,
+				player.getName().getString());
+	}
+
 	/** Consumes exactly one queued fall attack input during the jump. */
 	private static void handleSilentStormFallInput(ServerPlayerEntity player) {
 		if (!holdingSilentStorm(player)) {
@@ -7131,6 +7663,7 @@ public class TkGunServer implements ModInitializer {
 		st.skillJumpStartedAt = now;
 		st.skillJumpAirborne = false;
 		st.skillJumpFalling = false;
+		st.kineticSwordRunJump = false;
 		st.skillJumpResumeSprint = player.isSprinting();
 		st.skillJumpHovering = false;
 		st.skillJumpHoverConsumed = false;
@@ -7673,6 +8206,7 @@ public class TkGunServer implements ModInitializer {
 			GunStateMachine.tickImmovable(player, st, now);
 			GunStateMachine.tickAtk3MovementLock(player, st);
 			boolean armorDodgeChanged = tickArmorDodge(st, now);
+			tickKineticSwordDodgeBoost(player, st, now);
 			boolean dashChanged = GunStateMachine.tickDash(player, st, now);
 			if (armorDodgeChanged || dashChanged) {
 				rebroadcast(player);
@@ -7885,6 +8419,7 @@ public class TkGunServer implements ModInitializer {
 					broadcast(server, player, TkGun.State.IDLE, 0, st.heat);
 				}
 			}
+			tickKineticSwordSprintAttackQueue(player, st, now);
 			// （检视的定时音效/粒子点随旧素材的 `simple` 一起作废：新素材里没有 simple 了，
 			//   INSPECT 现在播作者的 Focus_over_shooting 样品，它自己没有埋音效事件。）
 
@@ -8103,22 +8638,52 @@ public class TkGunServer implements ModInitializer {
 					return;
 				}
 				st.skillJumpFalling = true;
+				if (holdingKineticSword(player)) {
+					stopKineticSwordDodgeBoost(player, st,
+							"jump descent");
+					double fallFade = st.kineticSwordRunJump
+							? 1.0D : TkGun.KINETIC_SWORD_JUMP_FALL_FADE;
+					TkGun.LOGGER.info(
+							"[mechaniciancombat] Kinetic Sword jump descent "
+									+ "fade={} inherited={} player={}",
+							fallFade,
+							velocity.horizontalLength(),
+							player.getName().getString());
+				} else {
+					player.setVelocity(
+							velocity.x * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+							velocity.y,
+							velocity.z * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER);
+					player.velocityModified = true;
+					TkGun.LOGGER.info("[mechaniciancombat] Silent Storm fall inertia x{} player={}",
+							TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
+							player.getName().getString());
+				}
+			}
+			if (st.skillJumpFalling && holdingKineticSword(player)
+					&& !st.kineticSwordRunJump) {
+				Vec3d fallVelocity = player.getVelocity();
 				player.setVelocity(
-						velocity.x * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
-						velocity.y,
-						velocity.z * TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER);
+						fallVelocity.x * TkGun.KINETIC_SWORD_JUMP_FALL_FADE,
+						fallVelocity.y,
+						fallVelocity.z * TkGun.KINETIC_SWORD_JUMP_FALL_FADE);
 				player.velocityModified = true;
-				TkGun.LOGGER.info("[mechaniciancombat] Silent Storm fall inertia x{} player={}",
-						TkGun.SKILL_JUMP_FALL_INERTIA_MULTIPLIER,
-						player.getName().getString());
 			}
 		} else if (st.skillJumpAirborne
 				|| now >= st.skillJumpStartedAt + 2L) {
+			boolean kineticSwordLanding = holdingKineticSword(player);
 			if (st.skillJumpThrusterFlight) {
 				finishBackpackSpecialThrust(player, now);
 				st.skillJumpThrusterFlight = false;
 			}
 			completeDodgeCooldownAfterSkillJump(st);
+			if (kineticSwordLanding) {
+				stopKineticSwordDodgeBoost(player, st, "jump landing");
+				st.skillJumpResumeSprint = false;
+				st.kineticSwordRunJump = false;
+				player.setVelocity(0.0D, 0.0D, 0.0D);
+				player.velocityModified = true;
+			}
 			if (st.skillJumpResumeSprint) {
 				player.setSprinting(true);
 			}
@@ -9062,6 +9627,7 @@ public class TkGunServer implements ModInitializer {
 		PState st = state(player);
 		boolean startingFromFocus = st.deployed;
 		long now = player.getWorld().getTime();
+		boolean kineticSword = TkGun.isKineticSword(player);
 		if (SoulAnchorSkillService.isActive(player)) {
 			return;
 		}
@@ -9093,22 +9659,29 @@ public class TkGunServer implements ModInitializer {
 				|| st.state == TkGun.State.ROLL_TO_RUN) {
 			return;
 		}
+		if (kineticSword && st.kineticSwordDodgeBoost
+				&& st.lastDodgeAt != now) {
+			return;
+		}
 		// 非专注状态下，翻滚结束后的下一次 Alt 必须走滑铲。combat_roll 事件通常先于
 		// GunRollPayload 到达；这里不能抢先广播 ROLL，否则会把“滑铲”覆盖成第二次翻滚。
-		if (st.lastDodgeKind == 1 && !st.deployed && !st.rollInputAccepted
+		if (!kineticSword && st.lastDodgeKind == 1
+				&& !st.deployed && !st.rollInputAccepted
 				&& now < st.dashUntil && st.lastDodgeAt != now) {
 			TkGun.LOGGER.info("[mechaniciancombat] 翻滚事件：下一次 Alt 应由滑铲接管，事件先忽略 玩家={}",
 					player.getName().getString());
 			return;
 		}
-		if (st.lastDodgeKind == 1 && !st.deployed && now >= st.dashUntil) {
+		if (!kineticSword && st.lastDodgeKind == 1
+				&& !st.deployed && now >= st.dashUntil) {
 			st.lastDodgeKind = 0;
 			TkGun.LOGGER.info("[mechaniciancombat] roll event: slide window expired -> restart roll cycle player={}",
 					player.getName().getString());
 		}
 		// 滑铲结束后的 1 秒锁同样约束 combat_roll 自己触发的事件。
 		// 过热 / Focus_over 仍允许翻滚打断，避免恢复流程被锁死。
-		if (now < st.dodgeBlockUntil && st.state != TkGun.State.OVERHEAT
+		if (!kineticSword && now < st.dodgeBlockUntil
+				&& st.state != TkGun.State.OVERHEAT
 				&& st.state != TkGun.State.OVER) {
 			TkGun.LOGGER.info("[mechaniciancombat] 翻滚事件：滑铲后冷却中，忽略 玩家={}", player.getName().getString());
 			return;
@@ -9118,7 +9691,11 @@ public class TkGunServer implements ModInitializer {
 		// —— 也就是三种翻滚（普通 / 专注里 / 过热里）都要拿到同一套冲刺奖励。
 		// 以前这里把过热分支放在前面**直接 return**，那两种翻滚就少了这个奖励。
 		// （连锁闪避冷却里 `onDodgeStarted` 自己会拒绝并给提示，返回 true = 锁着）
-		boolean rewardAlreadyGranted = st.rollFallbackPending || st.rollInputAccepted;
+		boolean kineticRewardThisTick = kineticSword
+				&& st.kineticSwordDodgeBoost && st.lastDodgeAt == now;
+		boolean rewardAlreadyGranted = kineticRewardThisTick
+				|| !kineticSword
+						&& (st.rollFallbackPending || st.rollInputAccepted);
 		st.rollFallbackPending = false;
 		st.rollFallbackAt = 0;
 		boolean locked = rewardAlreadyGranted

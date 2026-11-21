@@ -141,12 +141,12 @@ public final class GunStateMachine {
 		// movement modifier after a completed slide and must not revive roll,
 		// aim-lock, fast-focus, or dodge-window semantics.
 		boolean want = now < st.dashUntil || now < st.speedBoostUntil
-				|| now < st.armorDodgeBoostUntil;
+				|| now < st.armorDodgeBoostUntil || st.kineticSwordDodgeBoost;
 		// Broadcast only the authoritative dodge window. Keeping dashSyncActive
 		// tied to speedBoostUntil would make clients retain aim locks after the
 		// actual dash expired.
 		boolean dashActive = now < st.dashUntil
-				|| now < st.armorDodgeBoostUntil;
+				|| now < st.armorDodgeBoostUntil || st.kineticSwordDodgeBoost;
 		boolean syncChanged = dashActive != st.dashSyncActive;
 		st.dashSyncActive = dashActive;
 		EntityAttributeInstance attr = player.getAttributeInstance(EntityAttributes.GENERIC_MOVEMENT_SPEED);
@@ -248,6 +248,28 @@ public final class GunStateMachine {
 	 */
 	public static boolean onDodgeStarted(ServerPlayerEntity player, TkGunServer.PState st, long now,
 									 boolean roll) {
+		if (TkGun.isKineticSword(player)) {
+			if (st.kineticSwordDodgeBoost) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] Kinetic Sword boost active -> dodge denied player={}",
+						player.getName().getString());
+				return true;
+			}
+			st.lastDodgeAt = now;
+			st.lastDodgeKind = 0;
+			st.dashUntil = 0L;
+			st.speedBoostUntil = 0L;
+			st.slideBoostApplied = false;
+			st.dodgeLockUntil = 0L;
+			st.dodgeBlockUntil = 0L;
+			st.fallbackRollReadyAt = 0L;
+			st.kineticSwordDodgeBoost = true;
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] Kinetic Sword dodge -> movement-bound +{}% speed player={}",
+					(int) (DASH_SPEED_BONUS * 100),
+					player.getName().getString());
+			return false;
+		}
 		// ⚠️ 同一次翻滚会**两次**走到这里：combat_roll 的事件 + 我们"翻滚键包"那条路（2026-10-25 补的）。
 		//    不加这道闸，第二次会被判成"连锁闪避"→ 反而给玩家套上 3 秒闪避锁（自己坑自己）。
 		if (st.lastDodgeAt == now) {

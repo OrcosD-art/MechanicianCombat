@@ -47,6 +47,13 @@ public final class GunClientState {
 	 * （用户："疾跑与翻滚加速状态下不允许进行右键瞄准"）。
 	 */
 	public boolean dashing;
+		/** Kinetic Sword's condition-driven post-dodge acceleration. */
+		public boolean kineticSwordBoost;
+		public boolean kineticSwordDraft;
+		public boolean kineticSwordAccelerationAttack;
+		public boolean kineticSwordRunJump;
+		/** Keep the Kinetic Sword's fall-to-landing recovery pose before idle resumes. */
+		public int kineticSwordLandingIdleUntil;
 		public boolean dashMeleeActive;
 		public boolean meleeReturning;
 		public boolean dashMeleeReturn;
@@ -183,6 +190,17 @@ public final class GunClientState {
 		}
 		boolean enteredRoll = newState == TkGun.State.ROLL && previousState != TkGun.State.ROLL;
 		e.dashing = payload.dashing();
+		e.kineticSwordBoost = payload.kineticSwordBoost();
+		e.kineticSwordDraft = payload.kineticSwordDraft();
+		e.kineticSwordAccelerationAttack =
+				payload.kineticSwordAccelerationAttack();
+		e.kineticSwordRunJump = payload.kineticSwordRunJump();
+		if (previousState == TkGun.State.SKILL_JUMP
+				&& newState == TkGun.State.IDLE) {
+			e.kineticSwordLandingIdleUntil = ticks + 6;
+		} else if (newState == TkGun.State.SKILL_JUMP) {
+			e.kineticSwordLandingIdleUntil = 0;
+		}
 		e.dashUntil = payload.dashTicks() > 0 ? ticks + payload.dashTicks() : 0;
 		e.magAmmo = payload.magAmmo();
 		// 服务端每包都带权威剩余时间；允许快速蹲射结束时用 0 立即解锁。
@@ -280,6 +298,9 @@ public final class GunClientState {
 		if (ticks < e.localDodgeLockUntil) {
 			return false;
 		}
+		if (e.kineticSwordBoost) {
+			return false;
+		}
 		if (dashMeleeRecovery(e)) {
 			return true;
 		}
@@ -327,6 +348,11 @@ public final class GunClientState {
 		}
 		e.nextDodgeSlide = false;
 		e.dashing = false;
+		e.kineticSwordBoost = false;
+		e.kineticSwordDraft = false;
+		e.kineticSwordAccelerationAttack = false;
+		e.kineticSwordRunJump = false;
+		e.kineticSwordLandingIdleUntil = 0;
 		e.dashMeleeActive = false;
 		e.meleeReturning = false;
 		e.dashMeleeReturn = false;
@@ -442,6 +468,7 @@ public final class GunClientState {
 		e.effectElapsed = 0;
 		e.focus = false;
 		e.dashing = false;
+		e.kineticSwordLandingIdleUntil = 0;
 		e.dashMeleeActive = false;
 		e.meleeReturning = false;
 		e.dashMeleeReturn = false;
@@ -554,6 +581,19 @@ public final class GunClientState {
 		return entity != null && entity.getVelocity().y > 0.01D ? "jump" : "fall";
 	}
 
+	/** Kinetic Sword sprint leaps use their authored ascent and descent poses. */
+	public static String kineticSwordJumpAnimation(int entityId,
+			boolean runJump) {
+		String animation = skillJumpAnimation(entityId);
+		if (!runJump) {
+			return animation;
+		}
+		if ("jump".equals(animation)) {
+			return "GS_run_jump";
+		}
+		return "fall".equals(animation) ? "GS_run_fall" : animation;
+	}
+
 	public static double speedFor(int entityId) {
 		Entry e = ENTRIES.get(entityId);
 		if (e == null) {
@@ -602,7 +642,8 @@ public final class GunClientState {
 	/** 这位玩家现在在**翻滚后的加速冲刺窗口**里吗（服务端广播的 `dashing` 位；禁止右键瞄准）。 */
 	public static boolean dashing(int entityId) {
 		Entry e = ENTRIES.get(entityId);
-		return e != null && e.dashing && ticks < e.dashUntil;
+		return e != null && (e.kineticSwordBoost
+				|| e.dashing && ticks < e.dashUntil);
 	}
 
 	/** Full-suit armor dodge is unavailable during its reward or follow-up cooldown. */
@@ -723,6 +764,9 @@ public final class GunClientState {
 			return false;
 		}
 		if (ticks < e.localDodgeLockUntil) {
+			return true;
+		}
+		if (e.kineticSwordBoost) {
 			return true;
 		}
 		if (e.state == TkGun.State.FORTRESS_SKILL_LOAD

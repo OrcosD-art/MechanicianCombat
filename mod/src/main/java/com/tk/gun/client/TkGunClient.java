@@ -54,6 +54,7 @@ public class TkGunClient implements ClientModInitializer {
 	/** Z（或改键后的那个键）上一 tick 是否按着 —— 自己做边沿检测，不依赖原版 KeyBinding。 */
 	private static boolean focusKeyDown = false;
 	private static boolean jumpKeyDown = false;
+	private static boolean kineticSwordMoveInput = false;
 	/** 连发补包是否已经打过日志（一次按住只打一行，别刷屏）。 */
 	private static boolean autoFireLogged = false;
 	/** F 键上一 tick 是否按着（自己做边沿检测）。 */
@@ -454,13 +455,6 @@ public class TkGunClient implements ClientModInitializer {
 					&& GunClientState.dashing(player.getId())
 					&& dx * dx + dz * dz > MOVING_EPS2
 					&& !player.isSneaking() && !player.isUsingItem()) {
-				player.setSprinting(true);
-			}
-			if (player == client.player && !aiming
-					&& TkGun.isMeleeWeapon(player)
-					&& !player.isSneaking() && !player.isUsingItem()
-					&& hasMovementInput(player.getId())
-					&& client.options.sprintKey.isPressed()) {
 				player.setSprinting(true);
 			}
 			if (dx * dx + dz * dz > MOVING_EPS2) {
@@ -1014,6 +1008,7 @@ public class TkGunClient implements ClientModInitializer {
 			thirdPersonForced = false;
 			heldGunLastTick = false;
 			jumpKeyDown = false;
+			kineticSwordMoveInput = false;
 			MOVES.clear();
 			backpackActionDown = false;
 			soulAnchorKeyDown = false;
@@ -1059,9 +1054,20 @@ public class TkGunClient implements ClientModInitializer {
 						.equals(TkGun.id("abyssal_ancient_cannon"));
 		boolean fortress = holdingGunNow
 				&& TkGun.definition(client.player).id().equals(TkGun.id("bowgun"));
-		if (jumpDown && !jumpKeyDown && (silentStorm || fortress)) {
+		boolean kineticSword = holdingGunNow
+				&& TkGun.definition(client.player).id()
+						.equals(TkGun.id("kinetic_sword"));
+		if (jumpDown && !jumpKeyDown && (silentStorm || fortress || kineticSword)) {
 			ClientPlayNetworking.send(new GunJumpPayload());
 			TkGun.LOGGER.info("[mechaniciancombat] jump key -> request held gun skill");
+		}
+		boolean kineticMoveInput = kineticSword
+				&& hasMovementInput(client.player.getId());
+		if (kineticMoveInput != kineticSwordMoveInput) {
+			ClientPlayNetworking.send(
+					new com.tk.gun.net.KineticSwordMovementPayload(
+							kineticMoveInput));
+			kineticSwordMoveInput = kineticMoveInput;
 		}
 		jumpKeyDown = jumpDown;
 		if (holdingGunNow && client.player.isSneaking()
@@ -1078,7 +1084,9 @@ public class TkGunClient implements ClientModInitializer {
 		heldGunLastTick = holdingGunNow;
 		tickClientStepHeight(client, holdingGunNow);
 		trackMovement(client);
-		if (holdingGunNow && !TkGun.isMeleeWeapon(client.player)
+		if (holdingGunNow
+				&& (!TkGun.isMeleeWeapon(client.player)
+						|| TkGun.isKineticSword(client.player))
 				&& client.player.isSprinting()
 				&& !GunClientState.dashing(client.player.getId())) {
 			// Fallback guard for vanilla paths that set the sprint flag after

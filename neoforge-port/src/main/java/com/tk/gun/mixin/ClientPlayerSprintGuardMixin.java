@@ -28,7 +28,8 @@ public abstract class ClientPlayerSprintGuardMixin {
 					SoulAnchorSkillClientState.nonGunAnchorActive(
 							player.getId());
 			boolean vanillaSprintBlocked = TkGun.holdingGun(player)
-					&& !TkGun.isMeleeWeapon(player)
+					&& (!TkGun.isMeleeWeapon(player)
+							|| TkGun.isKineticSword(player))
 					&& !GunClientState.dashing(player.getId());
 			if (anchorReady || nonGunAnchor || vanillaSprintBlocked) {
 				ci.cancel();

@@ -66,7 +66,8 @@ public final class ShoulderCouplingState {
 		// Normal melee follows the camera, but the directional dash is locked to
 		// its trigger yaw and must keep the camera decoupled from attack heading.
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return !state.meleeHoldOver && !state.dashMeleeActive;
+			return !state.meleeHoldOver && !state.dashMeleeActive
+					&& !state.kineticSwordAccelerationAttack;
 		}
 		// 右键瞄准由 aim→locator 中心线闭环控制身体 yaw；ShoulderSurfing 继续解耦，
 		// 否则它会和中心线控制器同时写 yaw。使用其它物品时同样不接管。
@@ -144,7 +145,9 @@ public final class ShoulderCouplingState {
 			return 0;
 		}
 		if (state != null && state.state == TkGun.State.MELEE) {
-			return state.dashMeleeActive ? 20 : (state.meleeHoldOver ? 13 : 0);
+			return state.kineticSwordAccelerationAttack ? 25
+					: state.dashMeleeActive ? 20
+							: (state.meleeHoldOver ? 13 : 0);
 		}
 		if (TkGun.isMeleeWeapon(client.player)
 				&& client.options.useKey.isPressed()) {
