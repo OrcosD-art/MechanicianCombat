@@ -52,6 +52,8 @@ public final class GunClientState {
 		public boolean kineticSwordDraft;
 		public boolean kineticSwordAccelerationAttack;
 		public boolean kineticSwordRunJump;
+		/** Authored special branch start (2=ATK2-5, 3=ATK3-5, 4=ATK4-5). */
+		public int kineticSwordSpecial;
 		/** Keep the Kinetic Sword's fall-to-landing recovery pose before idle resumes. */
 		public int kineticSwordLandingIdleUntil;
 		public boolean dashMeleeActive;
@@ -195,6 +197,13 @@ public final class GunClientState {
 		e.kineticSwordAccelerationAttack =
 				payload.kineticSwordAccelerationAttack();
 		e.kineticSwordRunJump = payload.kineticSwordRunJump();
+		e.kineticSwordSpecial = Math.max(0,
+				Math.min(4, payload.kineticSwordSpecial()));
+		if (newShotFrame && newState == TkGun.State.MELEE
+				&& e.kineticSwordSpecial > 0) {
+			spawnKineticSwordSpecialSpark(payload.playerId(),
+					e.kineticSwordSpecial);
+		}
 		if (previousState == TkGun.State.SKILL_JUMP
 				&& newState == TkGun.State.IDLE) {
 			e.kineticSwordLandingIdleUntil = ticks + 6;
@@ -252,6 +261,34 @@ public final class GunClientState {
 			// tail remain eligible and override it after the next state packet.
 			e.readyHoldAnimation = null;
 		}
+	}
+
+	private static void spawnKineticSwordSpecialSpark(int entityId,
+			int startStep) {
+		net.minecraft.client.MinecraftClient client =
+				net.minecraft.client.MinecraftClient.getInstance();
+		if (client.world == null) {
+			return;
+		}
+		net.minecraft.entity.Entity entity =
+				client.world.getEntityById(entityId);
+		if (entity == null) {
+			return;
+		}
+		net.minecraft.util.math.Vec3d position =
+				com.tk.gun.client.rig.BowgunRigRenderer
+						.effectsPosition(entityId);
+		if (position == null) {
+			position = com.tk.gun.client.rig.BowgunRigRenderer
+					.locatorPosition(entityId);
+		}
+		if (position == null) {
+			position = entity.getEyePos()
+					.add(entity.getRotationVec(1.0F).multiply(1.25D))
+					.add(0.0D, -0.45D, 0.0D);
+		}
+		SkillSparkParticle.spawnAttached(entity, position, "effects",
+				TkGun.kineticSwordSpecialAnimation(startStep));
 	}
 
 	public static Entry get(int entityId) {
@@ -352,6 +389,7 @@ public final class GunClientState {
 		e.kineticSwordDraft = false;
 		e.kineticSwordAccelerationAttack = false;
 		e.kineticSwordRunJump = false;
+		e.kineticSwordSpecial = 0;
 		e.kineticSwordLandingIdleUntil = 0;
 		e.dashMeleeActive = false;
 		e.meleeReturning = false;
@@ -468,6 +506,11 @@ public final class GunClientState {
 		e.effectElapsed = 0;
 		e.focus = false;
 		e.dashing = false;
+		e.kineticSwordBoost = false;
+		e.kineticSwordDraft = false;
+		e.kineticSwordAccelerationAttack = false;
+		e.kineticSwordRunJump = false;
+		e.kineticSwordSpecial = 0;
 		e.kineticSwordLandingIdleUntil = 0;
 		e.dashMeleeActive = false;
 		e.meleeReturning = false;

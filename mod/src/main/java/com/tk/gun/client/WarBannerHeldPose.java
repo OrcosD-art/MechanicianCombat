@@ -28,9 +28,11 @@ final class WarBannerHeldPose {
 		ANIMATION_BONES.clear();
 	}
 
-	static void apply(GeoBone bone, double seconds, boolean gunHeld) {
-		apply(bone, seconds, HELD_RESOURCE,
-				gunHeld ? "skill_flag_gun" : "skill_flag");
+	static void apply(GeoBone bone, double seconds, boolean gunHeld,
+			boolean kineticSword) {
+		String animation = kineticSword ? "GS_skill_flag"
+				: gunHeld ? "skill_flag_gun" : "skill_flag";
+		apply(bone, seconds, HELD_RESOURCE, animation);
 	}
 
 	static void applyFirstPerson(GeoBone bone, double seconds) {
@@ -142,10 +144,21 @@ final class WarBannerHeldPose {
 
 	private static TreeMap<Double, Vec3> channel(
 			com.google.gson.JsonElement source) {
-		if (source == null || !source.isJsonObject()) {
+		if (source == null) {
 			return null;
 		}
 		TreeMap<Double, Vec3> frames = new TreeMap<>();
+		if (source.isJsonArray()) {
+			Vec3 constant = vector(source);
+			if (constant != null) {
+				frames.put(0.0D, constant);
+				return frames;
+			}
+			return null;
+		}
+		if (!source.isJsonObject()) {
+			return null;
+		}
 		for (var frame : source.getAsJsonObject().entrySet()) {
 			var value = frame.getValue();
 			if (value.isJsonObject()) {

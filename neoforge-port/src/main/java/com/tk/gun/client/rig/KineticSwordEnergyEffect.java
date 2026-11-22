@@ -20,20 +20,28 @@ public final class KineticSwordEnergyEffect {
 	public static final String BONE = "energy_effect";
 	private static final int FRAMES = 6;
 	private static final int FRAMES_PER_SECOND = 9;
-	private static final int HOLD_TICKS = 20;
-	private static final int FADE_TICKS = 20;
+	private static final int HOLD_TICKS = 30;
+	private static final int FADE_TICKS = 10;
 	private static final int HIDE_TICKS = HOLD_TICKS + FADE_TICKS;
 	private static final float FRAME_SIZE = 48.0F;
 	private static final float MODEL_TEXTURE_SIZE = 64.0F;
-	private static final float MIN_UV_SPAN = 4.0F / MODEL_TEXTURE_SIZE;
+	// The authored energy group also contains thin detail cubes whose visible
+	// faces span exactly one texture pixel. Keep sub-pixel rounding tolerance,
+	// while still filtering genuinely degenerate faces.
+	private static final float MIN_UV_SPAN = 0.5F / MODEL_TEXTURE_SIZE;
 	private static final Map<Integer, State> STATES = new HashMap<>();
 
 	public static boolean isEnergyBone(String name) {
 		return BONE.equals(name);
 	}
 
-	public static int colorFor(Entity entity) {
+	public static int colorFor(Entity entity, String animation,
+			float partialTick) {
 		if (entity == null || entity.getWorld() == null) {
+			return 0;
+		}
+		if (KineticSwordRotateEffect.isVisible(entity, animation,
+				partialTick)) {
 			return 0;
 		}
 		int id = entity.getId();
@@ -69,8 +77,9 @@ public final class KineticSwordEnergyEffect {
 		return alpha << 24 | 0x00FFFFFF;
 	}
 
-	public static boolean applyVisibility(GeoBone bone, Entity entity) {
-		int colour = colorFor(entity);
+	public static boolean applyVisibility(GeoBone bone, Entity entity,
+			String animation, float partialTick) {
+		int colour = colorFor(entity, animation, partialTick);
 		boolean visible = (colour >>> 24) > 0;
 		float scale = visible ? 1.0F : 1.0E-4F;
 		bone.setScaleX(scale);

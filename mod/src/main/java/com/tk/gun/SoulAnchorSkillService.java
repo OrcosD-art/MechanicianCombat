@@ -67,6 +67,7 @@ public final class SoulAnchorSkillService {
 		Stage stage = Stage.THROW;
 		boolean gun;
 		boolean sword;
+		boolean readyFromRun;
 		long stageStart;
 		long stageEnd;
 		int anchorId = -1;
@@ -101,7 +102,8 @@ public final class SoulAnchorSkillService {
 
 	public static boolean isAvailable(ServerPlayerEntity player) {
 		if (player == null || !player.isAlive() || player.isSpectator()
-				|| !player.isOnGround()) {
+				|| !player.isOnGround() && TkGun.holdingGun(player)
+						&& !TkGun.isKineticSword(player)) {
 			return false;
 		}
 		return hasInstalledModules(player);
@@ -178,6 +180,8 @@ public final class SoulAnchorSkillService {
 		Skill skill = new Skill();
 		skill.gun = gun;
 		skill.sword = sword;
+		skill.readyFromRun = sword
+				&& (sprintingAtPress || player.isSprinting());
 		skill.stage = Stage.READY;
 		skill.stageStart = player.getWorld().getTime();
 		skill.stageEnd = skill.stageStart;
@@ -764,7 +768,8 @@ public final class SoulAnchorSkillService {
 			int phase, int duration) {
 		skill.lastPhase = phase;
 		SoulAnchorSkillPayload payload = new SoulAnchorSkillPayload(
-				player.getId(), phase, duration, skill.gun, skill.sword);
+				player.getId(), phase, duration, skill.gun, skill.sword,
+				skill.readyFromRun);
 		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
 			if (viewer.squaredDistanceTo(player) <= 64.0D * 64.0D) {
 				ServerPlayNetworking.send(viewer, payload);
@@ -787,7 +792,7 @@ public final class SoulAnchorSkillService {
 		}
 		SoulAnchorSkillPayload payload = new SoulAnchorSkillPayload(
 				player.getId(), SoulAnchorSkillPayload.END, 0,
-				skill.gun, skill.sword);
+				skill.gun, skill.sword, skill.readyFromRun);
 		for (ServerPlayerEntity viewer : player.getServerWorld().getPlayers()) {
 			if (viewer.squaredDistanceTo(player) <= 64.0D * 64.0D) {
 				ServerPlayNetworking.send(viewer, payload);

@@ -174,7 +174,7 @@ public final class TkGunCommand {
 									ServerPlayerEntity p = EntityArgumentType.getPlayer(ctx, "player");
 									p.setOnGround(true);
 									p.fallDistance = 0.0F;
-									TkGunServer.handleJumpBackpackInput(p, true);
+									TkGunServer.handleJumpBackpackInput(p, true, 0.0F, 0.0F);
 									return 1;
 								})))
 				.then(CommandManager.literal("recipeeditor")

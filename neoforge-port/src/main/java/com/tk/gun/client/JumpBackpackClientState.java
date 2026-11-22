@@ -35,6 +35,8 @@ public final class JumpBackpackClientState {
 	private static int ticks;
 	private static boolean sentJumpPressed;
 	private static boolean previousJumpKey;
+	private static float lastDirectionX;
+	private static float lastDirectionZ;
 
 	private static final class Entry {
 		Phase phase = Phase.IDLE;
@@ -49,10 +51,13 @@ public final class JumpBackpackClientState {
 		ClientPlayerEntity player = client.player;
 		if (player == null || client.world == null) {
 			if (sentJumpPressed) {
-				ClientPlayNetworking.send(new JumpBackpackPayload(false));
+				ClientPlayNetworking.send(
+						new JumpBackpackPayload(false, 0.0F, 0.0F));
 				sentJumpPressed = false;
 			}
 			previousJumpKey = false;
+			lastDirectionX = 0.0F;
+			lastDirectionZ = 0.0F;
 			return;
 		}
 
@@ -85,16 +90,57 @@ public final class JumpBackpackClientState {
 		boolean risingEdge = rawPressed && !previousJumpKey;
 		previousJumpKey = rawPressed;
 		boolean eligible = equipped && !TkGun.holdingGun(player);
+		float directionX = 0.0F;
+		float directionZ = 0.0F;
+		if (eligible && client.currentScreen == null) {
+			float[] direction = horizontalDirection(client);
+			directionX = direction[0];
+			directionZ = direction[1];
+		}
+		boolean directionChanged = Math.abs(directionX - lastDirectionX) > 0.01F
+				|| Math.abs(directionZ - lastDirectionZ) > 0.01F;
 		if (eligible && rawPressed && risingEdge && !sentJumpPressed) {
-			ClientPlayNetworking.send(new JumpBackpackPayload(true));
+			ClientPlayNetworking.send(
+					new JumpBackpackPayload(true, directionX, directionZ));
 			sentJumpPressed = true;
 		} else if (eligible && !rawPressed && sentJumpPressed) {
-			ClientPlayNetworking.send(new JumpBackpackPayload(false));
+			ClientPlayNetworking.send(
+					new JumpBackpackPayload(false, directionX, directionZ));
 			sentJumpPressed = false;
 		} else if (!eligible && sentJumpPressed) {
-			ClientPlayNetworking.send(new JumpBackpackPayload(false));
+			ClientPlayNetworking.send(
+					new JumpBackpackPayload(false, 0.0F, 0.0F));
 			sentJumpPressed = false;
+		} else if (eligible && directionChanged
+				&& (sentJumpPressed || isActive(player.getId()))) {
+			ClientPlayNetworking.send(
+					new JumpBackpackPayload(rawPressed, directionX, directionZ));
 		}
+		lastDirectionX = directionX;
+		lastDirectionZ = directionZ;
+	}
+
+	private static float[] horizontalDirection(MinecraftClient client) {
+		float forward = (client.options.forwardKey.isPressed() ? 1.0F : 0.0F)
+				- (client.options.backKey.isPressed() ? 1.0F : 0.0F);
+		float sideways = (client.options.leftKey.isPressed() ? 1.0F : 0.0F)
+				- (client.options.rightKey.isPressed() ? 1.0F : 0.0F);
+		if (Math.abs(forward) < 0.01F && Math.abs(sideways) < 0.01F) {
+			return new float[]{0.0F, 0.0F};
+		}
+		double yaw = Math.toRadians(SprintDirectionCorrection
+				.movementCameraYaw(client));
+		double lookX = -Math.sin(yaw);
+		double lookZ = Math.cos(yaw);
+		double leftX = Math.cos(yaw);
+		double leftZ = Math.sin(yaw);
+		double x = lookX * forward + leftX * sideways;
+		double z = lookZ * forward + leftZ * sideways;
+		double length = Math.sqrt(x * x + z * z);
+		if (length < 1.0E-5D) {
+			return new float[]{0.0F, 0.0F};
+		}
+		return new float[]{(float) (x / length), (float) (z / length)};
 	}
 
 	public static void applyStatus(int playerId, int statusPhase, int remainingTicks) {
@@ -152,6 +198,8 @@ public final class JumpBackpackClientState {
 		JumpBackpackPlayerAnimation.clearAll();
 		sentJumpPressed = false;
 		previousJumpKey = false;
+		lastDirectionX = 0.0F;
+		lastDirectionZ = 0.0F;
 	}
 
 	private JumpBackpackClientState() {

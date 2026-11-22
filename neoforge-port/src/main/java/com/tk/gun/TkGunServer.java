@@ -159,12 +159,17 @@ public class TkGunServer implements ModInitializer {
 	private static final double MISSILE_BOX_TARGET_RADIUS = 32.0D;
 	private static final double MISSILE_BOX_TURN_RADIANS =
 			Math.toRadians(8.0D);
-	private static final double PORTABLE_TURRET_TURN_RADIANS =
-			Math.toRadians(3.0D);
+	private static final double BACKPACK_TURRET_TURN_RADIANS =
+			Math.toRadians(6.0D);
 	private static final double MISSILE_BOX_COLD_DISTANCE = 2.0D;
 	private static final double MISSILE_BOX_COLD_SPEED = 0.09D;
 	private static final double MISSILE_BOX_IGNITED_SPEED = 1.6D;
 	private static final int MISSILE_BOX_COLD_MAX_TICKS = 40;
+	private static final int MISSILE_BOX_ASCENT_TICKS = 6;
+	private static final int MISSILE_BOX_MAX_ASCENT_TICKS = 12;
+	private static final double MISSILE_BOX_ASCENT_HEIGHT = 3.0D;
+	private static final double MISSILE_BOX_ASCENT_SPEED = 0.8D;
+	private static final double MISSILE_BOX_ASCENT_HORIZONTAL = 0.35D;
 	private static final int WAR_BANNER_SKILL_TICKS = 23;
 	private static final int HUNTER_SPEAR_SKILL_TICKS = 23;
 	private static final int MAX_HUNTER_TURRETS = 3;
@@ -274,7 +279,11 @@ public class TkGunServer implements ModInitializer {
 		boolean jumpReadyChecked;
 		boolean jumpAirborne;
 		boolean jumpKeyHeld;
+		double jumpMoveX;
+		double jumpMoveZ;
+		boolean jumpHovering;
 		boolean jumpThrustSoundPlayed;
+		long lastJumpThrustSoundAt;
 		boolean missileAiming;
 		boolean missileFiring;
 		long missileNextMarkAt;
@@ -296,6 +305,9 @@ public class TkGunServer implements ModInitializer {
 		final Vec3d coldDirection;
 		final long launchedAt;
 		boolean tracking;
+		long ignitedAt = -1L;
+		double ignitionY;
+		boolean descending;
 
 		private MissileTracker(ServerWorld world, UUID projectileUuid,
 							   int targetEntityId, long expiresAt,
@@ -500,6 +512,7 @@ public class TkGunServer implements ModInitializer {
 		/** Sprint leap selects the authored GS_run_jump/GS_run_fall pair. */
 		public boolean kineticSwordRunJump;
 		public boolean kineticSwordMoveInput;
+		public boolean kineticSwordBackwardInput;
 		public long kineticSwordMoveInputAt;
 		/** A single slide may extend the speed modifier only once. */
 		public boolean slideBoostApplied;
@@ -515,6 +528,8 @@ public class TkGunServer implements ModInitializer {
 		/** Client-provided horizontal roll direction captured on the Alt press frame. */
 		public double rollRequestX;
 		public double rollRequestZ;
+		/** Raw back-key intent captured on the dodge press frame. */
+		public boolean rollRequestBackward;
 		// —— 客户端量出来的枪口/朝向（GunFirePayload 带过来，出伤帧用；用完即清） ——
 		public double fireMx;
 		public double fireMy;
@@ -603,10 +618,16 @@ public class TkGunServer implements ModInitializer {
 		public boolean kineticSwordQueued;
 		public boolean kineticSwordDraft;
 		public boolean kineticSwordAccelerationAttack;
+		/** Active authored special chain start step (2, 3, or 4; 0 = normal). */
+		public int kineticSwordSpecial;
+		/** Right-click branch waiting for the authored fast-entry tick. */
+		public int kineticSwordSpecialQueued;
+		public double kineticSwordSpecialEffectX;
+		public double kineticSwordSpecialEffectY;
+		public double kineticSwordSpecialEffectZ;
 		public double kineticSwordAccelerationInitialSpeed;
 		/** Buffered Kinetic Sword left click while a dodge transition still owns the state. */
 		public long kineticSwordSprintAttackQueuedUntil;
-		public int kineticSwordRound = 1;
 		public int kineticSwordHitIndex;
 		public double kineticSwordMoveDirX;
 		public double kineticSwordMoveDirZ;
@@ -1143,21 +1164,20 @@ public class TkGunServer implements ModInitializer {
 				TkGun.id("soul_anchor_fpa_model"),
 				new com.tk.gun.item.SoulAnchorFpaItem(
 						new Item.Settings().maxCount(1)));
-		KINETIC_SWORD_FPA_MODEL =
-				com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
-						TkGun.id("kinetic_sword_fpa_model"),
-						new com.tk.gun.item.KineticSwordFpaItem(
-								new Item.Settings().maxCount(1)));
-		HUNTER_ANCHOR_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
-				Registries.ITEM, TkGun.id("hunter_anchor_fpa_model"),
+		KINETIC_SWORD_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("kinetic_sword_fpa_model"),
+				new com.tk.gun.item.KineticSwordFpaItem(
+						new Item.Settings().maxCount(1)));
+		HUNTER_ANCHOR_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("hunter_anchor_fpa_model"),
 				new com.tk.gun.item.CombatPropFpaItem(
 						new Item.Settings().maxCount(1)));
-		PORTABLE_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
-				Registries.ITEM, TkGun.id("portable_turret_fpa_model"),
+		PORTABLE_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("portable_turret_fpa_model"),
 				new com.tk.gun.item.CombatPropFpaItem(
 						new Item.Settings().maxCount(1)));
-		AUTO_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(
-				Registries.ITEM, TkGun.id("auto_turret_fpa_model"),
+		AUTO_TURRET_FPA_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
+				TkGun.id("auto_turret_fpa_model"),
 				new com.tk.gun.item.CombatPropFpaItem(
 						new Item.Settings().maxCount(1)));
 		SOUL_ANCHOR_PROJECTILE_MODEL = com.tk.gun.neoforge.RegistryBridge.register(Registries.ITEM,
@@ -1377,13 +1397,16 @@ public class TkGunServer implements ModInitializer {
 				(payload, context) -> context.server().execute(() -> {
 					PState st = state(context.player());
 					st.kineticSwordMoveInput = payload.moving();
+					st.kineticSwordBackwardInput = payload.backward();
 					st.kineticSwordMoveInputAt =
 							context.player().getWorld().getTime();
 				}));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.JumpBackpackPayload.ID,
 				(payload, context) -> context.server().execute(() ->
-						handleJumpBackpackInput(context.player(), payload.pressed())));
+						handleJumpBackpackInput(context.player(),
+								payload.pressed(), payload.directionX(),
+								payload.directionZ())));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.GunFallAttackPayload.ID,
 				(payload, context) -> context.server().execute(() ->
@@ -1401,7 +1424,9 @@ public class TkGunServer implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.GunMeleePayload.ID,
 				(payload, context) -> context.server().execute(() ->
 						handleMeleeInput(context.player(), payload.pressed(),
-								payload.movingForward())));
+								payload.movingForward(), payload.special(),
+								payload.effectX(), payload.effectY(),
+								payload.effectZ())));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.SoulAnchorInputPayload.ID,
 				(payload, context) -> context.server().execute(() -> {
@@ -1530,6 +1555,7 @@ public class TkGunServer implements ModInitializer {
 					}
 					st.rollRequestX = payload.directionX();
 					st.rollRequestZ = payload.directionZ();
+					st.rollRequestBackward = payload.backward();
 					boolean startingFromFocus = st.deployed;
 					boolean kineticSword = TkGun.isKineticSword(p);
 					long rollNow = p.getWorld().getTime();
@@ -1798,10 +1824,7 @@ public class TkGunServer implements ModInitializer {
 					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
 						return;
 					}
-					com.tk.gun.neoforge.NeoMenuOpening.openByte(
-							p,
-							com.tk.gun.screen.AmmoStorageScreenHandler.createFactory(),
-							(byte) 0);
+					p.openHandledScreen(com.tk.gun.screen.AmmoStorageScreenHandler.createFactory());
 				}));
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.SwitchAmmoPayload.ID,
 				(payload, context) -> context.server().execute(() -> {
@@ -1951,6 +1974,7 @@ public class TkGunServer implements ModInitializer {
 		boolean kineticSwordAccelerationAttack =
 				st.kineticSwordAccelerationAttack;
 		boolean kineticSwordRunJump = st.kineticSwordRunJump;
+		int kineticSwordSpecial = st.kineticSwordSpecial;
 		// "在装填窗口里吗" 跟着状态一起发：HUD 靠它显示"装填"，模型那边靠它知道弹夹正在插回去
 		GunStatePayload payload = new GunStatePayload(actor.getId(), state.id, ticks, (int) heat, shotIndex,
 				activeMag(st), now < st.reloadUntil,
@@ -1971,7 +1995,8 @@ public class TkGunServer implements ModInitializer {
 						&& st.fortressSkillFromSlide,
 				st.skillJumpHovering, st.skillFallTailPose,
 				kineticSwordBoost, kineticSwordDraft,
-				kineticSwordAccelerationAttack, kineticSwordRunJump);
+				kineticSwordAccelerationAttack, kineticSwordRunJump,
+				kineticSwordSpecial);
 		for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(p, payload);
 		}
@@ -2122,13 +2147,16 @@ public class TkGunServer implements ModInitializer {
 	private static void handleWarBannerAction(ServerPlayerEntity player,
 			BackpackCharge state, long now) {
 		PState skillState = state(player);
+		boolean kineticSwordAttacking = TkGun.isKineticSword(player)
+				&& skillState.state == TkGun.State.MELEE;
 		boolean castStateAllowed = !TkGun.holdingGun(player)
 				|| (skillState.state == TkGun.State.IDLE
 						&& !skillState.deployed
 						&& !skillState.airborneIdle
 						&& !player.isUsingItem()
 						&& !player.isSneaking());
-		if (!player.isOnGround() || !castStateAllowed
+		if (!player.isOnGround() || kineticSwordAttacking
+				|| !castStateAllowed
 				|| SoulAnchorSkillService.isActive(player)
 				|| now < skillState.battleBannerCastUntil
 				|| player.getItemCooldownManager().isCoolingDown(WAR_BANNER)
@@ -3417,6 +3445,9 @@ public class TkGunServer implements ModInitializer {
 			state.jumpLastGroundAt = 0;
 			state.jumpAirborne = false;
 			state.jumpKeyHeld = false;
+			state.jumpMoveX = 0.0D;
+			state.jumpMoveZ = 0.0D;
+			state.jumpHovering = false;
 			state.jumpThrustSoundPlayed = false;
 			clearMissileTargets(player, state);
 			state.missileAiming = false;
@@ -3557,7 +3588,7 @@ public class TkGunServer implements ModInitializer {
 			BackpackCharge state, long now) {
 		if (state.launcherType
 				== com.tk.gun.item.BackpackUpgradeData.LauncherType.JUMP_THRUSTER) {
-			return jumpBackpackPhase(state, now);
+			return jumpBackpackPhase(player, state, now);
 		}
 		if (state.launcherType
 				== com.tk.gun.item.BackpackUpgradeData.LauncherType.SUMMON_ANTENNA) {
@@ -3744,7 +3775,7 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	public static void handleJumpBackpackInput(ServerPlayerEntity player,
-			boolean pressed) {
+			boolean pressed, float directionX, float directionZ) {
 		if (!com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
 				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
 			return;
@@ -3752,14 +3783,13 @@ public class TkGunServer implements ModInitializer {
 		long now = player.getWorld().getTime();
 		BackpackCharge state = backpackState(player, now);
 		if (state.jumpAirborne) {
+			setJumpDirection(state, directionX, directionZ);
 			boolean wasHeld = state.jumpKeyHeld;
 			boolean canThrust = pressed && !TkGun.holdingGun(player)
 					&& player.isAlive() && !player.isSpectator()
 						&& !state.jumpEnergyLocked && state.jumpEnergyPixels > 0;
 			state.jumpKeyHeld = canThrust;
-			if (!canThrust) {
-				state.jumpThrustSoundPlayed = false;
-			} else if (!wasHeld && now >= state.jumpReadyUntil) {
+			if (canThrust && !wasHeld && now >= state.jumpReadyUntil) {
 				playJumpThrustActivationSound(player, state);
 			}
 			return;
@@ -3768,7 +3798,7 @@ public class TkGunServer implements ModInitializer {
 		if (!pressed || TkGun.holdingGun(player) || !player.isAlive()
 				|| player.isSpectator() || player.hasVehicle() || player.isFallFlying()
 				|| state.jumpEnergyLocked || state.jumpEnergyPixels <= 0
-				|| jumpBackpackPhase(state, now)
+				|| jumpBackpackPhase(player, state, now)
 						!= com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY) {
 			return;
 		}
@@ -3785,6 +3815,8 @@ public class TkGunServer implements ModInitializer {
 		state.jumpMaxY = player.getY();
 		state.jumpReadyChecked = airborneStart;
 		state.jumpAirborne = true;
+		setJumpDirection(state, directionX, directionZ);
+		state.jumpHovering = false;
 		state.jumpThrustSoundPlayed = false;
 		player.setNoGravity(false);
 		player.setSprinting(false);
@@ -3795,7 +3827,8 @@ public class TkGunServer implements ModInitializer {
 				player.getName().getString(), round3(state.jumpOriginY));
 	}
 
-	private static int jumpBackpackPhase(BackpackCharge state, long now) {
+	private static int jumpBackpackPhase(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
 		if (state.specialThrustActive) {
 			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
 		}
@@ -3803,8 +3836,14 @@ public class TkGunServer implements ModInitializer {
 			if (now < state.jumpReadyUntil) {
 				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY_TO_FLY;
 			}
-			if (state.jumpKeyHeld && !state.jumpEnergyLocked
-					&& state.jumpEnergyPixels > 0) {
+			if (state.jumpHovering) {
+				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
+			}
+			if (!TkGun.holdingGun(player)
+					&& !state.jumpEnergyLocked
+					&& state.jumpEnergyPixels > 0
+					&& (state.jumpKeyHeld || state.jumpHovering
+							|| jumpDirectionalInput(state))) {
 				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
 			}
 			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
@@ -3859,11 +3898,46 @@ public class TkGunServer implements ModInitializer {
 				player.getName().getString());
 	}
 
+	private static boolean jumpDirectionalInput(BackpackCharge state) {
+		return state.jumpMoveX * state.jumpMoveX
+				+ state.jumpMoveZ * state.jumpMoveZ > 1.0E-6D;
+	}
+
+	private static void setJumpDirection(BackpackCharge state,
+			float directionX, float directionZ) {
+		if (!Float.isFinite(directionX) || !Float.isFinite(directionZ)) {
+			state.jumpMoveX = 0.0D;
+			state.jumpMoveZ = 0.0D;
+			return;
+		}
+		double length = Math.sqrt(directionX * directionX
+				+ directionZ * directionZ);
+		if (length < 1.0E-5D) {
+			state.jumpMoveX = 0.0D;
+			state.jumpMoveZ = 0.0D;
+			return;
+		}
+		state.jumpMoveX = directionX / length;
+		state.jumpMoveZ = directionZ / length;
+	}
+
+	private static boolean jumpHovering(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		return state.jumpAirborne && !state.specialThrustActive
+				&& !TkGun.holdingGun(player)
+				&& now >= state.jumpReadyUntil
+				&& !state.jumpKeyHeld
+				&& !jumpDirectionalInput(state)
+				&& !state.jumpEnergyLocked
+				&& state.jumpEnergyPixels > 0;
+	}
+
 	private static void tickJumpEnergy(ServerPlayerEntity player,
 			BackpackCharge state, long now) {
 		int maximum = TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
 		int step = TkGun.JUMP_BACKPACK_ENERGY_STEP_PIXELS;
 		if (state.jumpEnergyLocked) {
+			state.jumpHovering = false;
 			if (state.nextJumpEnergyRecoveryAt <= 0L) {
 				state.nextJumpEnergyRecoveryAt =
 						now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
@@ -3881,19 +3955,30 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 
-		boolean thrusting = state.specialThrustActive
-				|| (state.jumpAirborne && state.jumpKeyHeld
-				&& now >= state.jumpReadyUntil);
+		boolean hovering = jumpHovering(player, state, now);
+		if (state.jumpHovering != hovering) {
+			state.jumpHovering = hovering;
+			state.nextJumpEnergyUseAt = 0L;
+			if (hovering) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] jump thruster hover engaged at y={} player={}",
+						round3(player.getY()), player.getName().getString());
+			}
+		}
+		boolean thrusting = state.specialThrustActive || hovering
+				|| (state.jumpAirborne && now >= state.jumpReadyUntil
+						&& (state.jumpKeyHeld || jumpDirectionalInput(state)));
 		if (thrusting) {
 			state.nextJumpEnergyRecoveryAt = 0L;
+			int drainTicks = hovering
+					? TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS * 2
+					: TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
 			if (state.nextJumpEnergyUseAt <= 0L) {
-				state.nextJumpEnergyUseAt =
-						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+				state.nextJumpEnergyUseAt = now + drainTicks;
 			} else if (now >= state.nextJumpEnergyUseAt) {
 				state.jumpEnergyPixels = Math.max(0,
 						state.jumpEnergyPixels - step);
-				state.nextJumpEnergyUseAt =
-						now + TkGun.JUMP_BACKPACK_ENERGY_DRAIN_TICKS;
+				state.nextJumpEnergyUseAt = now + drainTicks;
 				if (state.jumpEnergyPixels <= 0) {
 					state.jumpEnergyPixels = 0;
 					state.jumpEnergyLocked = true;
@@ -3901,6 +3986,7 @@ public class TkGunServer implements ModInitializer {
 					state.nextJumpEnergyRecoveryAt =
 							now + TkGun.JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS;
 					state.jumpKeyHeld = false;
+					state.jumpHovering = false;
 					state.jumpThrustSoundPlayed = false;
 					state.specialThrustActive = false;
 					state.specialThrustUntil = 0L;
@@ -3912,8 +3998,9 @@ public class TkGunServer implements ModInitializer {
 		}
 
 		state.nextJumpEnergyUseAt = 0L;
+		state.jumpHovering = false;
 		boolean falling = state.jumpAirborne && !player.isOnGround()
-				&& jumpBackpackPhase(state, now)
+				&& jumpBackpackPhase(player, state, now)
 				== com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
 		boolean grounded = player.isOnGround();
 		int recoveryTicks = falling
@@ -3943,13 +4030,22 @@ public class TkGunServer implements ModInitializer {
 		if (!player.isAlive() || player.isSpectator()) {
 			state.jumpAirborne = false;
 			state.jumpKeyHeld = false;
+			state.jumpHovering = false;
 			player.setNoGravity(false);
+			return;
+		}
+		if (player.isSneaking()) {
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] jump thruster dismissed by sneak at y={} player={}",
+					round3(player.getY()), player.getName().getString());
+			finishJumpBackpack(player, state, now);
 			return;
 		}
 		if (TkGun.holdingGun(player)) {
 			// Starting is blocked while carrying a gun. If the player switches
 			// into one in flight, release the controlled thrust immediately.
 			state.jumpKeyHeld = false;
+			state.jumpHovering = false;
 			state.jumpThrustSoundPlayed = false;
 		}
 		player.fallDistance = 0.0F;
@@ -3973,14 +4069,15 @@ public class TkGunServer implements ModInitializer {
 			player.setNoGravity(false);
 			return;
 		}
-		if (state.jumpKeyHeld && !state.jumpEnergyLocked
-				&& state.jumpEnergyPixels > 0) {
+		boolean directional = jumpDirectionalInput(state);
+		boolean hovering = jumpHovering(player, state, now);
+		if ((state.jumpKeyHeld || directional || hovering)
+				&& !state.jumpEnergyLocked && state.jumpEnergyPixels > 0) {
 			player.setNoGravity(true);
 			player.removeStatusEffect(StatusEffects.SLOW_FALLING);
 			playJumpThrustActivationSound(player, state);
-			double yaw = Math.toRadians(player.getYaw());
-			double forwardX = -Math.sin(yaw);
-			double forwardZ = Math.cos(yaw);
+			double moveX = state.jumpMoveX;
+			double moveZ = state.jumpMoveZ;
 			double speedMultiplier = state.jumpThrustTicksUsed
 					< TkGun.JUMP_BACKPACK_START_BOOST_TICKS
 					? TkGun.JUMP_BACKPACK_START_SPEED_MULTIPLIER : 1.0D;
@@ -3991,18 +4088,26 @@ public class TkGunServer implements ModInitializer {
 							TkGun.JUMP_BACKPACK_BOOST_RISE * speedMultiplier,
 							remainingLift))
 					: 0.0D;
-			player.setVelocity(
-					forwardX * TkGun.JUMP_BACKPACK_FORWARD_SPEED * speedMultiplier,
-					vertical,
-					forwardZ * TkGun.JUMP_BACKPACK_FORWARD_SPEED * speedMultiplier);
+			if (hovering) {
+				player.setVelocity(Vec3d.ZERO);
+			} else {
+				player.setVelocity(
+						moveX * TkGun.JUMP_BACKPACK_HORIZONTAL_SPEED
+								* speedMultiplier,
+						vertical,
+						moveZ * TkGun.JUMP_BACKPACK_HORIZONTAL_SPEED
+								* speedMultiplier);
+			}
 			player.velocityModified = true;
-			state.jumpThrustTicksUsed++;
+			if (!hovering) {
+				state.jumpThrustTicksUsed++;
+			}
 			if ((now - state.jumpStartedAt) % 2L == 0L) {
 				ServerWorld world = player.getServerWorld();
 				world.spawnParticles(ParticleTypes.FLAME,
-						player.getX() - forwardX * 0.55D,
-						player.getY() + 0.75D,
-						player.getZ() - forwardZ * 0.55D,
+						player.getX() - moveX * (hovering ? 0.0D : 0.55D),
+						player.getY() + (hovering ? 0.35D : 0.75D),
+						player.getZ() - moveZ * (hovering ? 0.0D : 0.55D),
 						2, 0.08D, 0.08D, 0.08D, 0.01D);
 			}
 			return;
@@ -4018,10 +4123,16 @@ public class TkGunServer implements ModInitializer {
 
 	private static void playJumpThrustActivationSound(ServerPlayerEntity player,
 			BackpackCharge state) {
+		long now = player.getWorld().getTime();
 		if (state.jumpThrustSoundPlayed) {
 			return;
 		}
+		if (state.lastJumpThrustSoundAt > 0L
+				&& now - state.lastJumpThrustSoundAt < 20L) {
+			return;
+		}
 		state.jumpThrustSoundPlayed = true;
+		state.lastJumpThrustSoundAt = now;
 		player.getServerWorld().playSound(null,
 				player.getX(), player.getY(), player.getZ(),
 				SoundEvents.ENTITY_WITHER_SHOOT,
@@ -4032,6 +4143,9 @@ public class TkGunServer implements ModInitializer {
 			BackpackCharge state, long now) {
 		state.jumpAirborne = false;
 		state.jumpKeyHeld = false;
+		state.jumpMoveX = 0.0D;
+		state.jumpMoveZ = 0.0D;
+		state.jumpHovering = false;
 		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
 		player.setNoGravity(false);
 		player.fallDistance = 0.0F;
@@ -4252,6 +4366,8 @@ public class TkGunServer implements ModInitializer {
 			BACKPACK_PROJECTILES.remove(projectile.getUuid());
 			return false;
 		}
+		trackBackpackTurretProjectile(player.getServerWorld(), projectile,
+				target, now);
 		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
 		state.charges--;
 		playSound(player, TkGun.SND_GUNSHOT, 0.9F, 1.0F);
@@ -4355,11 +4471,8 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		if (target != null && target.isAlive()) {
-			projectile.setNoGravity(true);
-			PORTABLE_PROJECTILE_TRACKERS.put(projectile.getUuid(),
-					new PortableProjectileTracker(player.getServerWorld(),
-							projectile.getUuid(), target.getId(),
-							now + BACKPACK_PROJECTILE_TRACK_TICKS));
+			trackBackpackTurretProjectile(player.getServerWorld(), projectile,
+					target, now);
 		}
 		playBackpackLaunchSound(player.getServerWorld(), spawn, launchedStack);
 		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
@@ -4513,17 +4626,62 @@ public class TkGunServer implements ModInitializer {
 					continue;
 				}
 				tracker.tracking = true;
+				tracker.ignitedAt = now;
+				tracker.ignitionY = projectile.getY();
+				tracker.descending = false;
 				projectile.setNoGravity(false);
 				projectile.setSilent(false);
 				if (projectile instanceof net.minecraft.entity.projectile.FireworkRocketEntity rocket) {
 					playBackpackLaunchSound(tracker.world,
 							projectile.getPos(), rocket.getStack());
 				}
+				Vec3d ignitionVelocity = projectile.getVelocity();
+				Vec3d horizontal = new Vec3d(ignitionVelocity.x, 0.0D,
+						ignitionVelocity.z);
+				if (horizontal.lengthSquared() < 1.0E-6D) {
+					horizontal = living.getBoundingBox().getCenter()
+							.subtract(projectile.getPos());
+					horizontal = new Vec3d(horizontal.x, 0.0D,
+							horizontal.z);
+				}
+				horizontal = horizontal.normalize();
+				Vec3d ascent = horizontal
+						.multiply(MISSILE_BOX_ASCENT_HORIZONTAL)
+						.add(0.0D, 1.0D, 0.0D).normalize();
+				projectile.setVelocity(ascent.multiply(
+						MISSILE_BOX_ASCENT_SPEED));
+				projectile.velocityModified = true;
+				continue;
 			}
 			Vec3d currentVelocity = projectile.getVelocity();
 			Vec3d current = currentVelocity.lengthSquared() < 1.0E-8D
 					? projectile.getRotationVector()
 					: currentVelocity.normalize();
+			long ascentAge = now - tracker.ignitedAt;
+			if (!tracker.descending) {
+				boolean risenEnough = projectile.getY()
+						- tracker.ignitionY >= MISSILE_BOX_ASCENT_HEIGHT;
+				if (ascentAge < MISSILE_BOX_ASCENT_TICKS || !risenEnough
+						&& ascentAge < MISSILE_BOX_MAX_ASCENT_TICKS) {
+					Vec3d targetOffset = living.getBoundingBox().getCenter()
+							.subtract(projectile.getPos());
+					Vec3d horizontal = new Vec3d(targetOffset.x, 0.0D,
+							targetOffset.z);
+					if (horizontal.lengthSquared() < 1.0E-6D) {
+						horizontal = new Vec3d(current.x, 0.0D, current.z);
+					}
+					Vec3d ascentTarget = horizontal.normalize()
+							.multiply(MISSILE_BOX_ASCENT_HORIZONTAL)
+							.add(0.0D, 1.0D, 0.0D).normalize();
+					Vec3d steered = rotateTowards(current, ascentTarget,
+							MISSILE_BOX_TURN_RADIANS);
+					projectile.setVelocity(steered.multiply(
+							MISSILE_BOX_ASCENT_SPEED));
+					projectile.velocityModified = true;
+					continue;
+				}
+				tracker.descending = true;
+			}
 			Vec3d desired = living.getBoundingBox().getCenter()
 					.subtract(projectile.getPos()).normalize();
 			Vec3d steered = rotateTowards(current, desired,
@@ -4558,10 +4716,22 @@ public class TkGunServer implements ModInitializer {
 			Vec3d desired = living.getBoundingBox().getCenter()
 					.subtract(projectile.getPos()).normalize();
 			Vec3d steered = rotateTowards(current, desired,
-					PORTABLE_TURRET_TURN_RADIANS);
+					BACKPACK_TURRET_TURN_RADIANS);
 			projectile.setVelocity(steered.multiply(speed));
 			projectile.velocityModified = true;
 		}
+	}
+
+	private static void trackBackpackTurretProjectile(ServerWorld world,
+			Entity projectile, LivingEntity target, long now) {
+		if (projectile == null || target == null || !target.isAlive()) {
+			return;
+		}
+		projectile.setNoGravity(true);
+		PORTABLE_PROJECTILE_TRACKERS.put(projectile.getUuid(),
+				new PortableProjectileTracker(world, projectile.getUuid(),
+						target.getId(),
+						now + BACKPACK_PROJECTILE_TRACK_TICKS));
 	}
 
 	private static Vec3d rotateTowards(Vec3d current, Vec3d target,
@@ -4635,15 +4805,26 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	private static void handleMeleeInput(ServerPlayerEntity player, boolean pressed,
-			boolean movingForward) {
+			boolean movingForward, boolean special, double effectX,
+			double effectY, double effectZ) {
 		if (player == null || player.getServer() == null || !player.isAlive()) {
+			return;
+		}
+		PState st = state(player);
+		long now = player.getWorld().getTime();
+		if (pressed && now < st.battleBannerCastUntil) {
+			return;
+		}
+		if (special) {
+			if (pressed && TkGun.isKineticSword(player)) {
+				handleKineticSwordSpecialInput(player, st, now,
+						effectX, effectY, effectZ);
+			}
 			return;
 		}
 		if (pressed && !SoulAnchorSkillService.allowsMeleeStart(player)) {
 			return;
 		}
-		PState st = state(player);
-		long now = player.getWorld().getTime();
 		st.meleeInputHeld = pressed;
 		st.meleeInputPressedAt = pressed ? now : 0L;
 		if (!pressed) {
@@ -4700,6 +4881,9 @@ public class TkGunServer implements ModInitializer {
 
 	private static void handleKineticSwordInput(ServerPlayerEntity player,
 			PState st, long now) {
+		if (now < st.battleBannerCastUntil) {
+			return;
+		}
 		if (!player.isOnGround() || player.isUsingItem()) {
 			return;
 		}
@@ -4724,14 +4908,8 @@ public class TkGunServer implements ModInitializer {
 		}
 		if (st.state == TkGun.State.MELEE) {
 			if (st.kineticSwordAttack && !st.kineticSwordReturn) {
-				if (st.kineticSwordDraft) {
-					st.kineticSwordQueued = true;
-					return;
-				}
-				int index = Math.max(0, Math.min(5, st.meleeCombo - 1));
-				long chainAt = st.stateStarted
-						+ TkGun.KINETIC_SWORD_ATTACK_TICKS[index];
-				if (now < chainAt && st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length) {
+				if (st.kineticSwordSpecial <= 0
+						|| kineticSwordFinalStepActive(st, now)) {
 					st.kineticSwordQueued = true;
 				}
 			}
@@ -4744,6 +4922,55 @@ public class TkGunServer implements ModInitializer {
 		beginKineticSwordAttack(player, st, now, 1);
 	}
 
+	private static void handleKineticSwordSpecialInput(
+			ServerPlayerEntity player, PState st, long now,
+			double effectX, double effectY, double effectZ) {
+		if (st.state != TkGun.State.MELEE || st.kineticSwordReturn
+				|| !st.kineticSwordAttack || st.kineticSwordAccelerationAttack
+				|| st.kineticSwordSpecial > 0) {
+			return;
+		}
+		int startStep = TkGun.kineticSwordSpecialStart(st.meleeCombo);
+		if (startStep <= 0) {
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] kinetic sword special ignored after ATK_{} player={}",
+					st.meleeCombo, player.getName().getString());
+			return;
+		}
+		long elapsed = now - st.stateStarted;
+		int cutTick = TkGun.kineticSwordSpecialCutTick(st.meleeCombo);
+		// The branch is an authored late-attack hand-off, not an early cancel.
+		if (elapsed < Math.max(1L, cutTick / 2L)) {
+			return;
+		}
+		// Right-click is authoritative over any left-click input buffered first.
+		st.meleeInputHeld = false;
+		st.meleeInputPressedAt = 0L;
+		st.kineticSwordQueued = false;
+		st.kineticSwordSpecialQueued = startStep;
+		if (isPlausibleEffectPoint(player, effectX, effectY, effectZ)) {
+			st.kineticSwordSpecialEffectX = effectX;
+			st.kineticSwordSpecialEffectY = effectY;
+			st.kineticSwordSpecialEffectZ = effectZ;
+		} else {
+			st.kineticSwordSpecialEffectX = Double.NaN;
+			st.kineticSwordSpecialEffectY = 0.0D;
+			st.kineticSwordSpecialEffectZ = 0.0D;
+		}
+		if (elapsed >= cutTick) {
+			beginKineticSwordSpecial(player, st, now, startStep);
+		}
+	}
+
+	private static boolean isPlausibleEffectPoint(ServerPlayerEntity player,
+			double x, double y, double z) {
+		if (!Double.isFinite(x) || !Double.isFinite(y)
+				|| !Double.isFinite(z)) {
+			return false;
+		}
+		return new Vec3d(x, y, z).squaredDistanceTo(player.getPos()) <= 36.0D;
+	}
+
 	private static void beginKineticSwordAttack(ServerPlayerEntity player,
 			PState st, long now, int step) {
 		if (player.getServer() == null) {
@@ -4751,11 +4978,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		stopKineticSwordDodgeBoost(player, st, "attack");
 		int combo = Math.max(1, Math.min(TkGun.KINETIC_SWORD_DAMAGE_TICKS.length, step));
-		if (combo == 1) {
-			st.kineticSwordRound = 1;
-		}
-		int attackTicks = TkGun.kineticSwordAttackTicks(
-				combo, st.kineticSwordRound);
+		int attackTicks = TkGun.kineticSwordAttackTicks(combo);
 		st.meleeCombo = combo;
 		st.shotIndex = combo;
 		st.shotSeq++;
@@ -4772,6 +4995,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4808,6 +5033,89 @@ public class TkGunServer implements ModInitializer {
 				combo, player.getName().getString());
 	}
 
+	private static void beginKineticSwordSpecial(ServerPlayerEntity player,
+			PState st, long now, int startStep) {
+		if (player.getServer() == null) {
+			return;
+		}
+		startStep = Math.max(2, Math.min(4, startStep));
+		stopKineticSwordDodgeBoost(player, st, "special attack");
+		int attackTicks = TkGun.kineticSwordSpecialTicks(startStep);
+		st.meleeCombo = startStep;
+		st.shotIndex = startStep;
+		st.shotSeq++;
+		st.meleeHitDone = false;
+		st.meleeQueued = false;
+		st.meleeAtk3MainEnded = false;
+		st.meleeAtk4Empowered = false;
+		st.meleeHoldOver = false;
+		st.meleeDashAttack = false;
+		st.meleeDashMoving = false;
+		st.meleeDashStunHits.clear();
+		st.meleeReturning = false;
+		st.kineticSwordReturn = false;
+		st.kineticSwordAttack = true;
+		st.kineticSwordDraft = false;
+		st.kineticSwordAccelerationAttack = false;
+		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = startStep;
+		st.kineticSwordSpecialQueued = 0;
+		st.kineticSwordHitIndex = 0;
+		st.meleeInputHeld = false;
+		st.meleeInputPressedAt = 0L;
+		double yaw = Math.toRadians(player.getYaw());
+		st.kineticSwordMoveDirX = -Math.sin(yaw);
+		st.kineticSwordMoveDirZ = Math.cos(yaw);
+		st.kineticSwordMoveDistance = switch (startStep) {
+			case 2 -> 2.0D;
+			case 3 -> 1.5D;
+			default -> 1.0D;
+		};
+		st.kineticSwordMoveStartTick = 0;
+		st.kineticSwordMoveEndTick = Math.max(1, attackTicks - 1);
+		st.kineticSwordMoveLastX = player.getX();
+		st.kineticSwordMoveLastZ = player.getZ();
+		st.kineticSwordMoveTraveled = 0.0D;
+		st.meleePlayedSoundCues.clear();
+		st.lastMeleeAt = now;
+		st.deployed = false;
+		player.stopUsingItem();
+		player.setSprinting(false);
+		player.forwardSpeed = 0.0F;
+		player.sidewaysSpeed = 0.0F;
+		player.upwardSpeed = 0.0F;
+		Vec3d velocity = player.getVelocity();
+		player.setVelocity(0.0D, velocity.y, 0.0D);
+		player.velocityModified = true;
+		setState(player.getServer(), player, TkGun.State.MELEE,
+				attackTicks);
+		String animation = TkGun.kineticSwordSpecialAnimation(startStep);
+		playMeleeAnimationSounds(player, st, animation, 0.0D);
+		playMeleeSoundAt(player, st, TkGun.SND_SKILL_SPARK, 2.0F);
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] kinetic sword special {} started from ATK_{} ticks={} player={}",
+				animation, startStep - 1, attackTicks,
+				player.getName().getString());
+	}
+
+	private static void playMeleeSoundAt(ServerPlayerEntity player, PState st,
+			Identifier sound, float volume) {
+		double x = player.getX();
+		double y = player.getY() + 1.0D;
+		double z = player.getZ();
+		if (Double.isFinite(st.kineticSwordSpecialEffectX)
+				&& isPlausibleEffectPoint(player,
+						st.kineticSwordSpecialEffectX,
+						st.kineticSwordSpecialEffectY,
+						st.kineticSwordSpecialEffectZ)) {
+			x = st.kineticSwordSpecialEffectX;
+			y = st.kineticSwordSpecialEffectY;
+			z = st.kineticSwordSpecialEffectZ;
+		}
+		player.getServerWorld().playSound(null, x, y, z,
+				SoundEvent.of(sound), SoundCategory.PLAYERS, volume, 1.0F);
+	}
+
 	private static void beginKineticSwordAccelerationAttack(
 			ServerPlayerEntity player, PState st, long now) {
 		if (player.getServer() == null || !player.isOnGround()
@@ -4823,7 +5131,6 @@ public class TkGunServer implements ModInitializer {
 		stopKineticSwordDodgeBoost(player, st, "accelerated ATK_5");
 		st.kineticSwordSprintAttackQueuedUntil = 0L;
 		st.kineticSwordAccelerationInitialSpeed = inheritedSpeed;
-		st.kineticSwordRound = 1;
 		st.meleeCombo = 5;
 		st.shotIndex = 5;
 		st.shotSeq++;
@@ -4840,6 +5147,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = true;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.kineticSwordQueued = false;
 		st.kineticSwordHitIndex = 0;
 		double yaw = Math.toRadians(player.getYaw());
@@ -4871,111 +5180,6 @@ public class TkGunServer implements ModInitializer {
 				player.getName().getString());
 	}
 
-	private static String kineticSwordAnimation(PState st) {
-		if (!st.kineticSwordDraft) {
-			return "GS_ATK_" + st.meleeCombo;
-		}
-		return st.meleeCombo == 2
-				? "GS_ATK_2-3_draft" : "GS_ATK_4-5_draft";
-	}
-
-	/** Combined two-hit authored clip plus the required 0.1 s inter-loop gap. */
-	private static void beginKineticSwordDraft(ServerPlayerEntity player,
-			PState st, long now, int pair) {
-		if (player.getServer() == null || (pair != 2 && pair != 4)) {
-			return;
-		}
-		stopKineticSwordDodgeBoost(player, st, "attack");
-		st.meleeCombo = pair;
-		st.shotIndex = pair;
-		st.shotSeq++;
-		st.meleeHitDone = false;
-		st.meleeQueued = false;
-		st.meleeAtk3MainEnded = false;
-		st.meleeAtk4Empowered = false;
-		st.meleeHoldOver = false;
-		st.meleeDashAttack = false;
-		st.meleeDashMoving = false;
-		st.meleeDashStunHits.clear();
-		st.meleeReturning = false;
-		st.kineticSwordReturn = false;
-		st.kineticSwordAttack = true;
-		st.kineticSwordDraft = true;
-		st.kineticSwordAccelerationAttack = false;
-		st.kineticSwordQueued = false;
-		st.kineticSwordHitIndex = 0;
-		double yaw = Math.toRadians(player.getYaw());
-		st.kineticSwordMoveDirX = -Math.sin(yaw);
-		st.kineticSwordMoveDirZ = Math.cos(yaw);
-		st.kineticSwordMoveDistance = 1.0D;
-		st.kineticSwordMoveStartTick = 0;
-		st.kineticSwordMoveEndTick = TkGun.KINETIC_SWORD_DRAFT_CLIP_TICKS - 1;
-		st.kineticSwordMoveLastX = player.getX();
-		st.kineticSwordMoveLastZ = player.getZ();
-		st.kineticSwordMoveTraveled = 0.0D;
-		st.meleePlayedSoundCues.clear();
-		st.lastMeleeAt = now;
-		st.deployed = false;
-		player.stopUsingItem();
-		player.setSprinting(false);
-		player.forwardSpeed = 0.0F;
-		player.sidewaysSpeed = 0.0F;
-		player.upwardSpeed = 0.0F;
-		Vec3d velocity = player.getVelocity();
-		player.setVelocity(0.0D, velocity.y, 0.0D);
-		player.velocityModified = true;
-		String animation = kineticSwordAnimation(st);
-		setState(player.getServer(), player, TkGun.State.MELEE,
-				TkGun.KINETIC_SWORD_DRAFT_TICKS);
-		playMeleeAnimationSounds(player, st, animation, 0.0D);
-		TkGun.LOGGER.info(
-				"[mechaniciancombat] kinetic sword draft {} round={} started player={}",
-				animation, st.kineticSwordRound,
-				player.getName().getString());
-	}
-
-	private static void tickKineticSwordDraft(ServerPlayerEntity player,
-			PState st, long now) {
-		long elapsed = now - st.stateStarted;
-		player.setSprinting(false);
-		player.forwardSpeed = 0.0F;
-		player.sidewaysSpeed = 0.0F;
-		player.upwardSpeed = 0.0F;
-		Vec3d velocity = player.getVelocity();
-		player.setVelocity(0.0D, velocity.y, 0.0D);
-		player.velocityModified = true;
-		tickKineticSwordAttackMotion(player, st, elapsed);
-		playMeleeAnimationSounds(player, st, kineticSwordAnimation(st),
-				elapsed / 20.0D);
-		int[] damageTicks = TkGun.KINETIC_SWORD_DRAFT_DAMAGE_TICKS[
-				st.meleeCombo == 2 ? 0 : 1];
-		while (st.kineticSwordHitIndex < damageTicks.length
-				&& elapsed >= damageTicks[st.kineticSwordHitIndex]) {
-			st.kineticSwordHitIndex++;
-			performKineticSwordHit(player, st);
-		}
-		if (elapsed < TkGun.KINETIC_SWORD_DRAFT_TICKS) {
-			return;
-		}
-		boolean wantsNext = st.meleeInputHeld || st.kineticSwordQueued;
-		if (st.meleeCombo == 2 && wantsNext) {
-			beginKineticSwordDraft(player, st, now, 4);
-			return;
-		}
-		if (st.meleeCombo == 4) {
-			if (st.kineticSwordRound >= TkGun.KINETIC_SWORD_CHAIN_ROUNDS) {
-				beginKineticSwordAttack(player, st, now, 6);
-				return;
-			}
-			if (wantsNext) {
-				st.kineticSwordRound++;
-				beginKineticSwordDraft(player, st, now, 2);
-				return;
-			}
-		}
-		beginKineticSwordRecovery(player, st, now);
-	}
-
 	private static void beginKineticSwordRecovery(ServerPlayerEntity player,
 			PState st, long now) {
 		if (player.getServer() == null) {
@@ -4985,11 +5189,12 @@ public class TkGunServer implements ModInitializer {
 				&& st.meleeReturning) {
 			return;
 		}
-		boolean draftRecovery = st.kineticSwordDraft;
-		int recoveryStep = draftRecovery
-				? st.meleeCombo + 1 : st.meleeCombo;
+		int recoveryStep = st.kineticSwordSpecial > 0
+				? 5 : st.meleeCombo;
 		st.kineticSwordAttack = false;
 		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.kineticSwordReturn = true;
 		st.kineticSwordDraft = false;
 		st.kineticSwordAccelerationAttack = false;
@@ -5020,43 +5225,51 @@ public class TkGunServer implements ModInitializer {
 		player.velocityModified = true;
 		tickKineticSwordAttackMotion(player, st, elapsed);
 
-		String animation = "GS_ATK_" + st.meleeCombo;
+		int specialStep = st.kineticSwordSpecial;
+		String animation = specialStep > 0
+				? TkGun.kineticSwordSpecialAnimation(specialStep)
+				: "GS_ATK_" + st.meleeCombo;
 		playMeleeAnimationSounds(player, st, animation, elapsed / 20.0D);
-		int attackIndex = Math.max(0, Math.min(
-				TkGun.KINETIC_SWORD_DAMAGE_TICKS.length - 1,
-				st.meleeCombo - 1));
-		int[] damageTicks = TkGun.KINETIC_SWORD_DAMAGE_TICKS[attackIndex];
-		int attackTicks = TkGun.kineticSwordAttackTicks(
-				st.meleeCombo, st.kineticSwordRound);
+		int[] damageTicks = specialStep > 0
+				? TkGun.kineticSwordSpecialDamageTicks(specialStep)
+				: TkGun.KINETIC_SWORD_DAMAGE_TICKS[Math.max(0, Math.min(
+						TkGun.KINETIC_SWORD_DAMAGE_TICKS.length - 1,
+						st.meleeCombo - 1))];
+		int attackTicks = specialStep > 0
+				? TkGun.kineticSwordSpecialTicks(specialStep)
+				: TkGun.kineticSwordAttackTicks(st.meleeCombo);
 		while (st.kineticSwordHitIndex < damageTicks.length
 				&& elapsed >= Math.min(attackTicks,
 						damageTicks[st.kineticSwordHitIndex])) {
+			int hitStep = specialStep > 0
+					? Math.min(5, specialStep + st.kineticSwordHitIndex)
+					: st.meleeCombo;
 			st.kineticSwordHitIndex++;
-			performKineticSwordHit(player, st);
+			performKineticSwordHit(player, st, hitStep);
 		}
 
-		boolean finalRound = st.meleeCombo == 5
-				&& st.kineticSwordRound >= TkGun.KINETIC_SWORD_CHAIN_ROUNDS;
-		boolean wantsNext = st.meleeInputHeld || st.kineticSwordQueued
-				|| finalRound;
-		int transitionTick = st.meleeCombo == 2 || st.meleeCombo == 4
-				? Math.min(attackTicks, TkGun.KINETIC_SWORD_QUICK_CHAIN_TICK)
-				: attackTicks;
-		if (wantsNext && st.meleeCombo < TkGun.KINETIC_SWORD_DAMAGE_TICKS.length
-				&& elapsed >= transitionTick) {
-			if (st.meleeCombo == 5) {
-				if (finalRound) {
-					beginKineticSwordAttack(player, st, now, 6);
-				} else {
-					st.kineticSwordRound++;
-					beginKineticSwordDraft(player, st, now, 2);
-				}
-				return;
-			}
-			beginKineticSwordAttack(player, st, now, st.meleeCombo + 1);
+		if (specialStep <= 0 && st.kineticSwordSpecialQueued > 0
+				&& elapsed >= TkGun.kineticSwordSpecialCutTick(
+						st.meleeCombo)) {
+			beginKineticSwordSpecial(player, st, now,
+					st.kineticSwordSpecialQueued);
 			return;
 		}
 		if (elapsed >= attackTicks) {
+			boolean wantsNext =
+					st.meleeInputHeld || st.kineticSwordQueued;
+			if (specialStep > 0) {
+				if (wantsNext) {
+					beginKineticSwordAttack(player, st, now, 2);
+					return;
+				}
+			} else if (wantsNext) {
+				beginKineticSwordAttack(player, st, now,
+						st.meleeCombo
+								< TkGun.KINETIC_SWORD_DAMAGE_TICKS.length
+								? st.meleeCombo + 1 : 1);
+				return;
+			}
 			beginKineticSwordRecovery(player, st, now);
 		}
 	}
@@ -5069,10 +5282,10 @@ public class TkGunServer implements ModInitializer {
 		player.sidewaysSpeed = 0.0F;
 		player.upwardSpeed = 0.0F;
 
-		double fromX = st.kineticSwordMoveLastX;
-		double fromZ = st.kineticSwordMoveLastZ;
 		double toX = player.getX();
 		double toZ = player.getZ();
+		double fromX = st.kineticSwordMoveLastX;
+		double fromZ = st.kineticSwordMoveLastZ;
 		st.kineticSwordMoveLastX = toX;
 		st.kineticSwordMoveLastZ = toZ;
 		st.kineticSwordMoveTraveled += Math.max(0.0D,
@@ -5093,6 +5306,8 @@ public class TkGunServer implements ModInitializer {
 					st.kineticSwordAccelerationInitialSpeed
 							* holdOverMovementFriction(player)
 							/ Math.max(1.0E-4D, averagePace)));
+			// Preserve the captured sprint momentum as a front-loaded,
+			// smoothly decelerating profile while capping the step at 2 blocks.
 			double eased = 1.0D - Math.pow(1.0D - progress,
 					1.0D + momentum);
 			double cumulative = TkGun.KINETIC_SWORD_ACCEL_DISTANCE * eased;
@@ -5110,16 +5325,35 @@ public class TkGunServer implements ModInitializer {
 		if (!st.meleeHitDone
 				&& elapsed >= TkGun.KINETIC_SWORD_DAMAGE_TICKS[4][0]) {
 			st.meleeHitDone = true;
-			performKineticSwordHit(player, st);
+			performKineticSwordHit(player, st, 5);
 		}
 		if (elapsed >= TkGun.KINETIC_SWORD_ACCEL_ATTACK_TICKS) {
-			beginKineticSwordRecovery(player, st, now);
+			if (st.meleeInputHeld || st.kineticSwordQueued) {
+				beginKineticSwordAttack(player, st, now, 2);
+			} else {
+				beginKineticSwordRecovery(player, st, now);
+			}
 		}
+	}
+
+	private static boolean kineticSwordFinalStepActive(PState st, long now) {
+		if (st.kineticSwordSpecial <= 0) {
+			return false;
+		}
+		int[] damageTicks = TkGun.kineticSwordSpecialDamageTicks(
+				st.kineticSwordSpecial);
+		int finalStepStart = damageTicks.length > 1
+				? damageTicks[damageTicks.length - 2]
+				: damageTicks[0];
+		return now - st.stateStarted >= finalStepStart;
 	}
 
 	private static void tickKineticSwordSprintAttackQueue(
 			ServerPlayerEntity player, PState st, long now) {
 		if (st.kineticSwordSprintAttackQueuedUntil <= 0L) {
+			return;
+		}
+		if (now < st.battleBannerCastUntil) {
 			return;
 		}
 		if (now > st.kineticSwordSprintAttackQueuedUntil
@@ -5165,19 +5399,21 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	private static void performKineticSwordHit(ServerPlayerEntity player,
-			PState st) {
-		double yaw = Math.toRadians(player.getYaw());
-		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
-		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
-		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+			PState st, int step) {
+		AttackAxes axes = attackAxes(player.getPitch(), player.getYaw());
+		Vec3d forward = axes.forward();
+		Vec3d right = axes.right();
+		Vec3d up = axes.up();
+		Vec3d knockbackForward = horizontalForward(player.getYaw());
 		Vec3d origin = player.getPos().add(0.0D, 1.0D, 0.0D);
-		// Three blocks ahead plus one body block, centred on the player foot line.
-		Vec3d center = origin.add(forward.multiply(1.5D));
+		int attackStep = Math.max(1, Math.min(6, step));
+		double attackRange = TkGun.kineticSwordAttackRange(attackStep);
+		Vec3d center = origin.add(forward.multiply(attackRange * 0.5D));
 		double halfWidth = 1.5D;
 		double halfHeight = 1.5D;
-		double halfDepth = 2.0D;
+		double halfDepth = attackRange * 0.5D;
 		net.minecraft.util.math.Box search = player.getBoundingBox()
-				.expand(4.0D, 3.0D, 4.0D);
+				.expand(5.0D, 5.0D, 5.0D);
 		List<Entity> hitTargets = new ArrayList<>();
 		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
 				candidate -> candidate.isAlive() && candidate.canHit()
@@ -5196,12 +5432,30 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, st, hitTargets, forward,
+			MeleeImpactService.apply(player, st, hitTargets,
+					knockbackForward,
 					MeleeImpactService.ATK_2_TICKS, false, false, false);
 			TkGun.LOGGER.info("[mechaniciancombat] kinetic sword ATK_{} hit {} targets player={}",
 					st.meleeCombo, hitTargets.size(),
 					player.getName().getString());
 		}
+	}
+
+	private record AttackAxes(Vec3d right, Vec3d up, Vec3d forward) {
+	}
+
+	/** Better Combat-style fixed orientation: pitch and yaw own all three axes. */
+	private static AttackAxes attackAxes(float pitch, float yaw) {
+		Vec3d forward = Vec3d.fromPolar(pitch, yaw).normalize();
+		Vec3d up = Vec3d.fromPolar(pitch + 90.0F, yaw).normalize();
+		Vec3d right = forward.crossProduct(up).normalize();
+		return new AttackAxes(right, up, forward);
+	}
+
+	private static Vec3d horizontalForward(float yawDegrees) {
+		double yaw = Math.toRadians(yawDegrees);
+		return new Vec3d(-Math.sin(yaw), 0.0D,
+				Math.cos(yaw)).normalize();
 	}
 
 	private static int nextMeleeTap(int current) {
@@ -5274,6 +5528,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = false;
 		st.kineticSwordReturn = false;
 		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.meleeReturning = false;
 		st.meleeDashReturn = false;
 		st.meleeReturnToRun = false;
@@ -5315,6 +5571,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = false;
 		st.kineticSwordReturn = false;
 		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.meleeReturning = false;
 		st.meleeDashReturn = false;
 		st.meleeReturnToRun = false;
@@ -5348,6 +5606,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = false;
 		st.kineticSwordReturn = false;
 		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.meleeHitDone = true;
 		st.meleeQueued = false;
 		st.shotIndex = Math.max(1, Math.min(4, step));
@@ -5380,6 +5640,8 @@ public class TkGunServer implements ModInitializer {
 		st.kineticSwordAttack = false;
 		st.kineticSwordReturn = false;
 		st.kineticSwordQueued = false;
+		st.kineticSwordSpecial = 0;
+		st.kineticSwordSpecialQueued = 0;
 		st.meleeDashStunSpeed = 0.0D;
 		st.meleeDashStunHits.clear();
 		st.meleeReturning = false;
@@ -5424,9 +5686,7 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		if (st.kineticSwordAttack) {
-			if (st.kineticSwordDraft) {
-				tickKineticSwordDraft(player, st, now);
-			} else if (st.kineticSwordAccelerationAttack) {
+			if (st.kineticSwordAccelerationAttack) {
 				tickKineticSwordAccelerationAttack(player, st, now);
 			} else {
 				tickKineticSwordAttack(player, st, now);
@@ -5758,31 +6018,28 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	private static void performMeleeHit(ServerPlayerEntity player, PState st, int step) {
-		double yaw = Math.toRadians(player.getYaw());
-		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
-		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
+		AttackAxes axes = attackAxes(player.getPitch(), player.getYaw());
+		Vec3d forward = axes.forward();
+		Vec3d right = axes.right();
+		Vec3d up = axes.up();
+		Vec3d knockbackForward = horizontalForward(player.getYaw());
 		List<Entity> hitTargets = new ArrayList<>();
 		double range = TkGun.MELEE_RANGE;
 		Vec3d origin = player.getPos().add(0.0D, 0.9D, 0.0D);
 		net.minecraft.util.math.Box search = player.getBoundingBox()
-				.expand(range, 2.5D, range);
+				.expand(range, range, range);
 		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
 				candidate -> candidate.isAlive() && candidate.canHit()
 						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
-			Vec3d offset = entity.getBoundingBox().getCenter().subtract(origin);
-			double depth = offset.dotProduct(forward);
-			double lateral = Math.abs(offset.dotProduct(right));
-			double vertical = Math.abs(offset.y);
-			double radius = entity.getWidth() * 0.5D;
 			boolean inBox = switch (step) {
-				case 2 -> depth > 0.0D && depth <= range
-						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
-						&& vertical <= 1.5D + entity.getHeight() * 0.5D;
-				case 3, 4 -> Math.hypot(offset.x, offset.z) <= range + radius
-						&& vertical <= 2.5D + entity.getHeight() * 0.5D;
-				default -> depth >= -0.25D && depth <= range
-						&& lateral <= TkGun.MELEE_LATERAL_RADIUS + radius
-						&& vertical <= 1.8D + entity.getHeight() * 0.5D;
+				case 2 -> orientedBoxOverlaps(entity.getBoundingBox(),
+						origin.add(forward.multiply(2.0D)), right, up, forward,
+						TkGun.MELEE_LATERAL_RADIUS, 1.5D, 2.0D);
+				case 3, 4 -> tiltedRadialOverlaps(entity.getBoundingBox(),
+						origin, right, up, forward, range, 2.5D);
+				default -> orientedBoxOverlaps(entity.getBoundingBox(),
+						origin.add(forward.multiply(1.875D)), right, up,
+						forward, TkGun.MELEE_LATERAL_RADIUS, 1.8D, 2.125D);
 			};
 			if (!inBox) {
 				continue;
@@ -5799,26 +6056,28 @@ public class TkGunServer implements ModInitializer {
 		if (!hitTargets.isEmpty()) {
 			boolean critical = st.meleeHoldOver || st.meleeAtk4Empowered;
 			boolean lockAttacker = !st.meleeInputHeld && !st.meleeHoldOver;
-			MeleeImpactService.apply(player, st, hitTargets, forward,
+			MeleeImpactService.apply(player, st, hitTargets,
+					knockbackForward,
 					MeleeImpactService.ticksForStep(step), critical, lockAttacker,
 					false);
 		}
 		if (step != 2) {
 			player.getServerWorld().spawnParticles(
 					net.minecraft.particle.ParticleTypes.SWEEP_ATTACK,
-					player.getX() + forward.x * 1.5D,
+					player.getX() + knockbackForward.x * 1.5D,
 					player.getY() + 1.0D,
-					player.getZ() + forward.z * 1.5D,
+					player.getZ() + knockbackForward.z * 1.5D,
 					3, 0.35D, 0.25D, 0.35D, 0.0D);
 		}
 	}
 
 	private static void performDashMeleeHorizontalPlaneHit(
 			ServerPlayerEntity player, PState st) {
-		double yaw = Math.toRadians(st.meleeDashAimYaw);
-		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
-		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
-		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		AttackAxes axes = attackAxes(player.getPitch(), st.meleeDashAimYaw);
+		Vec3d right = axes.right();
+		Vec3d forward = axes.forward();
+		Vec3d up = axes.up();
+		Vec3d knockbackForward = horizontalForward(st.meleeDashAimYaw);
 		List<Entity> hitTargets = new ArrayList<>();
 		double range = TkGun.MELEE_RANGE;
 		Vec3d origin = player.getPos().add(0.0D,
@@ -5828,7 +6087,8 @@ public class TkGunServer implements ModInitializer {
 		double halfHeight = range / 6.0D;
 		double halfDepth = range * 0.5D;
 		net.minecraft.util.math.Box search = player.getBoundingBox()
-				.expand(range * 1.5D, range / 3.0D + 2.0D, range * 1.5D);
+				.expand(range * 1.5D, range * 1.5D + 2.0D,
+						range * 1.5D);
 		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
 				candidate -> candidate.isAlive() && candidate.canHit()
 						&& !candidate.isSpectator() && CombatTargeting.isTargetable(candidate))) {
@@ -5842,8 +6102,9 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, state(player), hitTargets, forward,
-					MeleeImpactService.DASH_TICKS, false, false, false);
+			MeleeImpactService.apply(player, state(player), hitTargets,
+					knockbackForward, MeleeImpactService.DASH_TICKS,
+					false, false, false);
 		}
 	}
 
@@ -5860,10 +6121,11 @@ public class TkGunServer implements ModInitializer {
 		double toZ = player.getZ();
 		double pathLength = Math.hypot(toX - fromX, toZ - fromZ);
 
-		double yaw = Math.toRadians(st.meleeDashAimYaw);
-		Vec3d right = new Vec3d(Math.cos(yaw), 0.0D, -Math.sin(yaw)).normalize();
-		Vec3d forward = new Vec3d(-Math.sin(yaw), 0.0D, Math.cos(yaw)).normalize();
-		Vec3d up = new Vec3d(0.0D, 1.0D, 0.0D);
+		AttackAxes axes = attackAxes(player.getPitch(), st.meleeDashAimYaw);
+		Vec3d right = axes.right();
+		Vec3d forward = axes.forward();
+		Vec3d up = axes.up();
+		Vec3d knockbackForward = horizontalForward(st.meleeDashAimYaw);
 		double range = TkGun.MELEE_RANGE;
 		Vec3d segmentCenter = new Vec3d(
 				(fromX + toX) * 0.5D,
@@ -5874,7 +6136,8 @@ public class TkGunServer implements ModInitializer {
 		double halfHeight = range / 6.0D;
 		double halfDepth = range * 0.5D + pathLength * 0.5D;
 		net.minecraft.util.math.Box search = player.getBoundingBox()
-				.expand(range * 1.5D + pathLength, range / 3.0D + 2.0D,
+				.expand(range * 1.5D + pathLength,
+						range * 1.5D + 2.0D,
 						range * 1.5D + pathLength);
 		List<Entity> hitTargets = new ArrayList<>();
 		for (Entity entity : player.getServerWorld().getOtherEntities(player, search,
@@ -5895,11 +6158,27 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, st, hitTargets, forward,
-					MeleeImpactService.DASH_TICKS, false, false, false);
+			MeleeImpactService.apply(player, st, hitTargets,
+					knockbackForward, MeleeImpactService.DASH_TICKS,
+					false, false, false);
 		}
 		st.meleeDashStunFromX = toX;
 		st.meleeDashStunFromZ = toZ;
+	}
+
+	private static boolean tiltedRadialOverlaps(
+			net.minecraft.util.math.Box bounds, Vec3d center,
+			Vec3d right, Vec3d up, Vec3d forward,
+			double radius, double halfHeight) {
+		Vec3d offset = bounds.getCenter().subtract(center);
+		double lateralX = offset.dotProduct(right);
+		double lateralZ = offset.dotProduct(forward);
+		double radial = Math.hypot(lateralX, lateralZ);
+		double targetRadius = (bounds.maxX - bounds.minX) * 0.5D;
+		double targetHalfHeight = (bounds.maxY - bounds.minY) * 0.5D;
+		return radial <= radius + targetRadius
+				&& Math.abs(offset.dotProduct(up))
+						<= halfHeight + targetHalfHeight;
 	}
 
 	private static boolean orientedBoxOverlaps(net.minecraft.util.math.Box bounds,
@@ -7191,6 +7470,10 @@ public class TkGunServer implements ModInitializer {
 				|| st.state == TkGun.State.SKILL_JUMP) {
 			return;
 		}
+		if (st.kineticSwordBackwardInput) {
+			stopKineticSwordDodgeBoost(player, st, "backward movement input");
+			return;
+		}
 		boolean moving = st.kineticSwordMoveInput
 				|| player.getVelocity().horizontalLength() > 0.03D;
 		if (!moving) {
@@ -7204,9 +7487,12 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		st.kineticSwordDodgeBoost = false;
+		player.setSprinting(false);
+		GunStateMachine.clearDash(player);
 		TkGun.LOGGER.info(
 				"[mechaniciancombat] Kinetic Sword boost ended ({}) player={}",
 				reason, player.getName().getString());
+		rebroadcast(player);
 	}
 
 	private static void startGunJumpAction(ServerPlayerEntity player) {
@@ -8261,6 +8547,8 @@ public class TkGunServer implements ModInitializer {
 						st.kineticSwordReturn = false;
 						st.kineticSwordAttack = false;
 						st.kineticSwordQueued = false;
+						st.kineticSwordSpecial = 0;
+						st.kineticSwordSpecialQueued = 0;
 						st.meleeReturning = false;
 						st.meleeInputHeld = false;
 						st.meleeInputPressedAt = 0L;
@@ -9560,6 +9848,7 @@ public class TkGunServer implements ModInitializer {
 			}
 			st.rollStartedFromFocus = st.rollQuickFocusEligible;
 			setState(server, player, TkGun.State.ROLL, stateTicks);
+			st.rollRequestBackward = false;
 		}
 	}
 

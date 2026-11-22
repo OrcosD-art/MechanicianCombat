@@ -21,7 +21,9 @@ public abstract class SoulAnchorFirstPersonMixin {
 	private void mechaniciancombat$renderSoulAnchorFpa(float tickDelta,
 			MatrixStack matrices, VertexConsumerProvider.Immediate consumers,
 			ClientPlayerEntity player, int light, CallbackInfo ci) {
-		if (!SoulAnchorSkillClientState.firstPersonActive(player.getId())) {
+		if (TkGun.isKineticSword(player)
+				|| !SoulAnchorSkillClientState.firstPersonActive(
+						player.getId())) {
 			return;
 		}
 		long startedAt = SoulAnchorSkillClientState.startedAt(player.getId());

@@ -215,24 +215,33 @@ public final class TkGun {
 	public static final int[][] KINETIC_SWORD_DAMAGE_TICKS = {
 			{8}, {4}, {4}, {4}, {4}, {3, 10}
 	};
+	/**
+	 * Right-click branches begun from ATK1/2/3. Each clip starts from the next
+	 * authored swing and carries through ATK5.
+	 */
+	public static final int[][] KINETIC_SWORD_SPECIAL_DAMAGE_TICKS = {
+			{4, 9, 14, 20},
+			{4, 9, 15},
+			{4, 10}
+	};
 	/** One extra tick keeps the authored final pose visible before recovery. */
 	public static final int[] KINETIC_SWORD_ATTACK_TICKS = {
-			16, 11, 11, 11, 11, 16
+			15, 10, 10, 10, 10, 15
 	};
-	/** Safe authored-tail handoff for ATK_2 -> 3 and ATK_4 -> 5. */
-	public static final int KINETIC_SWORD_QUICK_CHAIN_TICK = 8;
-	/** Three 2-3-4-5 rounds, then ATK_6 ends the accelerated chain. */
-	public static final int KINETIC_SWORD_CHAIN_ROUNDS = 3;
-	/** 0.4 seconds at 20 TPS. Round 2 = 3 ticks, round 3 = 1 tick. */
-	public static final int KINETIC_SWORD_ROUND_REDUCTION_TICKS = 8;
-	/** Authored draft clips are 0.75 s; one final-pose tick plus a 2-tick gap. */
-	public static final int KINETIC_SWORD_DRAFT_CLIP_TICKS = 16;
-	public static final int KINETIC_SWORD_DRAFT_GAP_TICKS = 2;
-	public static final int KINETIC_SWORD_DRAFT_TICKS =
-			KINETIC_SWORD_DRAFT_CLIP_TICKS + KINETIC_SWORD_DRAFT_GAP_TICKS;
-	/** Damage timelines for GS_ATK_2-3_draft and GS_ATK_4-5_draft. */
-	public static final int[][] KINETIC_SWORD_DRAFT_DAMAGE_TICKS = {
-			{3, 10}, {4, 10}
+	/** Final integer forward reach for ATK1-6, in blocks. */
+	public static final int[] KINETIC_SWORD_ATTACK_RANGES = {
+			3, 3, 4, 3, 3, 4
+	};
+	/** Indexed by special start step - 2: ATK2-5, ATK3-5, ATK4-5. */
+	public static final int[] KINETIC_SWORD_SPECIAL_ATTACK_TICKS = {
+			25, 20, 18
+	};
+	/**
+	 * The established ATK1 hand-off is 0.67 s. Shorter clips use the same
+	 * proportional point in their authored timeline (roughly the last fifth).
+	 */
+	public static final int[] KINETIC_SWORD_SPECIAL_CUT_TICKS = {
+			14, 9, 9, 9, 9, 14
 	};
 	/** Boost-consuming ATK5 at authored speed, with a 2-block forward step. */
 	public static final int KINETIC_SWORD_ACCEL_ATTACK_TICKS = 11;
@@ -242,17 +251,48 @@ public final class TkGun {
 	public static final int KINETIC_SWORD_BACK_IDLE_TICKS = 10;
 	public static final float KINETIC_SWORD_DAMAGE = 9.0F;
 
-	/** Effective state interval for one attack in the accelerated 2-5 loop. */
-	public static int kineticSwordAttackTicks(int combo, int round) {
-		if (combo < 2 || combo > 5) {
-			return KINETIC_SWORD_ATTACK_TICKS[
-					Math.max(0, Math.min(
-							KINETIC_SWORD_ATTACK_TICKS.length - 1, combo - 1))];
-		}
-		int clampedRound = Math.max(1,
-				Math.min(KINETIC_SWORD_CHAIN_ROUNDS, round));
-		return Math.max(1, KINETIC_SWORD_ATTACK_TICKS[combo - 1]
-				- (clampedRound - 1) * KINETIC_SWORD_ROUND_REDUCTION_TICKS);
+	/** State interval for one authored ATK clip. */
+	public static int kineticSwordAttackTicks(int combo) {
+		return KINETIC_SWORD_ATTACK_TICKS[
+				Math.max(0, Math.min(
+						KINETIC_SWORD_ATTACK_TICKS.length - 1, combo - 1))];
+	}
+
+	public static int kineticSwordAttackRange(int combo) {
+		return KINETIC_SWORD_ATTACK_RANGES[
+				Math.max(0, Math.min(
+						KINETIC_SWORD_ATTACK_RANGES.length - 1,
+						combo - 1))];
+	}
+
+	/** Returns the next authored special start step, or 0 when unavailable. */
+	public static int kineticSwordSpecialStart(int combo) {
+		return combo >= 1 && combo <= 3 ? combo + 1 : 0;
+	}
+
+	public static int kineticSwordSpecialCutTick(int combo) {
+		return KINETIC_SWORD_SPECIAL_CUT_TICKS[
+				Math.max(0, Math.min(
+						KINETIC_SWORD_SPECIAL_CUT_TICKS.length - 1,
+						combo - 1))];
+	}
+
+	public static int kineticSwordSpecialTicks(int startStep) {
+		return KINETIC_SWORD_SPECIAL_ATTACK_TICKS[
+				Math.max(0, Math.min(
+						KINETIC_SWORD_SPECIAL_ATTACK_TICKS.length - 1,
+						startStep - 2))];
+	}
+
+	public static int[] kineticSwordSpecialDamageTicks(int startStep) {
+		return KINETIC_SWORD_SPECIAL_DAMAGE_TICKS[
+				Math.max(0, Math.min(
+						KINETIC_SWORD_SPECIAL_DAMAGE_TICKS.length - 1,
+						startStep - 2))];
+	}
+
+	public static String kineticSwordSpecialAnimation(int startStep) {
+		return "GS_ATK_" + startStep + "-5";
 	}
 	/** A click must stay down for at least 0.25 s to branch into ATK_3. */
 	public static final int MELEE_LONG_PRESS_TICKS = 5;
@@ -312,7 +352,7 @@ public final class TkGun {
 	public static final int JUMP_BACKPACK_ENERGY_GROUND_RECOVERY_TICKS = 10;
 	public static final int JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS = 5;
 	public static final double JUMP_BACKPACK_BOOST_RISE = 0.15D;
-	public static final double JUMP_BACKPACK_FORWARD_SPEED = 0.75D;
+	public static final double JUMP_BACKPACK_HORIZONTAL_SPEED = 1.25D;
 	public static final double JUMP_BACKPACK_MIN_START_RISE = 0.5D;
 	public static final double JUMP_BACKPACK_MAX_HEIGHT = 6.0D;
 	/** Slow Falling duration before the fall attack acquires and dives at a target. */

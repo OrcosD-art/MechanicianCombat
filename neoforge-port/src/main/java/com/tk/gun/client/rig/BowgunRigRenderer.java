@@ -60,6 +60,9 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	/** Root-level E1 marker used by the ATK3 round attack particle. */
 	private static final Map<Integer, LocatorSample> E1_POSITIONS =
 			new HashMap<>();
+	/** Great-sword special-attack effect marker. */
+	private static final Map<Integer, LocatorSample> EFFECTS_POSITIONS =
+			new HashMap<>();
 	private record LocatorSample(Vec3d position, long worldTime) {
 	}
 	/** 弹匣相关骨骼：打空后整组隐藏。 */
@@ -109,6 +112,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 	/** 上半身那根：抬仰角就拧它（理由见 renderRecursively 里的注释）。 */
 	private static final String CHEST_BONE = "chest";
 	private static final String E1_BONE = "E1";
+	private static final String EFFECTS_BONE = "effects";
 	/** rig 的**根骨**（`body`，没有父骨骼）：瞄准对齐时整条模型都挂在它下面。 */
 	private static final String ROOT_BONE = "body";
 	/** 这位玩家现在是不是**正在开火**（= 枪口焰/弹壳该出现的那几帧）。 */
@@ -129,6 +133,7 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		addRenderLayer(new BowgunCloseCombatEffectLayer(this));
 		addRenderLayer(new BowgunEffectSkillLayer(this));
 		addRenderLayer(new KineticSwordEnergyLayer(this));
+		addRenderLayer(new KineticSwordRotateEffectLayer(this));
 		addRenderLayer(new CombatBackpackRigLayer(this));
 		// 原版 PlayerRenderer 继续负责皮肤第二层、盔甲、披风和 Curios。
 		// ⚠️ **气流那一层默认不开**（2026-10-16 用户实测反馈："枪口特效完全糊着、像管风琴一列一列
@@ -171,8 +176,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 								  float partialTick, int packedLight, int packedOverlay, int colour) {
 		String name = bone.getName();
 		Entity renderedEntity = getCurrentEntity();
+		KineticSwordRotateEffect.apply(bone, renderedEntity,
+				animatable.currentAnimation(), partialTick);
 		if (KineticSwordEnergyEffect.isEnergyBone(name)) {
-			KineticSwordEnergyEffect.applyVisibility(bone, renderedEntity);
+			KineticSwordEnergyEffect.applyVisibility(bone, renderedEntity,
+					animatable.currentAnimation(), partialTick);
 		}
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
@@ -315,6 +323,13 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		if (currentFrame && E1_BONE.equals(name)) {
 			org.joml.Vector3d world = bone.getWorldPosition();
 			E1_POSITIONS.put(renderedEntity.getId(),
+					new LocatorSample(new Vec3d(
+							world.x, world.y, world.z),
+							renderedEntity.getWorld().getTime()));
+		}
+		if (currentFrame && EFFECTS_BONE.equals(name)) {
+			org.joml.Vector3d world = bone.getWorldPosition();
+			EFFECTS_POSITIONS.put(renderedEntity.getId(),
 					new LocatorSample(new Vec3d(
 							world.x, world.y, world.z),
 							renderedEntity.getWorld().getTime()));
@@ -513,6 +528,35 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			return null;
 		}
 		return sample.position;
+	}
+
+	/** Latest authored Great-sword effects locator, rejected when stale. */
+	public static Vec3d effectsPosition(int playerId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		LocatorSample sample = EFFECTS_POSITIONS.get(playerId);
+		if (client.world == null || sample == null
+				|| Math.abs(client.world.getTime() - sample.worldTime()) > 3L) {
+			return null;
+		}
+		return sample.position;
+	}
+
+	/**
+	 * First-person item rendering uses the same rig geometry. Accept its marker
+	 * only when the resolved point is physically near the player, which rejects
+	 * root-local coordinates from renderers that do not expose world space.
+	 */
+	public static void acceptFirstPersonEffectsPosition(int playerId,
+			Vec3d position) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.world == null || client.player == null
+				|| client.player.getId() != playerId || position == null
+				|| position.squaredDistanceTo(
+						client.player.getEyePos()) > 16.0D) {
+			return;
+		}
+		EFFECTS_POSITIONS.put(playerId,
+				new LocatorSample(position, client.world.getTime()));
 	}
 
 	/**

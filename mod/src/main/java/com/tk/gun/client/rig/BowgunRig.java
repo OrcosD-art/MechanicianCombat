@@ -611,14 +611,12 @@ public final class BowgunRig implements GeoReplacedEntity {
 				resetKineticRunAnimationBridges();
 			}
 			int step = Math.max(1, Math.min(6, entry.shotIndex));
-			String name;
-			if (entry.kineticSwordDraft && !entry.meleeReturning) {
-				name = entry.shotIndex == 2
-						? "GS_ATK_2-3_draft" : "GS_ATK_4-5_draft";
-			} else {
-				name = "GS_ATK_" + step
-						+ (entry.meleeReturning ? "_back-idle" : "");
-			}
+			String name = entry.meleeReturning
+					? "GS_ATK_" + step + "_back-idle"
+					: entry.kineticSwordSpecial > 0
+							? TkGun.kineticSwordSpecialAnimation(
+									entry.kineticSwordSpecial)
+							: "GS_ATK_" + step;
 			if (entry.meleeReturning && name.endsWith("_back-idle")) {
 				if (entry.shotSeq == kineticBackIdleShotSeq) {
 					state.getController().transitionLength(0);
@@ -724,10 +722,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 			if (sword != null && sword.kineticSwordAccelerationAttack) {
 				return 1.0D;
 			}
-			if (sword != null && sword.kineticSwordDraft) {
-				return 1.0D;
-			}
 			if (sword != null && sword.state == TkGun.State.MELEE
+					&& sword.kineticSwordSpecial <= 0
 					&& sword.shotIndex >= 2 && sword.shotIndex <= 5) {
 				int baseTicks = TkGun.KINETIC_SWORD_ATTACK_TICKS[
 						sword.shotIndex - 1];
@@ -779,6 +775,13 @@ public final class BowgunRig implements GeoReplacedEntity {
 				&& com.tk.gun.client.SoulAnchorSkillClientState
 						.active(entity.getId())) {
 			return PlayState.STOP;
+		}
+		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+				&& WarBannerSkillClientState.isActive(entity.getId())
+				&& TkGun.isKineticSword(player)) {
+			state.getController().transitionLength(0);
+			state.setControllerSpeed(1.0F);
+			return state.setAndContinue(rawFor("GS_skill_flag"));
 		}
 		if (entity instanceof net.minecraft.entity.player.PlayerEntity player
 				&& TkGun.isMeleeWeapon(player)) {
@@ -1508,6 +1511,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return play(state, walk == null ? "idle" : walk);
 		}
 		if (WarBannerSkillClientState.isActive(entity.getId())) {
+			if (entity instanceof net.minecraft.entity.player.PlayerEntity player
+					&& TkGun.isKineticSword(player)) {
+				return pickKineticSword(state, e);
+			}
 			state.getController().transitionLength(0);
 			return play(state, "skill_flag_gun");
 		}

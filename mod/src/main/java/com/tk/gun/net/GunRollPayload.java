@@ -14,7 +14,8 @@ import net.minecraft.network.packet.CustomPayload;
  * 这个包在**按键那一刻**就告诉服务端，于是可以：① 先清缓慢；② 过热 / `Focus_over` 里直接打断动画；
  * ③ 如果 combat_roll 这次没把玩家带走（速度还是很小），我们自己给一次冲刺 + 播我们的 `roll`。
  */
-public record GunRollPayload(float directionX, float directionZ) implements CustomPayload {
+public record GunRollPayload(float directionX, float directionZ,
+		boolean backward) implements CustomPayload {
 	public static final CustomPayload.Id<GunRollPayload> ID =
 			new CustomPayload.Id<>(TkGun.id("roll_key"));
 
@@ -22,8 +23,10 @@ public record GunRollPayload(float directionX, float directionZ) implements Cust
 			(value, buf) -> {
 				buf.writeFloat(value.directionX());
 				buf.writeFloat(value.directionZ());
+				buf.writeBoolean(value.backward());
 			},
-			buf -> new GunRollPayload(buf.readFloat(), buf.readFloat()));
+			buf -> new GunRollPayload(buf.readFloat(), buf.readFloat(),
+					buf.readBoolean()));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

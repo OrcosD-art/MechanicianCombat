@@ -8,7 +8,8 @@ import java.util.Map;
 /** Per-player Soul Anchor skill animation phase. */
 public final class SoulAnchorSkillClientState {
 	public record Entry(int phase, long startedAt, long endsAt,
-			boolean gunHeld, boolean swordSkill, long revision) {
+			boolean gunHeld, boolean swordSkill, boolean readyFromRun,
+			long revision) {
 	}
 
 	private static final Map<Integer, Entry> ENTRIES = new HashMap<>();
@@ -39,7 +40,8 @@ public final class SoulAnchorSkillClientState {
 		ENTRIES.put(payload.playerEntityId(), new Entry(
 				payload.phase(), startedAt,
 				ticks + payload.durationTicks(),
-				payload.gunHeld(), payload.swordSkill(), revision));
+				payload.gunHeld(), payload.swordSkill(),
+				payload.readyFromRun(), revision));
 	}
 
 	public static void tick() {
@@ -171,7 +173,7 @@ public final class SoulAnchorSkillClientState {
 
 	public static boolean firstPersonActive(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		if (entry == null || entry.swordSkill()) {
+		if (entry == null) {
 			return false;
 		}
 		if (entry.phase() == SoulAnchorSkillPayload.READY) {
@@ -186,7 +188,7 @@ public final class SoulAnchorSkillClientState {
 
 	public static boolean firstPersonThrowing(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
-		return entry != null && !entry.swordSkill()
+		return entry != null
 				&& (entry.phase() == SoulAnchorSkillPayload.THROW
 						|| entry.phase()
 								== SoulAnchorSkillPayload.GUN_THROW);
@@ -256,7 +258,9 @@ public final class SoulAnchorSkillClientState {
 		}
 		return switch (entry.phase()) {
 			case SoulAnchorSkillPayload.READY -> entry.swordSkill()
-					? "chain_ready_sword"
+					? entry.readyFromRun()
+							? "chain_run_ready_sword"
+							: "chain_ready_sword"
 					: entry.gunHeld() ? "chain_ready_gun_upper" : "chain_ready";
 			case SoulAnchorSkillPayload.RECALL -> "chain_drag_entity";
 			case SoulAnchorSkillPayload.GUN_RECALL ->

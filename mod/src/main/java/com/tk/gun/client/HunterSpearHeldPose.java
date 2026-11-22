@@ -99,10 +99,21 @@ final class HunterSpearHeldPose {
 
 	private static TreeMap<Double, Vec3> channel(
 			com.google.gson.JsonElement source) {
-		if (source == null || !source.isJsonObject()) {
+		if (source == null) {
 			return null;
 		}
 		TreeMap<Double, Vec3> frames = new TreeMap<>();
+		if (source.isJsonArray()) {
+			Vec3 constant = vector(source);
+			if (constant != null) {
+				frames.put(0.0D, constant);
+				return frames;
+			}
+			return null;
+		}
+		if (!source.isJsonObject()) {
+			return null;
+		}
 		for (var frame : source.getAsJsonObject().entrySet()) {
 			var value = frame.getValue();
 			if (value.isJsonObject()) {

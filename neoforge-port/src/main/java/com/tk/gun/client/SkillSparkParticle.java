@@ -56,14 +56,21 @@ public final class SkillSparkParticle extends SpriteBillboardParticle {
 		String currentAnimation = BowgunRigClient.activeAnimation(
 				attachedEntityId);
 		if (ownerAnimation != null && !ownerAnimation.equals(currentAnimation)) {
-			markDead();
-			ACTIVE.remove(attachedEntityId, this);
-			return;
+			// Network state and the GeckoLib controller update one tick apart.
+			// Keep two ticks for the authored special clip to become active.
+			if (this.age >= 2) {
+				markDead();
+				ACTIVE.remove(attachedEntityId, this);
+				return;
+			}
 		}
 		if (attachedEntityId >= 0) {
-			Vec3d locator = "aim".equals(attachedLocator)
-					? BowgunRigRenderer.aimPosition(attachedEntityId)
-					: BowgunRigRenderer.locatorPosition(attachedEntityId);
+			Vec3d locator = switch (attachedLocator) {
+				case "aim" -> BowgunRigRenderer.aimPosition(attachedEntityId);
+				case "effects" -> BowgunRigRenderer.effectsPosition(
+						attachedEntityId);
+				default -> BowgunRigRenderer.locatorPosition(attachedEntityId);
+			};
 			if (locator != null) {
 				setPos(locator.x, locator.y, locator.z);
 			}

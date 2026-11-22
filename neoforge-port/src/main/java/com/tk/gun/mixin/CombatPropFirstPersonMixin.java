@@ -1,5 +1,6 @@
 package com.tk.gun.mixin;
 
+import com.tk.gun.TkGun;
 import com.tk.gun.client.CombatPropFirstPersonRenderer;
 import com.tk.gun.client.SoulAnchorFirstPersonRenderer;
 import com.tk.gun.client.SoulAnchorSkillClientState;
@@ -21,6 +22,9 @@ public abstract class CombatPropFirstPersonMixin {
 	private void mechaniciancombat$renderCombatPropFpa(float tickDelta,
 			MatrixStack matrices, VertexConsumerProvider.Immediate consumers,
 			ClientPlayerEntity player, int light, CallbackInfo ci) {
+		if (TkGun.isKineticSword(player)) {
+			return;
+		}
 		int id = player.getId();
 		if (SoulAnchorSkillClientState.firstPersonActive(id)) {
 			SoulAnchorFirstPersonRenderer.render(

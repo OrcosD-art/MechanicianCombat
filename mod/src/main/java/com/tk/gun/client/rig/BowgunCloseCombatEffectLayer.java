@@ -238,7 +238,7 @@ public final class BowgunCloseCombatEffectLayer
 	 * view-space normal and maximum vertex colour to keep both sides equally
 	 * bright.
 	 */
-	private static void renderUnshadedCube(MatrixStack poseStack, GeoCube cube,
+	static void renderUnshadedCube(MatrixStack poseStack, GeoCube cube,
 			VertexConsumer buffer, int packedOverlay) {
 		Matrix4f matrix = poseStack.peek().getPositionMatrix();
 		for (GeoQuad quad : cube.quads()) {

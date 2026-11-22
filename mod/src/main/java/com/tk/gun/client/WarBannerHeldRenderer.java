@@ -79,7 +79,8 @@ public final class WarBannerHeldRenderer
 			WarBannerHeldPose.apply(
 					bone, seconds,
 					WarBannerSkillClientState.usesGunAnimation(
-							activePlayer.getId()));
+							activePlayer.getId()),
+					TkGun.isKineticSword(activePlayer));
 			if ("flag_maker".equals(bone.getName())
 					&& activePlayer == net.minecraft.client.MinecraftClient
 							.getInstance().player) {

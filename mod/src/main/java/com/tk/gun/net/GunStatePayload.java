@@ -18,7 +18,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 							  boolean skillJumpHovering, boolean fallAttackTailPose,
 							  boolean kineticSwordBoost, boolean kineticSwordDraft,
 							  boolean kineticSwordAccelerationAttack,
-							  boolean kineticSwordRunJump)
+							  boolean kineticSwordRunJump,
+							  int kineticSwordSpecial)
 		implements CustomPayload {
 	public static final CustomPayload.Id<GunStatePayload> ID =
 			new CustomPayload.Id<>(TkGun.id("state"));
@@ -61,6 +62,7 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 				buf.writeBoolean(value.kineticSwordDraft());
 				buf.writeBoolean(value.kineticSwordAccelerationAttack());
 				buf.writeBoolean(value.kineticSwordRunJump());
+				buf.writeVarInt(value.kineticSwordSpecial());
 			},
 			buf -> new GunStatePayload(buf.readVarInt(), buf.readByte(), buf.readVarInt(), buf.readVarInt(),
 					buf.readVarInt(), buf.readVarInt(),
@@ -94,7 +96,8 @@ public record GunStatePayload(int playerId, byte state, int ticks, int heat, int
 					buf.readableBytes() > 0 && buf.readBoolean(),
 					buf.readableBytes() > 0 && buf.readBoolean(),
 					buf.readableBytes() > 0 && buf.readBoolean(),
-					buf.readableBytes() > 0 && buf.readBoolean()));
+					buf.readableBytes() > 0 && buf.readBoolean(),
+					buf.readableBytes() > 0 ? buf.readVarInt() : 0));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

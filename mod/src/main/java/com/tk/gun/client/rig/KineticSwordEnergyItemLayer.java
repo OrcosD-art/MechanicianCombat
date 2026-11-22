@@ -31,7 +31,9 @@ public final class KineticSwordEnergyItemLayer
 				|| bone.getCubes().isEmpty() || player == null) {
 			return;
 		}
-		int colour = KineticSwordEnergyEffect.colorFor(player);
+		int colour = KineticSwordEnergyEffect.colorFor(player,
+				com.tk.gun.client.KineticSwordFirstPersonState
+						.animationName(), partialTick);
 		if ((colour >>> 24) == 0) {
 			return;
 		}

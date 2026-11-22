@@ -1,5 +1,6 @@
 package com.tk.gun.mixin;
 
+import com.tk.gun.TkGun;
 import com.tk.gun.client.WarBannerFirstPersonRenderer;
 import com.tk.gun.client.WarBannerSkillClientState;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -18,7 +19,8 @@ public abstract class WarBannerFirstPersonMixin {
 	private void mechaniciancombat$renderWarBannerFpa(float tickDelta,
 			MatrixStack matrices, VertexConsumerProvider.Immediate consumers,
 			ClientPlayerEntity player, int light, CallbackInfo ci) {
-		if (!WarBannerSkillClientState.isActive(player.getId())) {
+		if (TkGun.isKineticSword(player)
+				|| !WarBannerSkillClientState.isActive(player.getId())) {
 			return;
 		}
 		WarBannerFirstPersonRenderer.render(

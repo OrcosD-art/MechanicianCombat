@@ -138,6 +138,12 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		if (!isActive()) {
 			return fallback;
 		}
+		if (usesPlainAnchorAirLegs(player.getId())
+				&& ("leftLeg".equals(part) || "rightLeg".equals(part))) {
+			// Non-gun chain clips only own the upper body while airborne.
+			// Returning the lower-layer transform preserves jump/fall legs.
+			return fallback;
+		}
 		PoseSnapshot snapshot = POSES.get(player.getId());
 		if (snapshot == null || player.getWorld() == null
 				|| cachedWorld != player.getWorld()) {
@@ -158,6 +164,24 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 		}
 		trace(snapshot, path, part, type);
 		return transform(path, snapshot.bones(), snapshot.channels(), type, fallback);
+	}
+
+	/**
+	 * Kinetic Sword already selects its authored jump/fall clips while airborne,
+	 * so its leg channels must remain active. Plain non-gun chain poses instead
+	 * yield their legs to the normal airborne animation layer.
+	 */
+	private static boolean usesPlainAnchorAirLegs(int playerId) {
+		SoulAnchorSkillClientState.Entry anchor =
+				SoulAnchorSkillClientState.get(playerId);
+		if (anchor == null || anchor.gunHeld() || anchor.swordSkill()) {
+			return false;
+		}
+		MinecraftClient client = MinecraftClient.getInstance();
+		return client.world != null
+				&& client.world.getEntityById(playerId)
+						instanceof net.minecraft.entity.player.PlayerEntity player
+				&& !player.isOnGround();
 	}
 
 	static Vec3f transform(String[] path, Map<String, BonePose> bones,

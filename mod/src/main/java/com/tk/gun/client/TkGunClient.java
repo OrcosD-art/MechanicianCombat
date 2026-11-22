@@ -55,6 +55,8 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean focusKeyDown = false;
 	private static boolean jumpKeyDown = false;
 	private static boolean kineticSwordMoveInput = false;
+	private static boolean kineticSwordBackwardInput = false;
+	private static int kineticSwordSpecialPacketShotSeq = -1;
 	/** 连发补包是否已经打过日志（一次按住只打一行，别刷屏）。 */
 	private static boolean autoFireLogged = false;
 	/** F 键上一 tick 是否按着（自己做边沿检测）。 */
@@ -840,6 +842,7 @@ public class TkGunClient implements ClientModInitializer {
 		CycloneRenderer.register();
 		SoulAnchorRopeRenderer.register();
 		WarBannerDebugRenderer.register();
+		MeleeHitboxDebugRenderer.register();
 		ClientPlayNetworking.registerGlobalReceiver(GunStatePayload.ID,
 				(payload, context) -> context.client().execute(() -> GunClientState.apply(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(
@@ -1009,6 +1012,8 @@ public class TkGunClient implements ClientModInitializer {
 			heldGunLastTick = false;
 			jumpKeyDown = false;
 			kineticSwordMoveInput = false;
+			kineticSwordBackwardInput = false;
+			kineticSwordSpecialPacketShotSeq = -1;
 			MOVES.clear();
 			backpackActionDown = false;
 			soulAnchorKeyDown = false;
@@ -1063,11 +1068,23 @@ public class TkGunClient implements ClientModInitializer {
 		}
 		boolean kineticMoveInput = kineticSword
 				&& hasMovementInput(client.player.getId());
-		if (kineticMoveInput != kineticSwordMoveInput) {
+		// A decoupled sprint deliberately converts all camera-relative WASD
+		// input into body-forward steering. Report raw S as a boost-cancelling
+		// backward input only when the camera is coupled; otherwise S would stop
+		// the kinetic boost before the steering correction can turn and move.
+		boolean decoupledKineticSprint = kineticSword
+				&& GunClientState.dashing(client.player.getId())
+				&& ShoulderCouplingState.requiresDecoupledView(client);
+		boolean kineticBackwardInput = kineticSword
+				&& client.options.backKey.isPressed()
+				&& !decoupledKineticSprint;
+		if (kineticMoveInput != kineticSwordMoveInput
+				|| kineticBackwardInput != kineticSwordBackwardInput) {
 			ClientPlayNetworking.send(
 					new com.tk.gun.net.KineticSwordMovementPayload(
-							kineticMoveInput));
+							kineticMoveInput, kineticBackwardInput));
 			kineticSwordMoveInput = kineticMoveInput;
+			kineticSwordBackwardInput = kineticBackwardInput;
 		}
 		jumpKeyDown = jumpDown;
 		if (holdingGunNow && client.player.isSneaking()
@@ -1210,6 +1227,46 @@ public class TkGunClient implements ClientModInitializer {
 					ammoUiKey.getLocalizedText().getString(), ammoUiKeyCode);
 		}
 		ammoUiKeyDown = ammoUiRaw;
+		boolean kineticSpecialRaw = client.currentScreen == null
+				&& client.options.useKey.isPressed();
+		if (kineticSpecialRaw && TkGun.isKineticSword(client.player)) {
+			GunClientState.Entry swordState =
+					GunClientState.get(client.player.getId());
+			if (swordState != null && swordState.state == TkGun.State.MELEE
+					&& !swordState.meleeReturning
+					&& swordState.kineticSwordSpecial <= 0
+					&& swordState.elapsed >= TkGun.kineticSwordSpecialCutTick(
+							Math.max(1, Math.min(6, swordState.shotIndex))) / 2) {
+				net.minecraft.util.math.Vec3d effect =
+						com.tk.gun.client.rig.BowgunRigRenderer
+								.effectsPosition(client.player.getId());
+				if (effect == null) {
+					effect = com.tk.gun.client.rig.BowgunRigRenderer
+							.locatorPosition(client.player.getId());
+				}
+				if (effect == null) {
+					effect = client.player.getEyePos()
+							.add(client.player.getRotationVec(1.0F)
+									.multiply(1.25D))
+							.add(0.0D, -0.45D, 0.0D);
+				}
+				ClientPlayNetworking.send(
+						new com.tk.gun.net.GunMeleePayload(
+								true, false, true,
+								effect.x, effect.y, effect.z));
+				if (kineticSwordSpecialPacketShotSeq
+						!= swordState.shotSeq) {
+					kineticSwordSpecialPacketShotSeq = swordState.shotSeq;
+					TkGun.LOGGER.info(
+							"[mechaniciancombat] kinetic sword right-click hold armed ATK_{} seq={} at effects locator ({}, {}, {})",
+							swordState.shotIndex, swordState.shotSeq,
+							effect.x, effect.y, effect.z);
+				}
+			}
+		}
+		if (!kineticSpecialRaw) {
+			kineticSwordSpecialPacketShotSeq = -1;
+		}
 		// （原来这里有一条"§e[mechaniciancombat] 专注没生效 …"的聊天栏诊断 —— 2026-10-17 用户要求清除，已整段删掉。
 		//   现在"是不是旧 jar"的判断看进服日志里的 `构建=` 那一行就够了。）
 		// —— 左键 ——
@@ -1324,7 +1381,7 @@ public class TkGunClient implements ClientModInitializer {
 		float sideways = (keyDown(client, client.options.leftKey) ? 1.0F : 0.0F)
 				- (keyDown(client, client.options.rightKey) ? 1.0F : 0.0F);
 		if (Math.abs(forward) < 0.01F && Math.abs(sideways) < 0.01F) {
-			return new GunRollPayload(0.0F, 0.0F);
+			return new GunRollPayload(0.0F, 0.0F, false);
 		}
 		double yaw = Math.toRadians(
 				SprintDirectionCorrection.movementCameraYaw(client));
@@ -1332,7 +1389,13 @@ public class TkGunClient implements ClientModInitializer {
 		// Minecraft yaw 0 faces +Z. Its left-hand direction is +X at yaw 0.
 		Vec3d left = new Vec3d(Math.cos(yaw), 0.0D, Math.sin(yaw));
 		Vec3d direction = look.multiply(forward).add(left.multiply(sideways)).normalize();
-		return new GunRollPayload((float) direction.x, (float) direction.z);
+		// A backward roll is displacement-only when the body and camera own the
+		// same heading. In a decoupled view, backwards is a valid camera-relative
+		// roll and must not inherit that cancellation rule.
+		boolean backward = forward < -0.01F
+				&& !ShoulderCouplingState.requiresDecoupledView(client);
+		return new GunRollPayload((float) direction.x, (float) direction.z,
+				backward);
 	}
 
 	private static boolean keyDown(MinecraftClient client, KeyBinding binding) {

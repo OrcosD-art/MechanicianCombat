@@ -46,13 +46,12 @@ public final class KineticSwordFirstPersonState {
 					id, gun.kineticSwordRunJump);
 		} else if (gun != null && gun.state == TkGun.State.MELEE) {
 			int step = Math.max(1, Math.min(6, gun.shotIndex));
-			if (gun.kineticSwordDraft && !gun.meleeReturning) {
-				name = gun.shotIndex == 2
-						? "GS_ATK_2-3_draft" : "GS_ATK_4-5_draft";
-			} else {
-				name = "GS_ATK_" + step
-						+ (gun.meleeReturning ? "_back-idle" : "");
-			}
+			name = gun.meleeReturning
+					? "GS_ATK_" + step + "_back-idle"
+					: gun.kineticSwordSpecial > 0
+							? TkGun.kineticSwordSpecialAnimation(
+									gun.kineticSwordSpecial)
+							: "GS_ATK_" + step;
 		} else if (!player.isOnGround()) {
 			name = GunClientState.kineticSwordJumpAnimation(id,
 					gun != null && gun.kineticSwordRunJump);
@@ -92,10 +91,11 @@ public final class KineticSwordFirstPersonState {
 			return TkGunClient.walkAnimationSpeed(id);
 		}
 		if (name.startsWith("GS_ATK_") && gun != null) {
-			if (gun.kineticSwordAccelerationAttack || gun.kineticSwordDraft) {
+			if (gun.kineticSwordAccelerationAttack) {
 				return 1.0D;
 			}
 			if (gun.state == TkGun.State.MELEE
+					&& gun.kineticSwordSpecial <= 0
 					&& gun.shotIndex >= 2 && gun.shotIndex <= 5) {
 				int baseTicks = TkGun.KINETIC_SWORD_ATTACK_TICKS[
 						gun.shotIndex - 1];

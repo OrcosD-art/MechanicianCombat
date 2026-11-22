@@ -263,6 +263,15 @@ public final class GunStateMachine {
 			st.dodgeLockUntil = 0L;
 			st.dodgeBlockUntil = 0L;
 			st.fallbackRollReadyAt = 0L;
+			if (st.rollRequestBackward) {
+				st.kineticSwordDodgeBoost = false;
+				clearDash(player);
+				player.setSprinting(false);
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] Kinetic Sword backward dodge -> displacement only, no sprint boost player={}",
+						player.getName().getString());
+				return false;
+			}
 			st.kineticSwordDodgeBoost = true;
 			TkGun.LOGGER.info(
 					"[mechaniciancombat] Kinetic Sword dodge -> movement-bound +{}% speed player={}",

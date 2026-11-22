@@ -203,10 +203,21 @@ public final class CombatBackpackPoseAnimation {
 
 	private static TreeMap<Double, Vec3> channel(JsonObject bone, String name) {
 		JsonElement source = bone.get(name);
-		if (source == null || !source.isJsonObject()) {
+		if (source == null) {
 			return null;
 		}
 		TreeMap<Double, Vec3> frames = new TreeMap<>();
+		if (source.isJsonArray()) {
+			Vec3 constant = vector(source);
+			if (constant != null) {
+				frames.put(0.0D, constant);
+				return frames;
+			}
+			return null;
+		}
+		if (!source.isJsonObject()) {
+			return null;
+		}
 		JsonObject sourceObject = source.getAsJsonObject();
 		if (sourceObject.has("vector")) {
 			Vec3 constant = vector(sourceObject.get("vector"));

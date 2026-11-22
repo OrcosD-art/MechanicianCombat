@@ -23,6 +23,9 @@ import java.util.Set;
 public final class KineticSwordFirstPersonRenderer
 		extends GeoItemRenderer<KineticSwordFpaItem> {
 	private static final float CAMERA_HEAD_HEIGHT = 24.0F / 16.0F;
+	private static final double FPA_OFFSET_X = 0.28D;
+	private static final double FPA_OFFSET_Y = -0.31D;
+	private static final double FPA_OFFSET_Z = -0.71D;
 	private static final Set<String> SWORD_BONES = Set.of(
 			"Great_sword", "B1", "Blade", "C1", "C2");
 	private static KineticSwordFirstPersonRenderer instance;
@@ -34,6 +37,9 @@ public final class KineticSwordFirstPersonRenderer
 		this.animatable = item;
 		addRenderLayer(new com.tk.gun.client.rig.KineticSwordEnergyItemLayer(
 				this));
+		addRenderLayer(
+				new com.tk.gun.client.rig.KineticSwordRotateEffectItemLayer(
+						this));
 	}
 
 	public static void render(ClientPlayerEntity player, float tickDelta,
@@ -67,8 +73,14 @@ public final class KineticSwordFirstPersonRenderer
 				player.getMainArm() == Arm.LEFT
 						? ModelTransformationMode.FIRST_PERSON_LEFT_HAND
 						: ModelTransformationMode.FIRST_PERSON_RIGHT_HAND;
-		instance.method_3166(stack, mode, matrices, consumers, light,
-				OverlayTexture.DEFAULT_UV);
+		matrices.push();
+		try {
+			matrices.translate(FPA_OFFSET_X, FPA_OFFSET_Y, FPA_OFFSET_Z);
+			instance.method_3166(stack, mode, matrices, consumers, light,
+					OverlayTexture.DEFAULT_UV);
+		} finally {
+			matrices.pop();
+		}
 		if (consumers instanceof VertexConsumerProvider.Immediate immediate) {
 			immediate.draw();
 		}
@@ -103,14 +115,29 @@ public final class KineticSwordFirstPersonRenderer
 			RenderLayer renderType, VertexConsumerProvider consumers,
 			VertexConsumer buffer, boolean isReRender, float tickDelta,
 			int packedLight, int packedOverlay, int colour) {
+		if (!isReRender && "effects".equals(bone.getName())
+				&& net.minecraft.client.MinecraftClient.getInstance()
+						.player != null) {
+			org.joml.Vector3d world = bone.getWorldPosition();
+			com.tk.gun.client.rig.BowgunRigRenderer
+					.acceptFirstPersonEffectsPosition(
+							net.minecraft.client.MinecraftClient
+									.getInstance().player.getId(),
+							new net.minecraft.util.math.Vec3d(
+									world.x, world.y, world.z));
+		}
 		if (com.tk.gun.client.rig.KineticSwordEnergyEffect
 				.isEnergyBone(bone.getName())
 				&& net.minecraft.client.MinecraftClient.getInstance().player
 						!= null) {
 			com.tk.gun.client.rig.KineticSwordEnergyEffect.applyVisibility(
 					bone, net.minecraft.client.MinecraftClient
-							.getInstance().player);
+							.getInstance().player,
+					KineticSwordFirstPersonState.animationName(), tickDelta);
 		}
+		com.tk.gun.client.rig.KineticSwordRotateEffect.apply(
+				bone, net.minecraft.client.MinecraftClient.getInstance().player,
+				KineticSwordFirstPersonState.animationName(), tickDelta);
 		super.renderRecursively(matrices, animatable, bone, renderType,
 				consumers, buffer, isReRender, tickDelta,
 				LightmapTextureManager.MAX_LIGHT_COORDINATE,

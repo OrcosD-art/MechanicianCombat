@@ -53,13 +53,18 @@ public final class SkillSparkClientState {
 			String active = BowgunRigClient.activeAnimation(
 					effect.entityId());
 			return effect.ownerAnimation() != null
+					&& effect.age(now) >= 2
 					&& !effect.ownerAnimation().equals(active);
 		});
 		for (Map.Entry<Integer, Effect> entry : EFFECTS.entrySet()) {
 			Effect effect = entry.getValue();
-			Vec3d locator = "aim".equals(effect.locator())
-					? BowgunRigRenderer.aimPosition(effect.entityId())
-					: BowgunRigRenderer.locatorPosition(effect.entityId());
+			Vec3d locator = switch (effect.locator()) {
+				case "aim" -> BowgunRigRenderer.aimPosition(effect.entityId());
+				case "effects" -> BowgunRigRenderer.effectsPosition(
+						effect.entityId());
+				default -> BowgunRigRenderer.locatorPosition(
+						effect.entityId());
+			};
 			if (locator != null) {
 				entry.setValue(new Effect(effect.entityId(),
 						effect.locator(), effect.ownerAnimation(),

@@ -29,7 +29,8 @@ public final class KineticSwordEnergyLayer
 			return;
 		}
 		Entity entity = rig.getCurrentEntity();
-		int colour = KineticSwordEnergyEffect.colorFor(entity);
+		int colour = KineticSwordEnergyEffect.colorFor(entity,
+				animatable.currentAnimation(), partialTick);
 		if ((colour >>> 24) == 0) {
 			return;
 		}
