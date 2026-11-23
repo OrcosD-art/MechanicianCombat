@@ -21,6 +21,11 @@ public final class SkillSparkClientState {
 		public int age(long now) {
 			return (int) Math.max(0L, now - startedAt);
 		}
+
+		public int framesPerSecond() {
+			return ownerAnimation != null
+					&& ownerAnimation.startsWith("GS_") ? 36 : 18;
+		}
 	}
 
 	private static final Map<Integer, Effect> EFFECTS = new HashMap<>();

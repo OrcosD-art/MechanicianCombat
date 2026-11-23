@@ -45,11 +45,15 @@ public final class MeleeImpactClientState {
 			return;
 		}
 		Entity attacker = client.world.getEntityById(payload.attackerId());
-		for (int targetId : payload.targetIds()) {
+		for (int index = 0; index < payload.targetIds().length; index++) {
+			int targetId = payload.targetIds()[index];
 			Entity target = client.world.getEntityById(targetId);
 			if (target == null) {
 				continue;
 			}
+			int effectId = index < payload.effectIds().length
+					? payload.effectIds()[index] : 0;
+			SlashHitClientState.spawn(attacker, target, effectId);
 			FreezeState state = createFreezeState(target, attacker,
 					payload.ticks(), payload.ticks());
 			FreezeState old = FROZEN_TARGETS.get(targetId);
@@ -111,6 +115,7 @@ public final class MeleeImpactClientState {
 		}
 		tickMap(HITSTOPS);
 		tickMap(FROZEN_TARGETS);
+		SlashHitClientState.tick();
 		if (cameraShake != null && --cameraShake.remainingTicks <= 0) {
 			cameraShake = null;
 		}
@@ -159,6 +164,7 @@ public final class MeleeImpactClientState {
 	public static void clear() {
 		HITSTOPS.clear();
 		FROZEN_TARGETS.clear();
+		SlashHitClientState.clear();
 		cameraShake = null;
 	}
 

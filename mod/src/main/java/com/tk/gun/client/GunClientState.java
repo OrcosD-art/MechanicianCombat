@@ -135,6 +135,7 @@ public final class GunClientState {
 		boolean sameFrame = e.state == newState && !newShotFrame;
 		if (newState == TkGun.State.MELEE && (!sameFrame || newShotFrame)) {
 			SkillSparkParticle.clearForEntity(payload.playerId());
+			KineticSwordSparkClientState.clearForEntity(payload.playerId());
 		}
 		if (newState == TkGun.State.MELEE) {
 			e.meleeGraceUntil = 0;
@@ -287,8 +288,7 @@ public final class GunClientState {
 					.add(entity.getRotationVec(1.0F).multiply(1.25D))
 					.add(0.0D, -0.45D, 0.0D);
 		}
-		SkillSparkParticle.spawnAttached(entity, position, "effects",
-				TkGun.kineticSwordSpecialAnimation(startStep));
+		KineticSwordSparkClientState.spawn(entity, position);
 	}
 
 	public static Entry get(int entityId) {

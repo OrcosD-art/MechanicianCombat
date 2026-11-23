@@ -50,16 +50,18 @@ public final class HunterSpearPlayerAnimation {
 					"[mechaniciancombat] Missing hunter spear PlayerAnimator clip {}", CLIP);
 			return;
 		}
-		layer.setAnimation(new HoldAnimation(playable.playAnimation()));
+		PlayerAnimationTransitions.play(layer,
+				new HoldAnimation(playable.playAnimation()),
+				PlayerAnimationTransitions.NORMAL_TICKS);
 		ACTIVE.add(uuid);
 	}
 
 	public static void clear(UUID uuid) {
 		ModifierLayer<IAnimation> layer = LAYERS.get(uuid);
-		if (layer != null) {
-			layer.setAnimation(null);
+		if (ACTIVE.remove(uuid)) {
+			PlayerAnimationTransitions.clear(
+					layer, PlayerAnimationTransitions.NORMAL_TICKS);
 		}
-		ACTIVE.remove(uuid);
 	}
 
 	public static void clearAll() {
@@ -112,6 +114,14 @@ public final class HunterSpearPlayerAnimation {
 		@Override
 		public Vec3f get3DTransform(String part, TransformType type,
 				float tickDelta, Vec3f fallback) {
+			if ("head".equals(part)) {
+				// Head orientation remains vanilla. Position can follow a future
+				// authored chest attachment or the lower normal-pose layer.
+				return type == TransformType.POSITION
+						? animation.get3DTransform(
+								part, type, tickDelta, fallback)
+						: fallback;
+			}
 			if (!"torso".equals(part) && !"rightArm".equals(part)
 					&& !"leftArm".equals(part)) {
 				return fallback;

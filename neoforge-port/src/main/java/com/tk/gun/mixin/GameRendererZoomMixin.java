@@ -1,6 +1,7 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.client.GunCamera;
+import com.tk.gun.client.CameraPerspectiveTransition;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.Camera;
 import net.minecraft.client.render.GameRenderer;
@@ -34,10 +35,10 @@ public abstract class GameRendererZoomMixin {
 			com.tk.gun.TkGun.LOGGER.info("[mechaniciancombat] 放大逐帧探针：帧={} FOV系数={} 返回={}",
 					frame, Math.round(scale * 1000) / 1000.0, Math.round(cir.getReturnValueD() * 100.0) / 100.0);
 		}
-		if (Math.abs(scale - 1.0F) > 0.001F) {
-			cir.setReturnValue(cir.getReturnValueD() * (double) scale);
-		}
-		GunCamera.recordRenderedFov(cir.getReturnValueD());
+		double result = cir.getReturnValueD() * (double) scale;
+		result = CameraPerspectiveTransition.blendFov(result);
+		cir.setReturnValue(result);
+		GunCamera.recordRenderedFov(result);
 	}
 
 	private static int frame;

@@ -5,6 +5,7 @@ import com.tk.gun.client.HelmetClientState;
 import com.tk.gun.client.HunterSpearHeldRenderer;
 import com.tk.gun.client.WarBannerHeldRenderer;
 import com.tk.gun.client.rig.BowgunRigClient;
+import com.tk.gun.client.rig.PlayerLocomotionRigClient;
 import com.tk.gun.item.MechanicianUndersuitItem;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.model.ModelPart;
@@ -34,6 +35,7 @@ public abstract class PlayerEntityRendererRigMixin {
 	@Inject(method = "<init>(Lnet/minecraft/class_5617$class_5618;Z)V", at = @At("TAIL"))
 	private void mechaniciancombat$rememberContext(EntityRendererFactory.Context ctx, boolean slim, CallbackInfo ci) {
 		BowgunRigClient.setContext(ctx);
+		PlayerLocomotionRigClient.setContext(ctx);
 		WarBannerHeldRenderer.setContext(ctx);
 		HunterSpearHeldRenderer.setContext(ctx);
 	}
@@ -57,7 +59,10 @@ public abstract class PlayerEntityRendererRigMixin {
 					model.jacket.visible
 			};
 		}
-		BowgunRigClient.renderIfHolding(player, yaw, tickDelta, matrices, consumers, light);
+		PlayerLocomotionRigClient.renderIfActive(
+				player, yaw, tickDelta, matrices, consumers, light);
+		BowgunRigClient.renderIfHolding(
+				player, yaw, tickDelta, matrices, consumers, light);
 		WarBannerHeldRenderer.renderIfActive(
 				player, yaw, tickDelta, matrices, consumers, light);
 		HunterSpearHeldRenderer.renderIfActive(

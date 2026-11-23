@@ -17,6 +17,27 @@ public final class AnchorLockRenderLayers {
 		return create(texture, name, RenderPhase.LEQUAL_DEPTH_TEST);
 	}
 
+	/**
+	 * Invisible depth-aware geometry used to write the slash-hit stencil mask.
+	 * Color and depth writes are disabled; only stencil writes are expected.
+	 */
+	public static RenderLayer createStencilMask(String name) {
+		RenderLayer.MultiPhaseParameters parameters =
+				RenderLayer.MultiPhaseParameters.builder()
+						.texture(RenderPhase.NO_TEXTURE)
+						.program(new RenderPhase.ShaderProgram(
+								GameRenderer::getPositionColorProgram))
+						.transparency(RenderPhase.NO_TRANSPARENCY)
+						.depthTest(RenderPhase.LEQUAL_DEPTH_TEST)
+						.cull(RenderPhase.DISABLE_CULLING)
+						.lightmap(RenderPhase.DISABLE_LIGHTMAP)
+						.writeMaskState(new RenderPhase.WriteMaskState(
+								false, false))
+						.build(false);
+		return RenderLayer.of(name, VertexFormats.POSITION_COLOR,
+				DrawMode.QUADS, 1536, parameters);
+	}
+
 	private static RenderLayer create(Identifier texture, String name,
 			RenderPhase.DepthTest depthTest) {
 		RenderLayer.MultiPhaseParameters parameters =

@@ -12,7 +12,8 @@ import net.minecraft.network.packet.CustomPayload;
  * already owns the movement timeline, while the target still freezes and the
  * camera still shakes.</p>
  */
-public record MeleeImpactPayload(int attackerId, int[] targetIds, int ticks,
+public record MeleeImpactPayload(int attackerId, int[] targetIds,
+								 int[] effectIds, int ticks,
 								 boolean critical, boolean lockAttacker,
 								 boolean cameraShake)
 		implements CustomPayload {
@@ -25,8 +26,10 @@ public record MeleeImpactPayload(int attackerId, int[] targetIds, int ticks,
 	private static void write(MeleeImpactPayload payload, RegistryByteBuf buffer) {
 		buffer.writeVarInt(payload.attackerId());
 		buffer.writeVarInt(payload.targetIds().length);
-		for (int targetId : payload.targetIds()) {
-			buffer.writeVarInt(targetId);
+		for (int index = 0; index < payload.targetIds().length; index++) {
+			buffer.writeVarInt(payload.targetIds()[index]);
+			buffer.writeVarInt(index < payload.effectIds().length
+					? payload.effectIds()[index] : 0);
 		}
 		buffer.writeVarInt(payload.ticks());
 		buffer.writeBoolean(payload.critical());
@@ -38,11 +41,14 @@ public record MeleeImpactPayload(int attackerId, int[] targetIds, int ticks,
 		int attackerId = buffer.readVarInt();
 		int count = buffer.readVarInt();
 		int[] targetIds = new int[count];
+		int[] effectIds = new int[count];
 		for (int index = 0; index < count; index++) {
 			targetIds[index] = buffer.readVarInt();
+			effectIds[index] = buffer.readVarInt();
 		}
-		return new MeleeImpactPayload(attackerId, targetIds, buffer.readVarInt(),
-				buffer.readBoolean(), buffer.readBoolean(), buffer.readBoolean());
+		return new MeleeImpactPayload(attackerId, targetIds, effectIds,
+				buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(),
+				buffer.readBoolean());
 	}
 
 	@Override

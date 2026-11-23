@@ -48,11 +48,11 @@ public final class JumpBackpackPlayerAnimation {
 		};
 		UUID uuid = player.getUuid();
 		if (clip == null) {
-			LAYERS.computeIfPresent(uuid, (ignored, layer) -> {
-				layer.setAnimation(null);
-				return layer;
-			});
-			ACTIVE.remove(uuid);
+			if (ACTIVE.remove(uuid) != null) {
+				PlayerAnimationTransitions.clear(
+						LAYERS.get(uuid),
+						PlayerAnimationTransitions.QUICK_TICKS);
+			}
 			return;
 		}
 		if (clip.equals(ACTIVE.get(uuid))) {
@@ -68,7 +68,9 @@ public final class JumpBackpackPlayerAnimation {
 			TkGun.LOGGER.warn("[mechaniciancombat] Missing PlayerAnimator animation {}", clip);
 			return;
 		}
-		layer.setAnimation(new HoldAnimation(clip, playable.playAnimation()));
+		PlayerAnimationTransitions.play(layer,
+				new HoldAnimation(clip, playable.playAnimation()),
+				PlayerAnimationTransitions.QUICK_TICKS);
 		ACTIVE.put(uuid, clip);
 		TkGun.LOGGER.info("[mechaniciancombat] PlayerAnimator play {} for {}", clip, uuid);
 	}
@@ -91,11 +93,11 @@ public final class JumpBackpackPlayerAnimation {
 	}
 
 	public static void clear(UUID uuid) {
-		ModifierLayer<IAnimation> layer = LAYERS.remove(uuid);
-		if (layer != null) {
-			layer.setAnimation(null);
+		ModifierLayer<IAnimation> layer = LAYERS.get(uuid);
+		if (ACTIVE.remove(uuid) != null) {
+			PlayerAnimationTransitions.clear(
+					layer, PlayerAnimationTransitions.QUICK_TICKS);
 		}
-		ACTIVE.remove(uuid);
 	}
 
 	public static void clearAll() {

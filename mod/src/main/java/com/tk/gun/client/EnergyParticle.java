@@ -141,14 +141,14 @@ public class EnergyParticle extends SpriteBillboardParticle {
 		}
 	}
 
-	/** Authored five-frame melee slash hit, played at 10 ticks total. */
+	/** Authored five-frame melee slash hit, played at 20 FPS as a fallback. */
 	public record SlashHitFactory(SpriteProvider provider)
 			implements ParticleFactory<SimpleParticleType> {
 		@Override
 		public EnergyParticle createParticle(SimpleParticleType type, ClientWorld world,
 											 double x, double y, double z,
 											 double vx, double vy, double vz) {
-			return new EnergyParticle(world, x, y, z, this.provider, 10, 2.0F, false);
+			return new EnergyParticle(world, x, y, z, this.provider, 5, 1.5F, false);
 		}
 	}
 

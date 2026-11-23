@@ -16,7 +16,6 @@ import org.joml.Vector3f;
 /** Camera-facing foreground rendering for the authored skill-spark flipbook. */
 public final class SkillSparkForegroundRenderer {
 	private static final int FRAME_COUNT = 5;
-	private static final int FRAMES_PER_SECOND = 18;
 	private static final float SIZE = 3.0F;
 	private static final RenderLayer[] LAYERS = new RenderLayer[FRAME_COUNT];
 
@@ -54,7 +53,8 @@ public final class SkillSparkForegroundRenderer {
 				for (SkillSparkClientState.Effect effect
 						: SkillSparkClientState.effects()) {
 					int frame = Math.min(FRAME_COUNT - 1,
-							effect.age(now) * FRAMES_PER_SECOND / 20);
+							effect.age(now)
+									* effect.framesPerSecond() / 20);
 					if (frame != frameIndex) {
 						continue;
 					}

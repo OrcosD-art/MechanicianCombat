@@ -16,9 +16,10 @@ import net.minecraft.util.math.Vec3d;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Veritas close-combat skill spark, five frames at the authored 18 FPS. */
+/** Generic skill spark fallback, five frames at the authored 18 FPS. */
 public final class SkillSparkParticle extends SpriteBillboardParticle {
 	private static final int FRAME_COUNT = 5;
+	private static final int FRAMES_PER_SECOND = 18;
 	private static final int LIFETIME = 10;
 	private static volatile SpriteProvider activeProvider;
 	private static final Map<Integer, SkillSparkParticle> ACTIVE =
@@ -44,10 +45,11 @@ public final class SkillSparkParticle extends SpriteBillboardParticle {
 	}
 
 	private void updateSprite() {
-		// The updated source flipbook is authored at 18 FPS. Use the real age so the
+		// The source flipbook is authored at 18 FPS. Use the real age so the
 		// last frame is selected; getSprite(frame, FRAME_COUNT) would cap at
 		// frameCount - 2.
-		int frame = Math.min(FRAME_COUNT - 1, this.age * 18 / 20);
+		int frame = Math.min(FRAME_COUNT - 1,
+				this.age * FRAMES_PER_SECOND / 20);
 		this.setSprite(this.provider.getSprite(frame, FRAME_COUNT - 1));
 	}
 

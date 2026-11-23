@@ -10,7 +10,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.particle.SimpleParticleType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -80,11 +79,14 @@ public final class MeleeImpactService {
 		int ticks = Math.min(MAX_HITSTOP_TICKS,
 				Math.max(1, baseTicks + (critical ? CRIT_BONUS_TICKS : 0)));
 		int[] targetIds = new int[targets.size()];
+		int[] effectIds = new int[targets.size()];
 		long now = attacker.getWorld().getTime();
 		boolean impactSoundPlayed = false;
 		for (int index = 0; index < targets.size(); index++) {
 			Entity target = targets.get(index);
 			targetIds[index] = target.getId();
+			effectIds[index] = attacker.getRandom().nextInt(
+					TkGunParticles.MELEE_HIT_EFFECTS.length);
 			Vec3d center = target.getBoundingBox().getCenter();
 			Vec3d outward = attacker.getEyePos().subtract(center);
 			outward = new Vec3d(outward.x, 0.0D, outward.z);
@@ -98,13 +100,6 @@ public final class MeleeImpactService {
 					center.x + outward.x * surfaceOffset,
 					target.getY() + target.getHeight() * 0.62D,
 					center.z + outward.z * surfaceOffset);
-			SimpleParticleType impactEffect = TkGunParticles.MELEE_HIT_EFFECTS[
-					attacker.getRandom().nextInt(
-							TkGunParticles.MELEE_HIT_EFFECTS.length)];
-			attacker.getServerWorld().spawnParticles(
-					impactEffect,
-					impactPos.x, impactPos.y, impactPos.z,
-					1, 0.0D, 0.0D, 0.0D, 0.0D);
 			if (!impactSoundPlayed) {
 				impactSoundPlayed = true;
 				attacker.getServerWorld().playSound(null, impactPos.x,
@@ -129,7 +124,8 @@ public final class MeleeImpactService {
 		}
 
 		MeleeImpactPayload payload = new MeleeImpactPayload(
-				attacker.getId(), targetIds, ticks, critical, lockAttacker, cameraShake);
+				attacker.getId(), targetIds, effectIds, ticks, critical,
+				lockAttacker, cameraShake);
 		for (ServerPlayerEntity viewer :
 				attacker.getServer().getPlayerManager().getPlayerList()) {
 			ServerPlayNetworking.send(viewer, payload);

@@ -42,6 +42,13 @@ public class TkGunClient implements ClientModInitializer {
 	public static final KeyBinding HELMET_TOGGLE_KEY = KeyBindingHelper.registerKeyBinding(
 			new KeyBinding("key.mechaniciancombat.helmet_toggle", InputUtil.Type.KEYSYM,
 					GLFW.GLFW_KEY_G, "category.mechaniciancombat"));
+	private static final KeyBinding fallbackRollKey =
+			CombatRollHook.isInstalled() ? null
+					: KeyBindingHelper.registerKeyBinding(new KeyBinding(
+							"key.mechaniciancombat.roll",
+							InputUtil.Type.KEYSYM,
+							GLFW.GLFW_KEY_LEFT_ALT,
+							"category.mechaniciancombat"));
 	private static boolean attackWasDown = false;
 	private static boolean meleeAttackDown = false;
 	private static boolean backpackActionDown = false;
@@ -61,10 +68,8 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean autoFireLogged = false;
 	/** F 键上一 tick 是否按着（自己做边沿检测）。 */
 	private static boolean reloadKeyDown = false;
-	private static boolean ammoUiKeyDown = false;
 	/** combat_roll 的翻滚键（按它的翻译键 `keybinds.combat_roll.roll` 找）+ 上一 tick 是否按着。 */
 	private static KeyBinding rollKey;
-	private static KeyBinding fallbackRollKey;
 	private static boolean rollKeyDown = false;
 	private static net.minecraft.resource.ResourceManager lastResourceManager;
 
@@ -160,6 +165,27 @@ public class TkGunClient implements ClientModInitializer {
 		} catch (Throwable ignored) {
 			return false;
 		}
+	}
+	/**
+	 * Handles Pick Block on the exact button/key press that invokes
+	 * {@code MinecraftClient#doItemPick()}. Polling the physical mouse button
+	 * from the client tick can miss short middle-clicks, especially on NeoForge.
+	 */
+	public static boolean openAmmoRingFromPickBlock(MinecraftClient client) {
+		if (client == null || client.player == null
+				|| client.currentScreen != null
+				|| !TkGun.holdingGun(client.player)
+				|| TkGun.isMeleeWeapon(client.player)) {
+			return false;
+		}
+		InputUtil.Key key = bindingKey(client.options.pickItemKey,
+				GLFW.GLFW_KEY_K);
+		ClientPlayNetworking.send(
+				new com.tk.gun.net.OpenAmmoStoragePayload());
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] 弹药环键 {}（码 {}）-> 打开弹药环",
+				key.getLocalizedText().getString(), key.getCode());
+		return true;
 	}
 	private static boolean selfTested = false;
 	private static int ticks;
@@ -726,13 +752,12 @@ public class TkGunClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		com.tk.gun.client.rig.BowgunPlayerAnimatorPose.register();
+		com.tk.gun.client.rig.PlayerLocomotionPoseBridge.register();
+		PlayerLocomotionAnimation.register();
 		JumpBackpackPlayerAnimation.register();
 		WarBannerPlayerAnimation.register();
 		HunterSpearPlayerAnimation.register();
-		if (!CombatRollHook.isInstalled()) {
-			fallbackRollKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-					"key.mechaniciancombat.roll", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_LEFT_ALT,
-					"category.mechaniciancombat"));
+		if (fallbackRollKey != null) {
 			TkGun.LOGGER.info("[mechaniciancombat] 未安装 Combat Roll：启用模组内置闪避键（默认左 Alt）");
 		}
 		// 让作者写在动画里的"跟随视角" Molang 真的生效（GeckoLib 对 GeoReplacedEntity 会返回 0，
@@ -837,7 +862,9 @@ public class TkGunClient implements ClientModInitializer {
 				(context, tickCounter) -> GunReticle.render(context));
 		SoulChainWorldRenderer.register();
 		AnchorLockParticleRenderer.register();
+		SlashHitForegroundRenderer.register();
 		SkillSparkForegroundRenderer.register();
+		KineticSwordSparkForegroundRenderer.register();
 		RoundAttackRenderer.register();
 		CycloneRenderer.register();
 		SoulAnchorRopeRenderer.register();
@@ -980,6 +1007,9 @@ public class TkGunClient implements ClientModInitializer {
 			WarBannerHeldPose.clearCache();
 			HunterSpearHeldPose.clearCache();
 			CombatPropHeldPose.clearCache();
+			PlayerLocomotionAnimation.clearAll();
+			com.tk.gun.client.rig.PlayerLocomotionRigClient.clear();
+			com.tk.gun.client.rig.PlayerLocomotionPoseBridge.clear();
 			CombatBackpackGeoRenderer.clearPoseDiagnostics();
 			MechanicianArmorGeometry.clearCache();
 		}
@@ -999,6 +1029,7 @@ public class TkGunClient implements ClientModInitializer {
 			SoulAnchorSkillClientState.tick();
 			SoulAnchorMarkClientState.tick();
 			SkillSparkClientState.tick(client);
+			KineticSwordSparkClientState.tick(client);
 			RoundAttackClientState.tick(client);
 			CycloneClientState.tick(client);
 		ticks++;
@@ -1009,6 +1040,7 @@ public class TkGunClient implements ClientModInitializer {
 		GunDebugHarness.tick(client);
 		if (client.world == null || client.player == null) {
 			thirdPersonForced = false;
+			CameraPerspectiveTransition.reset();
 			heldGunLastTick = false;
 			jumpKeyDown = false;
 			kineticSwordMoveInput = false;
@@ -1030,8 +1062,12 @@ public class TkGunClient implements ClientModInitializer {
 				SoulAnchorSkillClientState.clearAll();
 				SoulAnchorMarkClientState.clear();
 				SkillSparkClientState.clear();
+				KineticSwordSparkClientState.clear();
 				RoundAttackClientState.clear();
 				CycloneClientState.clear();
+			PlayerLocomotionAnimation.clearAll();
+			com.tk.gun.client.rig.PlayerLocomotionRigClient.clear();
+			com.tk.gun.client.rig.PlayerLocomotionPoseBridge.clear();
 			com.tk.gun.client.rig.BowgunPlayerAnimatorPose.clear();
 			com.tk.gun.client.rig.BowgunRigClient.clear();
 			return;
@@ -1101,6 +1137,7 @@ public class TkGunClient implements ClientModInitializer {
 		heldGunLastTick = holdingGunNow;
 		tickClientStepHeight(client, holdingGunNow);
 		trackMovement(client);
+		PlayerLocomotionAnimation.tick(client);
 		if (holdingGunNow
 				&& (!TkGun.isMeleeWeapon(client.player)
 						|| TkGun.isKineticSword(client.player))
@@ -1213,20 +1250,6 @@ public class TkGunClient implements ClientModInitializer {
 		// 记录物理按下状态（而不是“界面关闭时的按下”），
 		// 这样在界面里按住/松开按键后关闭界面，不会又补触发一次。
 		reloadKeyDown = reloadRaw;
-		// Ammo ring reuses vanilla Pick Block; its vanilla action is cancelled
-		// while a gun is held by PickItemAmmoRingMixin.
-		InputUtil.Key ammoUiKey = bindingKey(
-				client.options.pickItemKey, GLFW.GLFW_KEY_K);
-		int ammoUiKeyCode = ammoUiKey.getCode();
-		boolean ammoUiRaw = isInputDown(client, ammoUiKey);
-		boolean ammoUiDown = client.currentScreen == null && ammoUiRaw;
-		if (ammoUiDown && !ammoUiKeyDown && TkGun.holdingGun(client.player)
-				&& !TkGun.isMeleeWeapon(client.player)) {
-			ClientPlayNetworking.send(new com.tk.gun.net.OpenAmmoStoragePayload());
-			TkGun.LOGGER.info("[mechaniciancombat] 弹药环键 {}（码 {}）-> 打开弹药环",
-					ammoUiKey.getLocalizedText().getString(), ammoUiKeyCode);
-		}
-		ammoUiKeyDown = ammoUiRaw;
 		boolean kineticSpecialRaw = client.currentScreen == null
 				&& client.options.useKey.isPressed();
 		if (kineticSpecialRaw && TkGun.isKineticSword(client.player)) {
@@ -1500,6 +1523,7 @@ public class TkGunClient implements ClientModInitializer {
 			if (!thirdPersonForced) {
 				thirdPersonForced = true;
 				perspectiveBeforeGun = client.options.getPerspective();
+				CameraPerspectiveTransition.beginEquip(client);
 				// 2026-10-17 用户："撤销所有关于视角修改的内容，我将重新使用 ShoulderSurfing" ——
 				// 回到原来的分工：**视角交给 ShoulderSurfing**（它接管时用它的 `SHOULDER_SURFING`），
 				// 没装/没接管才退回原版第三人称。本模组不再自带越肩相机。
@@ -1512,6 +1536,7 @@ public class TkGunClient implements ClientModInitializer {
 			}
 		} else if (thirdPersonForced) {
 			thirdPersonForced = false;
+			CameraPerspectiveTransition.beginUnequip(client);
 			FallbackShoulderCamera.leave(client);
 			applyShoulderSurf(false);
 			// Always restore the vanilla perspective that was active before the gun.

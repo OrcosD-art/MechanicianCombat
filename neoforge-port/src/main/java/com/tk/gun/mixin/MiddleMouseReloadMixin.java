@@ -1,6 +1,5 @@
 package com.tk.gun.mixin;
 
-import com.tk.gun.TkGun;
 import net.minecraft.client.MinecraftClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -13,9 +12,8 @@ public abstract class MiddleMouseReloadMixin {
 	@Inject(method = "method_1511", at = @At("HEAD"), cancellable = true)
 	private void mechaniciancombat$pickItemOpensAmmoRing(CallbackInfo ci) {
 		MinecraftClient client = (MinecraftClient) (Object) this;
-		if (client.player != null && client.currentScreen == null
-				&& TkGun.holdingGun(client.player)) {
-			// TkGunClient polls pickItemKey directly and opens the ring once.
+		if (com.tk.gun.client.TkGunClient
+				.openAmmoRingFromPickBlock(client)) {
 			ci.cancel();
 		}
 	}

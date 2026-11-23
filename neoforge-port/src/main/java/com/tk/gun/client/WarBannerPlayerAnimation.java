@@ -56,16 +56,18 @@ public final class WarBannerPlayerAnimation {
 			TkGun.LOGGER.warn("[mechaniciancombat] Missing War Banner PlayerAnimator clip {}", CLIP);
 			return;
 		}
-		layer.setAnimation(new HoldAnimation(playable.playAnimation()));
+		PlayerAnimationTransitions.play(layer,
+				new HoldAnimation(playable.playAnimation()),
+				PlayerAnimationTransitions.NORMAL_TICKS);
 		ACTIVE.add(uuid);
 	}
 
 	public static void clear(UUID uuid) {
 		ModifierLayer<IAnimation> layer = LAYERS.get(uuid);
-		if (layer != null) {
-			layer.setAnimation(null);
+		if (ACTIVE.remove(uuid)) {
+			PlayerAnimationTransitions.clear(
+					layer, PlayerAnimationTransitions.NORMAL_TICKS);
 		}
-		ACTIVE.remove(uuid);
 	}
 
 	public static void clearAll() {
@@ -118,6 +120,15 @@ public final class WarBannerPlayerAnimation {
 		@Override
 		public Vec3f get3DTransform(String part, TransformType type,
 				float tickDelta, Vec3f fallback) {
+			if ("head".equals(part)) {
+				// Keep horizontal/pitch rotation fully vanilla. A future clip may
+				// author head position to keep it attached to the animated chest;
+				// otherwise the lower normal-pose layer supplies that position.
+				return type == TransformType.POSITION
+						? animation.get3DTransform(
+								part, type, tickDelta, fallback)
+						: fallback;
+			}
 			// skill_flag only authors the upper body. Keep every other player
 			// channel on the lower animation layer's pose.
 			if (!"torso".equals(part) && !"rightArm".equals(part)
