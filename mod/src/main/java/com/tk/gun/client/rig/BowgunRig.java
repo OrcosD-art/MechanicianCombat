@@ -77,11 +77,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 		// 最后统一把"这一帧没有任何动画碰过的骨骼"拉回绑定姿势（见 AnimationProcessor#tickAnimation）。
 		// 所以上层只写上半身、下层照旧写全身，合并出来的就是"边走边打"。
 		registrar.add(new AnimationController<>(this, "upper", 1, this::pickUpper)
-				.setAnimationSpeedHandler(rig -> {
-					return player != null
-							&& com.tk.gun.client.MeleeImpactClientState
-									.freezesAnimation(player.getId()) ? 0.0D : 1.0D;
-				})
+				.setAnimationSpeedHandler(rig -> 1.0D)
 				// 上半身动画是从完整动画派生的，仍带有原动画的声音/timeline/粒子标记。
 				// 这些事件由主 rig 控制器或服务端处理；这里显式吸收，避免重复播放和日志刷屏。
 				.setSoundKeyframeHandler(this::onUpperSoundKeyframe)
@@ -114,9 +110,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 					.setCustomInstructionKeyframeHandler(event -> { })
 					.setParticleKeyframeHandler(event -> { }));
 		}
-		// Close-combat effect planes use their own controller. Veritas effects
-		// deliberately ignore hitstop for both their authored bone transforms
-		// and the manually scheduled visibility windows.
+		// Close-combat effect planes use their own controller and effect clock.
 		registrar.add(new AnimationController<BowgunRig>(this, "close_effects", 0,
 				this::pickCloseCombatEffects)
 				.setAnimationSpeedHandler(rig -> 1.0D)
@@ -521,6 +515,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 
 	/** 最近一次 pick 选的动画名 + 打日志用（验收"待机=idle / 部署快慢 / 开火"看客户端日志即可）。 */
 	private String currentAnimationName = "-";
+	private double currentAnimationTick;
 	/** Soul Anchor is an additive player-only layer, not the locomotion clip. */
 	private String soulAnchorSkillName;
 	private long baseAnchorRevision = -1L;
@@ -528,6 +523,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 	/** 当前 rig 控制器在播哪一段（渲染器判"这段要不要跟随视角"要用）。 */
 	public String currentAnimation() {
 		return currentAnimationName;
+	}
+
+	public double currentAnimationTick() {
+		return currentAnimationTick;
 	}
 
 	/** Animation layers affecting the current player's body in this GeckoLib render pass. */
@@ -596,6 +595,7 @@ public final class BowgunRig implements GeoReplacedEntity {
 
 	private PlayState pickKineticSword(AnimationState<BowgunRig> state,
 			GunClientState.Entry entry) {
+		currentAnimationTick = state.getAnimationTick();
 		Entity entity = entityOf(state);
 		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
 			return play(state, "idle");
@@ -703,10 +703,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 		}
 		if (WarBannerSkillClientState.isActive(player.getId())) {
 			return 1.0D;
-		}
-		if (com.tk.gun.client.MeleeImpactClientState
-				.freezesAnimation(player.getId())) {
-			return 0.0D;
 		}
 		if (currentAnimationName != null
 				&& (currentAnimationName.startsWith("walk_")
@@ -1523,7 +1519,10 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return pickKineticSword(state, e);
 		}
 		if (e != null && e.airborneIdle) {
-			return play(state, "idle");
+			return play(state,
+					entity instanceof net.minecraft.entity.player.PlayerEntity player
+							&& player.getVelocity().y <= 0.01D
+							? "fall" : "idle");
 		}
 		if (isVeritasAcceleratedRun(entity, e)) {
 			// The recovery clip has already reached the planted landing pose.

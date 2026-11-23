@@ -343,6 +343,14 @@
                                           }
                                       ]
                        },
+    "backpack_lock_on":  {
+                             "sounds":  [
+                                            {
+                                                "name":  "mechaniciancombat:backpack_lock_on",
+                                                "stream":  false
+                                            }
+                                        ]
+                         },
     "golem_swing":  {
                         "sounds":  [
                                        {

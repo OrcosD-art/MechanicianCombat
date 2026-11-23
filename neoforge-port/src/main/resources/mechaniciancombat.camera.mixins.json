@@ -28,8 +28,6 @@
     "CreativeInventoryScreenAccessor",
     "CombatRollInputGuardMixin",
     "MeleeCameraShakeMixin",
-    "MeleeInputFreezeMixin",
-    "MeleeEntityFreezeRenderMixin",
     "OffhandSwapGuardClientMixin",
     "OffhandUseGuardClientMixin",
     "OffhandStorageFirstPersonMixin",

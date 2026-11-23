@@ -16,6 +16,8 @@ import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.math.Vec3d;
 
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public final class CombatBackpackClientState {
@@ -31,6 +33,7 @@ public final class CombatBackpackClientState {
 		int targetEntityId = -1;
 		int phase = CombatBackpackStatusPayload.PHASE_READY;
 		int missilePhase = CombatBackpackStatusPayload.MISSILE_NONE;
+		int[] missileTargetIds = new int[0];
 		int jumpEnergyPixels = com.tk.gun.TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS;
 		boolean jumpEnergyLocked;
 		int charges;
@@ -243,7 +246,8 @@ public final class CombatBackpackClientState {
 	public static void applyStatus(int ownerEntityId, int targetEntityId, int phase,
 								   int charges, int remainingTicks, int launcherType,
 								   int missilePhase, int jumpEnergyPixels,
-								   boolean jumpEnergyLocked) {
+								   boolean jumpEnergyLocked,
+								   int[] missileTargetIds) {
 		Entry entry = ENTRIES.computeIfAbsent(ownerEntityId, ignored -> new Entry());
 		int previousPhase = entry.phase;
 		BackpackUpgradeData.LauncherType previousType = entry.launcherType;
@@ -253,6 +257,8 @@ public final class CombatBackpackClientState {
 						phase));
 		entry.missilePhase = Math.max(CombatBackpackStatusPayload.MISSILE_NONE,
 				Math.min(CombatBackpackStatusPayload.MISSILE_CD, missilePhase));
+		entry.missileTargetIds = missileTargetIds == null
+				? new int[0] : missileTargetIds.clone();
 		entry.jumpEnergyPixels = Math.max(0, Math.min(
 				com.tk.gun.TkGun.JUMP_BACKPACK_ENERGY_MAX_PIXELS,
 				jumpEnergyPixels));
@@ -534,6 +540,34 @@ public final class CombatBackpackClientState {
 			return -1;
 		}
 		return entry.targetEntityId;
+	}
+
+	/** Unique active portable/auto backpack lock targets for foreground markers. */
+	public static List<Integer> lockOnTargetEntityIds() {
+		List<Integer> targets = new ArrayList<>();
+		for (Integer ownerId : List.copyOf(ENTRIES.keySet())) {
+			Entry entry = ENTRIES.get(ownerId);
+			if (entry == null) {
+				continue;
+			}
+			boolean targetPhase =
+					entry.phase == CombatBackpackStatusPayload.PHASE_MARKED
+							|| entry.phase == CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
+							|| entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_MARKED
+							|| entry.phase == CombatBackpackStatusPayload.PHASE_SUMMON_CAST;
+			if (targetPhase && entry.targetEntityId >= 0
+					&& entry.remainingTicks > 0
+					&& !targets.contains(entry.targetEntityId)) {
+				targets.add(entry.targetEntityId);
+			}
+			for (int missileTargetId : entry.missileTargetIds) {
+				if (missileTargetId >= 0
+						&& !targets.contains(missileTargetId)) {
+					targets.add(missileTargetId);
+				}
+			}
+		}
+		return targets;
 	}
 
 	public static int charges(int playerId) {

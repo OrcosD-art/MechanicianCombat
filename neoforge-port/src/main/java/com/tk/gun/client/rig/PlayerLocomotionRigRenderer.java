@@ -54,7 +54,8 @@ public final class PlayerLocomotionRigRenderer
 					bone.getPivotX(), bone.getPivotY(), bone.getPivotZ()));
 		}
 		if (currentFrame && "body".equals(bone.getName())) {
-			PlayerLocomotionPoseBridge.capture(entity.getId(), pose);
+			PlayerLocomotionPoseBridge.capture(
+					entity.getId(), pose, partialTick);
 		}
 	}
 }

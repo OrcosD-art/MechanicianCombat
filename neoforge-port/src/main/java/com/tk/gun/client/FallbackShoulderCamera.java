@@ -23,15 +23,15 @@ import net.minecraft.world.RaycastContext;
 public final class FallbackShoulderCamera {
 	private static final boolean SHOULDER_SURFING_INSTALLED =
 			FabricLoader.getInstance().isModLoaded("shouldersurfing");
-	private static final double DEFAULT_DISTANCE = 3.2D;
-	private static final double DEFAULT_SIDE = 0.68D;
-	private static final double DEFAULT_HEIGHT = 0.18D;
-	private static final double AIM_DISTANCE = 2.35D;
-	private static final double AIM_SIDE = 0.52D;
-	private static final double AIM_HEIGHT = 0.12D;
-	private static final double ACTION_DISTANCE = 3.55D;
-	private static final double ACTION_SIDE = 0.58D;
-	private static final double ACTION_HEIGHT = 0.32D;
+	private static final double DEFAULT_DISTANCE = 4.6D;
+	private static final double DEFAULT_SIDE = 1.505D;
+	private static final double DEFAULT_HEIGHT = 0.33D;
+	private static final double AIM_DISTANCE = 3.75D;
+	private static final double AIM_SIDE = 1.345D;
+	private static final double AIM_HEIGHT = 0.27D;
+	private static final double ACTION_DISTANCE = 4.95D;
+	private static final double ACTION_SIDE = 1.405D;
+	private static final double ACTION_HEIGHT = 0.47D;
 	private static final double TRANSITION_SECONDS = 0.10D;
 	private static final double COLLISION_MARGIN = 0.15D;
 

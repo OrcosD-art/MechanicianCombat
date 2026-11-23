@@ -101,9 +101,8 @@ return JSON.stringify(info);
         (New-Object Text.UTF8Encoding($false)))
     $content = $null
     foreach ($entry in $result.exports) {
-        if ($entry.content -and (
-                $entry.name -match "geo" -or
-                $entry.name -match "\.geo")) {
+        if ($entry.content -and
+                ([string]$entry.content).Contains('"minecraft:geometry"')) {
             $content = [string]$entry.content
             break
         }

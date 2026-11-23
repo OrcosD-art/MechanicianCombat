@@ -862,6 +862,7 @@ public class TkGunClient implements ClientModInitializer {
 				(context, tickCounter) -> GunReticle.render(context));
 		SoulChainWorldRenderer.register();
 		AnchorLockParticleRenderer.register();
+		BackpackLockOnParticleRenderer.register();
 		SlashHitForegroundRenderer.register();
 		SkillSparkForegroundRenderer.register();
 		KineticSwordSparkForegroundRenderer.register();
@@ -947,7 +948,8 @@ public class TkGunClient implements ClientModInitializer {
 									payload.launcherType(),
 									payload.missilePhase(),
 									payload.jumpEnergyPixels(),
-									payload.jumpEnergyLocked());
+									payload.jumpEnergyLocked(),
+									payload.missileTargetIds());
 					JumpBackpackClientState.applyStatus(
 							payload.ownerEntityId(), payload.phase(),
 							payload.remainingTicks());
@@ -1041,6 +1043,7 @@ public class TkGunClient implements ClientModInitializer {
 		if (client.world == null || client.player == null) {
 			thirdPersonForced = false;
 			CameraPerspectiveTransition.reset();
+			BackpackLockOnParticleRenderer.clear();
 			heldGunLastTick = false;
 			jumpKeyDown = false;
 			kineticSwordMoveInput = false;

@@ -793,6 +793,8 @@ public final class TkGun {
 			id("hunter_turret_fire");
 	/** Soul Anchor throw cue authored at 0.1667s in chain_skill.bbmodel. */
 	public static final Identifier SND_CHAIN = id("chain");
+	/** Backpack target acquisition cue. */
+	public static final Identifier SND_BACKPACK_LOCK_ON = id("backpack_lock_on");
 	/** 熔铁弩矢（三叉戟式弹药）开火声：素材 `枪击.ogg`。 */
 	public static final Identifier SND_GUNSHOT = id("gunshot");
 

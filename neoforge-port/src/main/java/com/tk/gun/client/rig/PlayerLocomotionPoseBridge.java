@@ -43,7 +43,8 @@ public final class PlayerLocomotionPoseBridge implements IAnimation {
 	}
 
 	public static void capture(int playerId,
-			Map<String, BowgunPlayerAnimatorPose.BonePose> bones) {
+			Map<String, BowgunPlayerAnimatorPose.BonePose> bones,
+			float tickDelta) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.world == null) {
 			return;
@@ -54,8 +55,10 @@ public final class PlayerLocomotionPoseBridge implements IAnimation {
 		if (player == null) {
 			return;
 		}
+		Map<String, BowgunPlayerAnimatorPose.BonePose> smoothed =
+				PlayerLocomotionSmoother.smooth(player, bones, tickDelta);
 		POSES.put(player.getUuid(), new PoseSnapshot(
-				Map.copyOf(bones), client.world.getTime()));
+				Map.copyOf(smoothed), client.world.getTime()));
 	}
 
 	public static boolean hasFreshPose(UUID uuid) {
@@ -78,8 +81,13 @@ public final class PlayerLocomotionPoseBridge implements IAnimation {
 
 	@Override
 	public boolean isActive() {
-		return player.isAlive() && PlayerLocomotionRigClient.shouldEvaluate(player)
+		boolean active = player.isAlive()
+				&& PlayerLocomotionRigClient.shouldEvaluate(player)
 				&& hasFreshPose(player.getUuid());
+		if (!active) {
+			PlayerLocomotionSmoother.clearNormal(player.getUuid());
+		}
+		return active;
 	}
 
 	@Override
@@ -126,6 +134,7 @@ public final class PlayerLocomotionPoseBridge implements IAnimation {
 
 	public static void clear() {
 		POSES.clear();
+		PlayerLocomotionSmoother.clear();
 	}
 
 	private record PoseSnapshot(

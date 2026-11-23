@@ -11,7 +11,8 @@ public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 										  int remainingTicks, int launcherType,
 										  int missilePhase,
 										  int jumpEnergyPixels,
-										  boolean jumpEnergyLocked)
+										  boolean jumpEnergyLocked,
+										  int[] missileTargetIds)
 		implements CustomPayload {
 	public static final int PHASE_READY = 0;
 	public static final int PHASE_MARKED = 1;
@@ -49,12 +50,31 @@ public record CombatBackpackStatusPayload(int ownerEntityId, int targetEntityId,
 						buf.writeByte(value.missilePhase());
 						buf.writeVarInt(Math.max(0, value.jumpEnergyPixels()));
 						buf.writeBoolean(value.jumpEnergyLocked());
+						buf.writeVarInt(value.missileTargetIds().length);
+						for (int targetId : value.missileTargetIds()) {
+							buf.writeVarInt(targetId);
+						}
 					},
-					buf -> new CombatBackpackStatusPayload(
-							buf.readVarInt(), buf.readVarInt(), buf.readUnsignedByte(),
-							buf.readUnsignedByte(), buf.readVarInt(),
-							buf.readUnsignedByte(), buf.readUnsignedByte(),
-							buf.readVarInt(), buf.readBoolean()));
+					buf -> {
+						int ownerId = buf.readVarInt();
+						int targetId = buf.readVarInt();
+						int phase = buf.readUnsignedByte();
+						int charges = buf.readUnsignedByte();
+						int remainingTicks = buf.readVarInt();
+						int launcherType = buf.readUnsignedByte();
+						int missilePhase = buf.readUnsignedByte();
+						int jumpEnergyPixels = buf.readVarInt();
+						boolean jumpEnergyLocked = buf.readBoolean();
+						int count = buf.readVarInt();
+						int[] missileTargetIds = new int[count];
+						for (int index = 0; index < count; index++) {
+							missileTargetIds[index] = buf.readVarInt();
+						}
+						return new CombatBackpackStatusPayload(ownerId, targetId,
+								phase, charges, remainingTicks, launcherType,
+								missilePhase, jumpEnergyPixels,
+								jumpEnergyLocked, missileTargetIds);
+					});
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

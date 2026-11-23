@@ -28,9 +28,7 @@ import java.util.Set;
  * A group whose only scale key is zero stays hidden for the whole clip. The
  * layer also gates rendering to clips that actually contain close-combat
  * effects, preventing an unanimated group from falling back to scale 1.
- * Veritas effects intentionally use an independent clock and never pause for
- * hitstop. Ask whether a future weapon's effect should use hitstop before
- * reusing this schedule.</p>
+ * Veritas effects use an independent effect clock.</p>
  */
 public final class BowgunCloseCombatEffectLayer
 		extends GeoRenderLayer<BowgunRig> {
@@ -131,8 +129,6 @@ public final class BowgunCloseCombatEffectLayer
 
 	/**
 	 * Applies the complete effect schedule from the dedicated effect clock.
-	 * Veritas hitstop pauses the pose controller only; it must not pause or
-	 * extend any authored effect window.
 	 */
 	public static void applyScheduledVisibility(GeoBone bone, Entity entity,
 			float partialTick, String upperAnimation,

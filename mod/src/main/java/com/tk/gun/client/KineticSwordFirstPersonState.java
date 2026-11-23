@@ -14,6 +14,7 @@ public final class KineticSwordFirstPersonState {
 
 	private static volatile Snapshot snapshot =
 			new Snapshot("idle", 0L, 1.0D);
+	private static volatile double animationTick;
 
 	public static Snapshot resolve(ClientPlayerEntity player) {
 		int id = player.getId();
@@ -84,9 +85,6 @@ public final class KineticSwordFirstPersonState {
 
 	private static double speedFor(int id, String name,
 			GunClientState.Entry gun) {
-		if (MeleeImpactClientState.freezesAnimation(id)) {
-			return 0.0D;
-		}
 		if (name.startsWith("GS_walk_") || "GS_run".equals(name)) {
 			return TkGunClient.walkAnimationSpeed(id);
 		}
@@ -120,6 +118,14 @@ public final class KineticSwordFirstPersonState {
 
 	public static double animationSpeed() {
 		return snapshot.speed();
+	}
+
+	public static void animationTick(double value) {
+		animationTick = Math.max(0.0D, value);
+	}
+
+	public static double animationTick() {
+		return animationTick;
 	}
 
 	private KineticSwordFirstPersonState() {

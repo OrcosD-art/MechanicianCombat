@@ -18,7 +18,7 @@ public final class GunClientState {
 	public static final class Entry {
 		public TkGun.State state = TkGun.State.IDLE;
 		public int elapsed;
-		/** Veritas effect timeline; deliberately unaffected by melee hitstop. */
+		/** Independent effect timeline used by authored close-combat planes. */
 		public int effectElapsed;
 		public int total;
 		public int heat;
@@ -295,14 +295,6 @@ public final class GunClientState {
 		return ENTRIES.get(entityId);
 	}
 
-	/** Extend the client-side melee mirror while the server pauses its timeline. */
-	public static void extendMelee(int entityId, int ticks) {
-		Entry entry = ENTRIES.get(entityId);
-		if (entry != null && entry.state == TkGun.State.MELEE && ticks > 0) {
-			entry.total += ticks;
-		}
-	}
-
 	/** Whether an Alt press may start a real roll or the roll-to-slide follow-up. */
 	public static boolean canTriggerDodge(int entityId) {
 		Entry e = ENTRIES.get(entityId);
@@ -412,11 +404,7 @@ public final class GunClientState {
 				if (e.state == TkGun.State.MELEE) {
 					e.effectElapsed++;
 				}
-				if (!(e.state == TkGun.State.MELEE
-						&& com.tk.gun.client.MeleeImpactClientState
-								.freezesAnimation(entityId))) {
-					e.elapsed++;
-				}
+				e.elapsed++;
 				if (e.predictedRoll && ++e.predictedRollTicks > 4) {
 					// 服务端迟迟没有回 ROLL（例如闪避冷却拒绝）：撤销预测，避免模型空滚。
 					e.predictedRoll = false;
@@ -540,7 +528,12 @@ public final class GunClientState {
 			return null;
 		}
 		if (e.airborneIdle) {
-			return "idle";
+			net.minecraft.entity.Entity entity = net.minecraft.client.MinecraftClient
+					.getInstance().world == null ? null
+					: net.minecraft.client.MinecraftClient.getInstance()
+							.world.getEntityById(entityId);
+			return entity != null && entity.getVelocity().y <= 0.01D
+					? "fall" : "idle";
 		}
 		switch (e.state) {
 			case FORTRESS_SKILL_LOAD:
@@ -782,7 +775,7 @@ public final class GunClientState {
 		return e.elapsed;
 	}
 
-	/** Effect-only melee clock that never pauses for hitstop. */
+	/** Effect-only melee clock. */
 	public static int effectElapsed(int entityId) {
 		Entry e = ENTRIES.get(entityId);
 		return e == null ? 0 : e.effectElapsed;
@@ -829,7 +822,7 @@ public final class GunClientState {
 		};
 	}
 
-	/** Dash attack is rollable only after its authored hit-stop has ended. */
+	/** Dash attack is rollable after its authored recovery has ended. */
 	private static boolean dashMeleeRecovery(Entry e) {
 		return e != null && e.state == TkGun.State.MELEE
 				&& e.meleeReturning && e.dashMeleeReturn;

@@ -29,6 +29,8 @@ public final class KineticSwordFpaItem extends Item implements GeoItem {
 			AnimatableManager.ControllerRegistrar controllers) {
 		controllers.add(new AnimationController<>(this, "sword_fpa", 0,
 				state -> {
+					KineticSwordFirstPersonState.animationTick(
+							state.getAnimationTick());
 					String name = KineticSwordFirstPersonState.animationName();
 					if (name == null || name.isBlank()) {
 						return PlayState.STOP;

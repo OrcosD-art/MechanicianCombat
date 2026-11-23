@@ -445,6 +445,10 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 			}
 		}
 
+		if (currentFrame && ROOT_BONE.equals(name)
+				&& renderedEntity instanceof AbstractClientPlayerEntity player) {
+			applyWeaponPoseSmoothing(player, partialTick);
+		}
 		super.renderRecursively(poseStack, animatable, bone, type, bufferSource, buffer, isReRender, partialTick,
 				packedLight, packedOverlay, colour);
 		if (currentFrame && "arm_left".equals(name)) {
@@ -585,6 +589,37 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 
 	private static float lerp(float t, float t0, float t1, float v0, float v1) {
 		return v0 + (v1 - v0) * ((t - t0) / (t1 - t0));
+	}
+
+	private void applyWeaponPoseSmoothing(
+			AbstractClientPlayerEntity player, float partialTick) {
+		Map<String, BowgunPlayerAnimatorPose.BonePose> raw = new HashMap<>();
+		for (String boneName : POSE_BONES) {
+			getGeoModel().getBone(boneName).ifPresent(bone ->
+					raw.put(boneName, new BowgunPlayerAnimatorPose.BonePose(
+							bone.getPosX(), bone.getPosY(), bone.getPosZ(),
+							bone.getRotX(), bone.getRotY(), bone.getRotZ(),
+							bone.getPivotX(), bone.getPivotY(),
+							bone.getPivotZ())));
+		}
+		GunClientState.Entry entry = GunClientState.get(player.getId());
+		boolean secondaryMotion = entry == null
+				|| entry.state == TkGun.State.IDLE && !entry.airborneIdle;
+		Map<String, BowgunPlayerAnimatorPose.BonePose> smoothed =
+				PlayerLocomotionSmoother.smoothWeapon(
+						player, raw, partialTick, secondaryMotion);
+		for (Map.Entry<String, BowgunPlayerAnimatorPose.BonePose> pose
+				: smoothed.entrySet()) {
+			getGeoModel().getBone(pose.getKey()).ifPresent(bone -> {
+				BowgunPlayerAnimatorPose.BonePose value = pose.getValue();
+				bone.setPosX(value.x());
+				bone.setPosY(value.y());
+				bone.setPosZ(value.z());
+				bone.setRotX(value.rotX());
+				bone.setRotY(value.rotY());
+				bone.setRotZ(value.rotZ());
+			});
+		}
 	}
 
 	private static boolean isFullBodyState(com.tk.gun.client.GunClientState.Entry e) {

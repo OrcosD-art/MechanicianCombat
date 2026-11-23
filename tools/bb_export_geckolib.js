@@ -23,6 +23,19 @@ Canvas.updateAll();
 const animsBefore = (typeof AnimationItem !== "undefined" && AnimationItem.all) ? AnimationItem.all.length : -1;
 let formatError = null;
 try {
+    const geckoFormat = Formats && (
+        Formats.animated_entity_model
+        || Formats.geckolib_model
+        || Object.values(Formats).find(format =>
+            format && (format.id === "animated_entity_model"
+                || format.id === "geckolib_model"))
+    );
+    if (geckoFormat) {
+        if (typeof geckoFormat.select === "function") {
+            geckoFormat.select();
+        }
+        Project.format = geckoFormat;
+    }
     if (Formats && Formats.geckolib_model) {
         // 正确的切法是**格式实例自己的** select()；Format.select(fmt) 那个签名不生效（实测 Format.id 还是 free）
         if (typeof Formats.geckolib_model.select === "function") {
@@ -80,9 +93,22 @@ if (!globalThis.__BB_EXPORT_STUBBED) {
 async function fire(id) {
     const act = BarItems[id];
     if (!act) return id + ": 没有这个动作";
+    if (typeof act.condition === "function" && !act.condition()) {
+        const reason = id + ": condition=false";
+        globalThis.__BB_ACTION_ERRORS.push(reason);
+        return reason;
+    }
     const before = globalThis.__BB_EXPORTS.length;
-    try { act.click(); } catch (e) { /* 有对话框会抛，内容照样进 __BB_EXPORTS */ }
-    await new Promise(r => setTimeout(r, 1500));
+    try {
+        const result = act.click();
+        if (result && typeof result.then === "function") {
+            await result;
+        }
+    } catch (e) {
+        globalThis.__BB_ACTION_ERRORS.push(
+            id + ": " + String(e && (e.stack || e.message) || e));
+    }
+    await new Promise(r => setTimeout(r, 3000));
     // 导出会弹"选哪些动画"的对话框。⚠️ 页面上还有别的对话框（插件列表那个也有 OK），
     // 所以必须挑**当前这个可见对话框里**的按钮：优先 Confirm（这个版本就是它），再退 OK。
     for (let round = 0; round < 2; round++) {
@@ -101,6 +127,7 @@ async function fire(id) {
 }
 
 const log = [];
+globalThis.__BB_ACTION_ERRORS = [];
 log.push(await fire("export_geckolib_model"));
 log.push(await fire("export_geckolib_animations"));
 // 插件那个动作只是 `BarItems['export_animation_file'].trigger()` 的壳，trigger 会查 condition；
@@ -129,6 +156,7 @@ return JSON.stringify({
     animations: { before: animsBefore, after: animsAfter,
         names: (typeof AnimationItem !== "undefined" && AnimationItem.all)
             ? AnimationItem.all.map(a => a.name) : [] },
+    action_errors: globalThis.__BB_ACTION_ERRORS,
     log,
     exports: out,
 });

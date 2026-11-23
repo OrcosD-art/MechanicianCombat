@@ -79,6 +79,7 @@ public final class BowgunRigClient {
 		boolean skillRig = com.tk.gun.client.SoulAnchorSkillClientState
 				.active(player.getId());
 		if ((!TkGun.holdingGun(player) && !skillRig) || context == null) {
+			PlayerLocomotionSmoother.clearWeapon(player.getUuid());
 			return false;
 		}
 		RigBundle bundle = RIGS.get(player.getUuid());

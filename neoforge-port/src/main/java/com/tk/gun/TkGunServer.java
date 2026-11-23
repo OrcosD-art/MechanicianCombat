@@ -137,7 +137,6 @@ public class TkGunServer implements ModInitializer {
 	private static final int BACKPACK_FIREWORK_COOLDOWN_TICKS = 100;
 	private static final double BACKPACK_TARGET_RADIUS = 20.0D;
 	private static final int BACKPACK_TARGET_WINDOW_TICKS = 160;
-	private static final int BACKPACK_TARGET_GLOW_TICKS = BACKPACK_TARGET_WINDOW_TICKS;
 	private static final int BACKPACK_MAX_CHARGES = 3;
 	private static final int BACKPACK_CHARGE_INTERVAL_TICKS = 40;
 	private static final int AUTO_BACKPACK_MAX_CHARGES = 10;
@@ -155,7 +154,6 @@ public class TkGunServer implements ModInitializer {
 	private static final int MISSILE_BOX_MARK_INTERVAL_TICKS = 1;
 	private static final int MISSILE_BOX_SHOT_INTERVAL_TICKS = 2;
 	private static final int MISSILE_BOX_COOLDOWN_TICKS = 120;
-	private static final int MISSILE_BOX_GLOW_TICKS = 140;
 	private static final double MISSILE_BOX_TARGET_RADIUS = 32.0D;
 	private static final double MISSILE_BOX_TURN_RADIANS =
 			Math.toRadians(8.0D);
@@ -2881,13 +2879,9 @@ public class TkGunServer implements ModInitializer {
 				LivingEntity target = nextMissileTarget(player, state);
 				if (target != null) {
 					state.missileTargets.add(target.getUuid());
-					target.addStatusEffect(new StatusEffectInstance(
-							StatusEffects.GLOWING, MISSILE_BOX_GLOW_TICKS,
-							0, false, false, true), player);
-					player.getServerWorld().playSound(null, player.getBlockPos(),
-							SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
-							SoundCategory.PLAYERS,
-							TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+					playSound(player, TkGun.SND_BACKPACK_LOCK_ON,
+							0.8F, 1.0F);
+					syncBackpackStatus(player, state, now);
 				}
 				state.missileNextMarkAt = now
 						+ MISSILE_BOX_MARK_INTERVAL_TICKS;
@@ -2917,6 +2911,7 @@ public class TkGunServer implements ModInitializer {
 			finishMissileVolley(player, state, now);
 		} else {
 			state.missileNextShotAt = now + MISSILE_BOX_SHOT_INTERVAL_TICKS;
+			syncBackpackStatus(player, state, now);
 		}
 	}
 
@@ -3009,7 +3004,6 @@ public class TkGunServer implements ModInitializer {
 						target.getId(), now + BACKPACK_PROJECTILE_TRACK_TICKS,
 						spawn, coldDirection, now));
 		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
-		target.removeStatusEffect(StatusEffects.GLOWING);
 		return true;
 	}
 
@@ -3025,12 +3019,6 @@ public class TkGunServer implements ModInitializer {
 
 	private static void clearMissileTargets(ServerPlayerEntity player,
 			BackpackCharge state) {
-		for (UUID targetId : state.missileTargets) {
-			if (player.getServerWorld().getEntity(targetId)
-					instanceof LivingEntity living) {
-				living.removeStatusEffect(StatusEffects.GLOWING);
-			}
-		}
 		state.missileTargets.clear();
 	}
 
@@ -3119,20 +3107,10 @@ public class TkGunServer implements ModInitializer {
 
 	private static void markSummonAntennaTarget(ServerPlayerEntity player,
 			BackpackCharge state, LivingEntity target, long now) {
-		if (state.targetEntityId >= 0
-				&& state.targetEntityId != target.getId()
-				&& player.getServerWorld().getEntityById(
-						state.targetEntityId) instanceof LivingEntity previous) {
-			previous.removeStatusEffect(StatusEffects.GLOWING);
-		}
 		state.targetEntityId = target.getId();
 		state.targetUuid = target.getUuid();
 		state.targetUntil = now + SUMMON_ANTENNA_COOLDOWN_TICKS;
-		target.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
-				SUMMON_ANTENNA_COOLDOWN_TICKS, 0, false, false, true), player);
-		player.getServerWorld().playSound(null, player.getBlockPos(),
-				SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
-				SoundCategory.PLAYERS, TkGun.BACKPACK_SOUND_VOLUME, 1.2F);
+		playSound(player, TkGun.SND_BACKPACK_LOCK_ON, 0.8F, 1.0F);
 	}
 
 	private static void tickSummonAntenna(ServerPlayerEntity player,
@@ -3145,10 +3123,6 @@ public class TkGunServer implements ModInitializer {
 			return;
 		}
 		if (state.summonCastUntil > 0 && now >= state.summonCastUntil) {
-			if (player.getServerWorld().getEntityById(state.targetEntityId)
-					instanceof LivingEntity target) {
-				target.removeStatusEffect(StatusEffects.GLOWING);
-			}
 			com.tk.gun.entity.MoltenGolemEntity golem =
 					findLivingSummonedGolem(player, state.summonX, state.summonY,
 							state.summonZ);
@@ -3325,10 +3299,6 @@ public class TkGunServer implements ModInitializer {
 	public static void clearBackpackCooldown(ServerPlayerEntity player) {
 		long now = player.getWorld().getTime();
 		BackpackCharge state = backpackState(player, now);
-		if (player.getServerWorld().getEntityById(state.targetEntityId)
-				instanceof LivingEntity target) {
-			target.removeStatusEffect(StatusEffects.GLOWING);
-		}
 		clearBackpackTarget(state, now);
 		clearMissileState(player);
 		state.cooldownUntil = 0;
@@ -3409,10 +3379,6 @@ public class TkGunServer implements ModInitializer {
 			state.jumpLastGroundAt = now;
 		}
 		if (state.launcherType != type) {
-			if (player.getServerWorld().getEntityById(state.targetEntityId)
-					instanceof LivingEntity previousTarget) {
-				previousTarget.removeStatusEffect(StatusEffects.GLOWING);
-			}
 			clearBackpackTarget(state, now);
 			state.launcherType = type;
 			state.autoActive = false;
@@ -3499,15 +3465,12 @@ public class TkGunServer implements ModInitializer {
 		}
 
 		long now = world.getTime();
-		nearest.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
-				BACKPACK_TARGET_GLOW_TICKS, 0, false, false, true), player);
 		state.targetEntityId = nearest.getId();
 		state.targetUuid = nearest.getUuid();
 		state.targetUntil = now + BACKPACK_TARGET_WINDOW_TICKS;
 		state.nextChargeAt = 0;
 		syncBackpackStatus(player, state, now);
-		world.playSound(null, player.getBlockPos(), SoundEvents.BLOCK_ENCHANTMENT_TABLE_USE,
-				SoundCategory.PLAYERS, TkGun.BACKPACK_SOUND_VOLUME, 1.0F);
+		playSound(player, TkGun.SND_BACKPACK_LOCK_ON, 0.8F, 1.0F);
 		TkGun.LOGGER.info("[mechaniciancombat] 战斗背包锁定最近生物 id={} 距离={} 玩家={}",
 				nearest.getId(), round3(Math.sqrt(bestDistanceSq)),
 				player.getName().getString());
@@ -3697,6 +3660,17 @@ public class TkGunServer implements ModInitializer {
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_MARKED
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST;
+		int firstMissileTarget = Math.min(state.missileShotIndex,
+				state.missileTargets.size());
+		int[] missileTargetIds = new int[Math.max(0,
+				state.missileTargets.size() - firstMissileTarget)];
+		for (int index = firstMissileTarget;
+				index < state.missileTargets.size(); index++) {
+			Entity target = world.getEntity(
+					state.missileTargets.get(index));
+			missileTargetIds[index - firstMissileTarget] =
+					target == null ? -1 : target.getId();
+		}
 		com.tk.gun.net.CombatBackpackStatusPayload payload =
 				new com.tk.gun.net.CombatBackpackStatusPayload(owner.getId(),
 						targetPhase
@@ -3710,7 +3684,7 @@ public class TkGunServer implements ModInitializer {
 							case BATTLE_BANNER -> 5;
 							default -> 0;
 				}, missilePhase, state.jumpEnergyPixels,
-				state.jumpEnergyLocked);
+				state.jumpEnergyLocked, missileTargetIds);
 		for (ServerPlayerEntity viewer : world.getPlayers()) {
 			ServerPlayNetworking.send(viewer, payload);
 		}
@@ -4197,10 +4171,8 @@ public class TkGunServer implements ModInitializer {
 		if (target == null || !autoTargetVisible(player, target, state, now)) {
 			int oldTarget = state.targetEntityId;
 			target = findAutoTarget(player, -1, state, now);
-			if (oldTarget != targetId(target)
-					&& player.getServerWorld().getEntityById(oldTarget)
-					instanceof LivingEntity oldLiving) {
-				oldLiving.removeStatusEffect(StatusEffects.GLOWING);
+			if (oldTarget != targetId(target) && target != null) {
+				playSound(player, TkGun.SND_BACKPACK_LOCK_ON, 0.8F, 1.0F);
 			}
 			if (target == null) {
 				state.targetEntityId = -1;
@@ -4215,8 +4187,6 @@ public class TkGunServer implements ModInitializer {
 		}
 		if (target != null) {
 			state.targetUntil = now + 20;
-			target.addStatusEffect(new StatusEffectInstance(StatusEffects.GLOWING,
-					20, 0, false, false, true), player);
 			if (now >= state.nextAutoAttackAt) {
 				if (fireAutoBackpack(player, state, target, now)) {
 					state.nextAutoAttackAt =
@@ -4302,6 +4272,7 @@ public class TkGunServer implements ModInitializer {
 		state.targetEntityId = target.getId();
 		state.targetUuid = target.getUuid();
 		state.targetUntil = now + 20;
+		playSound(player, TkGun.SND_BACKPACK_LOCK_ON, 0.8F, 1.0F);
 		fireAutoBackpack(player, state, target, now);
 		if (state.charges > 0) {
 			state.nextAutoAttackAt = now + AUTO_BACKPACK_ATTACK_INTERVAL_TICKS;
@@ -4379,11 +4350,12 @@ public class TkGunServer implements ModInitializer {
 			if (state.autoShotsOnTarget >= 2) {
 				LivingEntity next = findAutoTarget(player, target.getId(), state, now);
 				if (next != null) {
-					target.removeStatusEffect(StatusEffects.GLOWING);
 					state.targetEntityId = next.getId();
 					state.targetUuid = next.getUuid();
 					state.targetUntil = now + 20;
 					state.autoShotsOnTarget = 0;
+					playSound(player, TkGun.SND_BACKPACK_LOCK_ON,
+							0.8F, 1.0F);
 				}
 			}
 		}
@@ -4396,14 +4368,9 @@ public class TkGunServer implements ModInitializer {
 		state.autoHoldAim = holdAim;
 		state.nextAutoAttackAt = 0;
 		state.autoShotsOnTarget = 0;
-		int targetId = state.targetEntityId;
 		state.targetEntityId = -1;
 		state.targetUuid = null;
 		state.targetUntil = 0;
-		if (player.getServerWorld().getEntityById(targetId)
-				instanceof LivingEntity living) {
-			living.removeStatusEffect(StatusEffects.GLOWING);
-		}
 		if (depleted && state.charges <= 0) {
 			state.cooldownUntil = now + AUTO_BACKPACK_COOLDOWN_TICKS;
 			state.nextChargeAt = 0;
@@ -4422,13 +4389,6 @@ public class TkGunServer implements ModInitializer {
 		clearMissileTargets(player, state);
 		if (state.jumpAirborne) {
 			player.setNoGravity(false);
-		}
-		if (state.targetEntityId < 0) {
-			return;
-		}
-		if (player.getServerWorld().getEntityById(state.targetEntityId)
-				instanceof LivingEntity living) {
-			living.removeStatusEffect(StatusEffects.GLOWING);
 		}
 	}
 
@@ -4478,11 +4438,7 @@ public class TkGunServer implements ModInitializer {
 		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
 		state.charges = Math.max(0, state.charges - 1);
 		if (state.charges == 0) {
-			int targetId = state.targetEntityId;
 			clearBackpackTarget(state, now);
-			if (player.getServerWorld().getEntityById(targetId) instanceof LivingEntity living) {
-				living.removeStatusEffect(StatusEffects.GLOWING);
-			}
 			state.cooldownUntil = now + BACKPACK_FIREWORK_COOLDOWN_TICKS;
 			state.nextChargeAt = 0;
 		}
@@ -4566,11 +4522,7 @@ public class TkGunServer implements ModInitializer {
 
 	private static void clearBackpackMarker(ServerPlayerEntity player,
 			BackpackCharge state, long now) {
-		int targetId = state.targetEntityId;
 		clearBackpackTarget(state, now);
-		if (player.getServerWorld().getEntityById(targetId) instanceof LivingEntity living) {
-			living.removeStatusEffect(StatusEffects.GLOWING);
-		}
 	}
 
 	public static void restoreBackpackChargeAfterLoyalty(ServerPlayerEntity player) {
@@ -5432,9 +5384,9 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, st, hitTargets,
+			MeleeImpactService.apply(player, hitTargets,
 					knockbackForward,
-					MeleeImpactService.ATK_2_TICKS, false, false, false);
+					MeleeImpactService.ATK_2_TICKS, false, false);
 			TkGun.LOGGER.info("[mechaniciancombat] kinetic sword ATK_{} hit {} targets player={}",
 					st.meleeCombo, hitTargets.size(),
 					player.getName().getString());
@@ -5920,9 +5872,6 @@ public class TkGunServer implements ModInitializer {
 			MeleeImpactService.sendCameraShake(
 					player, MeleeImpactService.HOLD_OVER_TICKS, true);
 			performMeleeHit(player, st, 4);
-			// A successful hit pauses the authored timeline. Re-read it so the
-			// next authored hit cannot fire during the same server tick.
-			elapsed = now - st.stateStarted;
 		}
 	}
 
@@ -6055,11 +6004,9 @@ public class TkGunServer implements ModInitializer {
 		}
 		if (!hitTargets.isEmpty()) {
 			boolean critical = st.meleeHoldOver || st.meleeAtk4Empowered;
-			boolean lockAttacker = !st.meleeInputHeld && !st.meleeHoldOver;
-			MeleeImpactService.apply(player, st, hitTargets,
+			MeleeImpactService.apply(player, hitTargets,
 					knockbackForward,
-					MeleeImpactService.ticksForStep(step), critical, lockAttacker,
-					false);
+					MeleeImpactService.ticksForStep(step), critical, false);
 		}
 		if (step != 2) {
 			player.getServerWorld().spawnParticles(
@@ -6102,9 +6049,9 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, state(player), hitTargets,
+			MeleeImpactService.apply(player, hitTargets,
 					knockbackForward, MeleeImpactService.DASH_TICKS,
-					false, false, false);
+					false, false);
 		}
 	}
 
@@ -6158,9 +6105,9 @@ public class TkGunServer implements ModInitializer {
 			}
 		}
 		if (!hitTargets.isEmpty()) {
-			MeleeImpactService.apply(player, st, hitTargets,
+			MeleeImpactService.apply(player, hitTargets,
 					knockbackForward, MeleeImpactService.DASH_TICKS,
-					false, false, false);
+					false, false);
 		}
 		st.meleeDashStunFromX = toX;
 		st.meleeDashStunFromZ = toZ;
@@ -8301,7 +8248,6 @@ public class TkGunServer implements ModInitializer {
 
 	// ---------------------------------------------------------------- 每 tick
 	private static void tickAll(MinecraftServer server) {
-		MeleeImpactService.tick(server);
 		FortressSkillKnockbackService.tick(server);
 		tickBolts();
 		tickBackpackProjectiles(server);

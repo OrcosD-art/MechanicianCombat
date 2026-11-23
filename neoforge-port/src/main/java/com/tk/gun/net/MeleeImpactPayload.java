@@ -5,17 +5,10 @@ import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
 import net.minecraft.network.packet.CustomPayload;
 
-/**
- * Server-authoritative close-combat impact feedback.
- *
- * <p>{@code lockAttacker} is false for the dash attack: its authored hard-stop
- * already owns the movement timeline, while the target still freezes and the
- * camera still shakes.</p>
- */
+/** Server-authoritative close-combat visual and camera feedback. */
 public record MeleeImpactPayload(int attackerId, int[] targetIds,
 								 int[] effectIds, int ticks,
-								 boolean critical, boolean lockAttacker,
-								 boolean cameraShake)
+								 boolean critical, boolean cameraShake)
 		implements CustomPayload {
 	public static final Id<MeleeImpactPayload> ID =
 			new Id<>(TkGun.id("melee_impact"));
@@ -33,7 +26,6 @@ public record MeleeImpactPayload(int attackerId, int[] targetIds,
 		}
 		buffer.writeVarInt(payload.ticks());
 		buffer.writeBoolean(payload.critical());
-		buffer.writeBoolean(payload.lockAttacker());
 		buffer.writeBoolean(payload.cameraShake());
 	}
 
@@ -47,7 +39,7 @@ public record MeleeImpactPayload(int attackerId, int[] targetIds,
 			effectIds[index] = buffer.readVarInt();
 		}
 		return new MeleeImpactPayload(attackerId, targetIds, effectIds,
-				buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean(),
+				buffer.readVarInt(), buffer.readBoolean(),
 				buffer.readBoolean());
 	}
 
