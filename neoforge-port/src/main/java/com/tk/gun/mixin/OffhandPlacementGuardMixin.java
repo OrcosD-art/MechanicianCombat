@@ -2,10 +2,13 @@ package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
 import com.tk.gun.item.BackpackLauncherRules;
+import com.tk.gun.item.MechanicianArmorItem;
+import com.tk.gun.item.MechanicianUndersuitItem;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
+import net.minecraft.screen.PlayerScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,6 +31,29 @@ public abstract class OffhandPlacementGuardMixin {
 		}
 
 		Slot clicked = handler.getSlot(slotIndex);
+		if (actionType == SlotActionType.QUICK_MOVE
+				&& handler instanceof PlayerScreenHandler playerHandler
+				&& isMechanicianEquipment(clicked.getStack())) {
+			if (!isPlayerArmorSlot(clicked, player)) {
+				quickMoveWithinPlayerInventory(
+						playerHandler, clicked, player);
+			}
+			ci.cancel();
+			return;
+		}
+		ItemStack hotbarSwap = actionType == SlotActionType.SWAP
+				&& button >= 0 && button < 9
+						? player.getInventory().getStack(button)
+						: ItemStack.EMPTY;
+		if (isPlayerArmorSlot(clicked, player)
+				&& (isMechanicianEquipment(clicked.getStack())
+						|| isMechanicianEquipment(
+								handler.getCursorStack())
+						|| isMechanicianEquipment(hotbarSwap))
+				) {
+			ci.cancel();
+			return;
+		}
 		boolean clickedOffhand = isOffhand(clicked, player);
 		boolean bannerInstalled =
 				BackpackLauncherRules.isBattleBannerInstalled(player);
@@ -86,6 +112,47 @@ public abstract class OffhandPlacementGuardMixin {
 	private static boolean isOffhand(Slot slot, PlayerEntity player) {
 		return slot.inventory == player.getInventory()
 				&& slot.getIndex() == PlayerInventory.OFF_HAND_SLOT;
+	}
+
+	private static boolean isPlayerArmorSlot(Slot slot,
+			PlayerEntity player) {
+		return slot.inventory == player.getInventory()
+				&& slot.getIndex() >= PlayerInventory.MAIN_SIZE
+				&& slot.getIndex() < PlayerInventory.MAIN_SIZE + 4;
+	}
+
+	private static boolean isMechanicianEquipment(ItemStack stack) {
+		return stack.getItem() instanceof MechanicianArmorItem
+				|| stack.getItem() instanceof MechanicianUndersuitItem;
+	}
+
+	private static void quickMoveWithinPlayerInventory(
+			PlayerScreenHandler handler, Slot source,
+			PlayerEntity player) {
+		int sourceIndex = handler.slots.indexOf(source);
+		int targetStart;
+		int targetEnd;
+		if (sourceIndex >= 9 && sourceIndex < 36) {
+			targetStart = 36;
+			targetEnd = Math.min(45, handler.slots.size());
+		} else if (sourceIndex >= 36 && sourceIndex < 45) {
+			targetStart = 9;
+			targetEnd = 36;
+		} else {
+			return;
+		}
+		ItemStack moving = source.getStack().copy();
+		for (int index = targetStart; index < targetEnd
+				&& !moving.isEmpty(); index++) {
+			Slot target = handler.slots.get(index);
+			if (target.inventory == player.getInventory()
+					&& target.canInsert(moving)) {
+				target.insertStack(moving);
+			}
+		}
+		source.setStack(moving);
+		source.markDirty();
+		handler.sendContentUpdates();
 	}
 
 	private static boolean hasVirtualBattleBannerOffhand(

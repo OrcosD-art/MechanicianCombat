@@ -5,6 +5,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.util.math.MathHelper;
+import org.joml.Quaternionf;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,6 +35,11 @@ public final class PlayerLocomotionSmoother {
 			AbstractClientPlayerEntity player,
 			Map<String, BowgunPlayerAnimatorPose.BonePose> raw,
 			float tickDelta, boolean secondaryMotion) {
+		if (!com.tk.gun.client.LocomotionIsolationDebug
+				.poseSmoothingEnabled()) {
+			WEAPON_STATES.remove(player.getUuid());
+			return raw;
+		}
 		return smooth(WEAPON_STATES, player, raw, tickDelta,
 				secondaryMotion);
 	}
@@ -184,19 +190,27 @@ public final class PlayerLocomotionSmoother {
 			float chestYaw = (float) (gaitPrimary * 0.012D);
 			float chestRoll = (float) (gaitSide * 0.011D
 					+ state.strafeMotion * 0.055D);
-			offset(output, "body", 0.0F, 0.0F, 0.0F,
-					0.0F, 0.0F, (float) (state.strafeMotion * 0.018D));
-			offset(output, "chest", 0.0F, chestBob, 0.0F,
-					chestPitch, chestYaw, chestRoll);
-			offset(output, "head", (float) (state.strafeMotion * 0.025D),
-					0.0F, 0.0F,
-					0.0F, 0.0F, 0.0F);
-			offset(output, "arm_left", 0.0F, 0.0F, 0.0F,
-					(float) (-gaitPrimary * 0.016D), 0.0F,
-					(float) (gaitSecondary * 0.008D));
-			offset(output, "arm_right", 0.0F, 0.0F, 0.0F,
-					(float) (gaitPrimary * 0.016D), 0.0F,
-					(float) (-gaitSecondary * 0.008D));
+			if (com.tk.gun.client.LocomotionIsolationDebug
+					.parentSecondaryEnabled()) {
+				offset(output, "body", 0.0F, 0.0F, 0.0F,
+						0.0F, 0.0F,
+						(float) (state.strafeMotion * 0.018D));
+				offset(output, "chest", 0.0F, chestBob, 0.0F,
+						chestPitch, chestYaw, chestRoll);
+				offset(output, "head",
+						(float) (state.strafeMotion * 0.025D),
+						0.0F, 0.0F,
+						0.0F, 0.0F, 0.0F);
+			}
+			if (com.tk.gun.client.LocomotionIsolationDebug
+					.directArmSecondaryEnabled()) {
+				offset(output, "arm_left", 0.0F, 0.0F, 0.0F,
+						(float) (-gaitPrimary * 0.016D), 0.0F,
+						(float) (gaitSecondary * 0.008D));
+				offset(output, "arm_right", 0.0F, 0.0F, 0.0F,
+						(float) (gaitPrimary * 0.016D), 0.0F,
+						(float) (-gaitSecondary * 0.008D));
+			}
 		}
 
 		state.output = Map.copyOf(output);
@@ -240,20 +254,34 @@ public final class PlayerLocomotionSmoother {
 	private static BowgunPlayerAnimatorPose.BonePose blend(
 			BowgunPlayerAnimatorPose.BonePose from,
 			BowgunPlayerAnimatorPose.BonePose to, float amount) {
+		Quaternionf rotation = rotation(from);
+		rotation.slerp(rotation(to), amount).normalize();
+		float rotX = (float) Math.atan2(
+				2.0F * (rotation.w * rotation.x
+						+ rotation.y * rotation.z),
+				1.0F - 2.0F * (rotation.x * rotation.x
+						+ rotation.y * rotation.y));
+		float rotY = (float) Math.asin(MathHelper.clamp(
+				2.0F * (rotation.w * rotation.y
+						- rotation.z * rotation.x),
+				-1.0F, 1.0F));
+		float rotZ = (float) Math.atan2(
+				2.0F * (rotation.w * rotation.z
+						+ rotation.x * rotation.y),
+				1.0F - 2.0F * (rotation.y * rotation.y
+						+ rotation.z * rotation.z));
 		return new BowgunPlayerAnimatorPose.BonePose(
 				MathHelper.lerp(amount, from.x(), to.x()),
 				MathHelper.lerp(amount, from.y(), to.y()),
 				MathHelper.lerp(amount, from.z(), to.z()),
-				lerpAngle(from.rotX(), to.rotX(), amount),
-				lerpAngle(from.rotY(), to.rotY(), amount),
-				lerpAngle(from.rotZ(), to.rotZ(), amount),
+				rotX, rotY, rotZ,
 				to.pivotX(), to.pivotY(), to.pivotZ());
 	}
 
-	private static float lerpAngle(float from, float to, float amount) {
-		float delta = (float) Math.toRadians(MathHelper.wrapDegrees(
-				(float) Math.toDegrees(to - from)));
-		return from + delta * amount;
+	private static Quaternionf rotation(
+			BowgunPlayerAnimatorPose.BonePose pose) {
+		return new Quaternionf().rotationZYX(
+				pose.rotZ(), pose.rotY(), pose.rotX());
 	}
 
 	private static double damp(double current, double target,

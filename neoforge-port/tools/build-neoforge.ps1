@@ -119,6 +119,13 @@ Invoke-Native (Join-Path $build "javac-errors.txt") "Java compilation" {
     & $javac "@$javacArgs"
 }
 
+foreach ($artifact in @($classesYarn, $classesMojmap, $classesNeoForge,
+        $output)) {
+    if (Test-Path -LiteralPath $artifact) {
+        Remove-Item -LiteralPath $artifact -Force
+    }
+}
+
 Invoke-Native (Join-Path $build "jar-classes.log") "Yarn class archive" {
     & $jar --create --file $classesYarn -C $classes .
 }

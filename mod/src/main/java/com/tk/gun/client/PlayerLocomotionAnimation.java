@@ -20,6 +20,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.MathHelper;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -33,6 +34,7 @@ import java.util.UUID;
  */
 public final class PlayerLocomotionAnimation {
 	private static final int LAYER_PRIORITY = 1;
+	private static final int PREVIEW_LAYER_PRIORITY = 12000;
 	private static final int LAND_RECOVERY_TICKS = 5;
 	private static final Identifier IDLE =
 			TkGun.id("player_idle");
@@ -61,7 +63,11 @@ public final class PlayerLocomotionAnimation {
 			Set.of("body", "torso", "rightArm", "leftArm");
 	private static final Map<UUID, ModifierLayer<IAnimation>> LAYERS =
 			new HashMap<>();
+	private static final Map<UUID, ModifierLayer<IAnimation>>
+			PREVIEW_LAYERS = new HashMap<>();
 	private static final Map<UUID, State> STATES = new HashMap<>();
+	private static final Set<UUID> FIXED_IDLE_PREVIEWS = new HashSet<>();
+	private static int fixedPreviewEntityId = -1;
 
 	private static final class State {
 		Identifier clip;
@@ -75,8 +81,12 @@ public final class PlayerLocomotionAnimation {
 		PlayerAnimationAccess.REGISTER_ANIMATION_EVENT.register((player, stack) -> {
 			ModifierLayer<IAnimation> layer = new ModifierLayer<>();
 			stack.addAnimLayer(LAYER_PRIORITY, layer);
+			ModifierLayer<IAnimation> previewLayer = new ModifierLayer<>();
+			stack.addAnimLayer(PREVIEW_LAYER_PRIORITY, previewLayer);
 			LAYERS.put(player.getUuid(), layer);
+			PREVIEW_LAYERS.put(player.getUuid(), previewLayer);
 			STATES.remove(player.getUuid());
+			FIXED_IDLE_PREVIEWS.remove(player.getUuid());
 		});
 	}
 
@@ -86,13 +96,83 @@ public final class PlayerLocomotionAnimation {
 			return;
 		}
 		for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
+			if (isFixedIdlePreview(player.getId())) {
+				ensureFixedIdlePreview(player);
+				continue;
+			}
 			apply(player);
 		}
+	}
+
+	public static void beginFixedIdlePreview(int entityId) {
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.world == null
+				|| !(client.world.getEntityById(entityId)
+						instanceof AbstractClientPlayerEntity player)) {
+			return;
+		}
+		fixedPreviewEntityId = entityId;
+		ensureFixedIdlePreview(player);
+	}
+
+	public static void endFixedIdlePreview(int entityId) {
+		if (fixedPreviewEntityId != entityId) {
+			return;
+		}
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (client.player != null
+				&& client.player.getId() == entityId) {
+			ModifierLayer<IAnimation> layer = PREVIEW_LAYERS.get(
+					client.player.getUuid());
+			if (layer != null) {
+				layer.setAnimation(null);
+			}
+			FIXED_IDLE_PREVIEWS.remove(client.player.getUuid());
+		}
+		fixedPreviewEntityId = -1;
+	}
+
+	public static boolean isFixedIdlePreview(int entityId) {
+		return fixedPreviewEntityId >= 0
+				&& fixedPreviewEntityId == entityId;
+	}
+
+	private static void ensureFixedIdlePreview(
+			AbstractClientPlayerEntity player) {
+		UUID uuid = player.getUuid();
+		if (!FIXED_IDLE_PREVIEWS.add(uuid)) {
+			return;
+		}
+		ModifierLayer<IAnimation> layer = previewLayerFor(player);
+		IPlayable playable = PlayerAnimationRegistry.getAnimation(IDLE);
+		if (layer == null || playable == null) {
+			FIXED_IDLE_PREVIEWS.remove(uuid);
+			return;
+		}
+		IActualAnimation<?> animation;
+		if (playable instanceof KeyframeAnimation data) {
+			animation = new KeyframeAnimationPlayer(data, 0, true);
+		} else {
+			animation = playable.playAnimation();
+		}
+		animation.setFirstPersonMode(FirstPersonMode.NONE);
+		animation.setFirstPersonConfiguration(
+				new FirstPersonConfiguration(false, false, false, false));
+		layer.setAnimation(new FixedFirstFrame(animation));
 	}
 
 	private static void apply(AbstractClientPlayerEntity player) {
 		UUID uuid = player.getUuid();
 		State state = STATES.computeIfAbsent(uuid, ignored -> new State());
+		if (TkGun.holdingGun(player)
+				|| com.tk.gun.client.SoulAnchorSkillClientState
+						.active(player.getId())) {
+			// The weapon pose bridge now owns the complete visible body.
+			// A generic locomotion fallback would still be injected into the
+			// arm POSITION channel and leak its walk transitions into the hand.
+			disableImmediately(uuid, state);
+			return;
+		}
 		if (com.tk.gun.client.rig.PlayerLocomotionRigClient
 				.hasActivePose(player)) {
 			clearState(uuid, state);
@@ -260,6 +340,24 @@ public final class PlayerLocomotionAnimation {
 		return null;
 	}
 
+	private static ModifierLayer<IAnimation> previewLayerFor(
+			AbstractClientPlayerEntity player) {
+		ModifierLayer<IAnimation> layer =
+				PREVIEW_LAYERS.get(player.getUuid());
+		if (layer != null) {
+			return layer;
+		}
+		try {
+			layer = new ModifierLayer<>();
+			PlayerAnimationAccess.getPlayerAnimLayer(player)
+					.addAnimLayer(PREVIEW_LAYER_PRIORITY, layer);
+			PREVIEW_LAYERS.put(player.getUuid(), layer);
+			return layer;
+		} catch (RuntimeException exception) {
+			return null;
+		}
+	}
+
 	private static void clearState(UUID uuid, State state) {
 		ModifierLayer<IAnimation> layer = LAYERS.get(uuid);
 		if (layer != null && state.clip != null) {
@@ -270,12 +368,30 @@ public final class PlayerLocomotionAnimation {
 		state.animation = null;
 	}
 
-	public static void clear(UUID uuid) {
-		State state = STATES.remove(uuid);
-		ModifierLayer<IAnimation> layer = LAYERS.remove(uuid);
+	private static void disableImmediately(UUID uuid, State state) {
+		ModifierLayer<IAnimation> layer = LAYERS.get(uuid);
 		if (layer != null) {
 			layer.setAnimation(null);
 		}
+		state.clip = null;
+		state.animation = null;
+		state.initialized = false;
+		state.wasAirborne = false;
+		state.fallBackUntil = 0L;
+	}
+
+	public static void clear(UUID uuid) {
+		State state = STATES.remove(uuid);
+		ModifierLayer<IAnimation> layer = LAYERS.remove(uuid);
+		ModifierLayer<IAnimation> previewLayer =
+				PREVIEW_LAYERS.remove(uuid);
+		if (layer != null) {
+			layer.setAnimation(null);
+		}
+		if (previewLayer != null) {
+			previewLayer.setAnimation(null);
+		}
+		FIXED_IDLE_PREVIEWS.remove(uuid);
 		if (state != null) {
 			state.clip = null;
 			state.animation = null;
@@ -286,8 +402,54 @@ public final class PlayerLocomotionAnimation {
 		for (ModifierLayer<IAnimation> layer : LAYERS.values()) {
 			layer.setAnimation(null);
 		}
+		for (ModifierLayer<IAnimation> layer : PREVIEW_LAYERS.values()) {
+			layer.setAnimation(null);
+		}
 		LAYERS.clear();
+		PREVIEW_LAYERS.clear();
 		STATES.clear();
+		FIXED_IDLE_PREVIEWS.clear();
+		fixedPreviewEntityId = -1;
+	}
+
+	private static final class FixedFirstFrame implements IAnimation {
+		private final IActualAnimation<?> animation;
+
+		private FixedFirstFrame(IActualAnimation<?> animation) {
+			this.animation = animation;
+		}
+
+		@Override
+		public void tick() {
+			// Keep the authored zero-time pose exactly fixed for the preview.
+		}
+
+		@Override
+		public boolean isActive() {
+			return true;
+		}
+
+		@Override
+		public Vec3f get3DTransform(String part, TransformType type,
+				float tickDelta, Vec3f fallback) {
+			return animation.get3DTransform(part, type, 0.0F, fallback);
+		}
+
+		@Override
+		public void setupAnim(float tickDelta) {
+			animation.setupAnim(0.0F);
+		}
+
+		@Override
+		public FirstPersonMode getFirstPersonMode(float tickDelta) {
+			return FirstPersonMode.NONE;
+		}
+
+		@Override
+		public FirstPersonConfiguration getFirstPersonConfiguration(
+				float tickDelta) {
+			return new FirstPersonConfiguration(false, false, false, false);
+		}
 	}
 
 	private static final class LocomotionAnimation implements IAnimation {

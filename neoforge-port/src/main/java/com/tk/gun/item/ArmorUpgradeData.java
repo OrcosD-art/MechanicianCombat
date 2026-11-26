@@ -31,6 +31,8 @@ public final class ArmorUpgradeData {
 	private static final String HELMET_TRANSITION_DURATION =
 			"mechaniciancombat_helmet_transition_duration";
 	private static final String PART_STACKS = "mechaniciancombat_armor_part_stacks";
+	private static final String STATION_LOCKED =
+			"mechaniciancombat_station_locked";
 
 	private ArmorUpgradeData() {
 	}
@@ -38,6 +40,24 @@ public final class ArmorUpgradeData {
 	public static ItemStack equippedChestplate(PlayerEntity player) {
 		ItemStack chest = player.getEquippedStack(EquipmentSlot.CHEST);
 		return isChestplate(chest) ? chest : ItemStack.EMPTY;
+	}
+
+	public static boolean isStationLocked(ItemStack stack) {
+		return stack != null && !stack.isEmpty()
+				&& customData(stack).getBoolean(STATION_LOCKED);
+	}
+
+	public static void setStationLocked(ItemStack stack, boolean locked) {
+		if (stack == null || stack.isEmpty()) {
+			return;
+		}
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, stack, nbt -> {
+			if (locked) {
+				nbt.putBoolean(STATION_LOCKED, true);
+			} else {
+				nbt.remove(STATION_LOCKED);
+			}
+		});
 	}
 
 	public static boolean isChestplate(ItemStack stack) {
@@ -198,6 +218,18 @@ public final class ArmorUpgradeData {
 			nbt.putBoolean(HELMET_EXPANDED, expanded);
 			nbt.putLong(HELMET_TRANSITION_STARTED, startedAt);
 			nbt.putInt(HELMET_TRANSITION_DURATION, duration);
+		});
+	}
+
+	/** Clears the fold state when the chestplate leaves the equipped set. */
+	public static void clearHelmetTransition(ItemStack chest) {
+		if (!isChestplate(chest)) {
+			return;
+		}
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, chest, nbt -> {
+			nbt.remove(HELMET_EXPANDED);
+			nbt.remove(HELMET_TRANSITION_STARTED);
+			nbt.remove(HELMET_TRANSITION_DURATION);
 		});
 	}
 

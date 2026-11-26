@@ -22,6 +22,14 @@ public abstract class FocusMovementLockMixin {
 			return;
 		}
 		int playerId = client.player.getId();
+		if (com.tk.gun.client.ArmorDressingClientState.locksInput(playerId)) {
+			KeyboardInput locked = (KeyboardInput) (Object) this;
+			locked.movementForward = 0.0F;
+			locked.movementSideways = 0.0F;
+			locked.jumping = false;
+			locked.sneaking = false;
+			return;
+		}
 		boolean holdingGun = TkGun.holdingGun(client.player);
 		boolean warBannerLock =
 				WarBannerSkillClientState.usesGunAnimation(playerId);
@@ -75,10 +83,14 @@ public abstract class FocusMovementLockMixin {
 				|| holdOverLock || skillJumpLock || fallAttackLock || skillGatherLock
 				|| skillHitLock || skillCrouchedLoadLock || slideSkillLoadLock
 				|| slideLock;
+		KeyboardInput self = (KeyboardInput) (Object) this;
 		if (!movementLock && !skillLoadOnly) {
+			if (TkGunClient.shouldApplyGunWalkSlowdown(client)) {
+				self.movementForward *= TkGunClient.GUN_WALK_SPEED_MULTIPLIER;
+				self.movementSideways *= TkGunClient.GUN_WALK_SPEED_MULTIPLIER;
+			}
 			return;
 		}
-		KeyboardInput self = (KeyboardInput) (Object) this;
 		if (movementLock && !TkGunClient.isRollTriggerTick(client)) {
 			self.movementForward = 0.0F;
 			self.movementSideways = 0.0F;

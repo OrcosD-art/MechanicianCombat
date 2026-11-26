@@ -65,7 +65,7 @@ public class BoltProjectileEntity extends PersistentProjectileEntity {
 	@Override
 	protected void onEntityHit(EntityHitResult result) {
 		Entity target = result.getEntity();
-		if (CombatTargeting.isGolem(target)) {
+		if (!CombatTargeting.isTargetable(target)) {
 			return;
 		}
 		DamageSource source = boltDamageSource();

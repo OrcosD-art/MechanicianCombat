@@ -1,11 +1,12 @@
 package com.tk.gun.screen;
 
 import com.tk.gun.TkGunServer;
-import com.tk.gun.block.BackpackModificationTableBlockEntity;
+import com.tk.gun.block.ArmorDressingStationBlockEntity;
+import com.tk.gun.block.BackpackWorkstationBinding;
+import com.tk.gun.block.BackpackWorkstationStorage;
 import com.tk.gun.item.BackpackPartItem;
 import com.tk.gun.item.BackpackUpgradeData;
 import com.tk.gun.item.CombatBackpackItem;
-import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -16,8 +17,14 @@ import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.resource.featuretoggle.FeatureSet;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
+
+import java.util.UUID;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Proxy;
+import java.util.Arrays;
 
 /**
  * Persistent backpack component installer.
@@ -31,7 +38,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 	public static final int BACKPACK_SLOT_X = 152;
 	public static final int BACKPACK_SLOT_Y = 66;
 	public static final int BACKPACK_SLOT_INDEX =
-			BackpackModificationTableBlockEntity.BACKPACK_SLOT;
+			BackpackWorkstationStorage.BACKPACK_SLOT;
 	public static final int FIRST_PART_SLOT_INDEX = 1;
 	public static final int PLAYER_SLOT_START = 5;
 	public static final int HOTBAR_SLOT_START = 32;
@@ -48,15 +55,13 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 	};
 
 	public static final ScreenHandlerType<BackpackModificationTableScreenHandler> TYPE =
-			ExtendedScreenHandlerType.create(
-					(syncId, playerInventory, pos) ->
-							new BackpackModificationTableScreenHandler(
-									syncId, playerInventory, pos),
-					BlockPos.PACKET_CODEC);
+			createVanillaType();
 
 	private final BlockPos pos;
 	private final Inventory tableInventory;
+	private final Inventory backpackInventory;
 	private final PlayerEntity owner;
+	private final ArmorDressingStationBlockEntity station;
 	private ItemStack lastBackpack = ItemStack.EMPTY;
 	private boolean installing;
 
@@ -70,21 +75,36 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		if (playerInventory.player instanceof ServerPlayerEntity
 				&& playerInventory.player.getWorld()
 						.getBlockEntity(this.pos)
-						instanceof BackpackModificationTableBlockEntity table) {
-			tableInventory = table.inventory();
+						instanceof ArmorDressingStationBlockEntity station) {
+			this.station = station;
+			tableInventory = station.backpackInventory();
+			backpackInventory = new EquippedBackpackInventory(
+					(ServerPlayerEntity) playerInventory.player, station);
+			station.bindBackpackOwner(playerInventory.player.getUuid());
+			bindExistingBackpack((ServerPlayerEntity) playerInventory.player,
+					station);
+			migrateStoredBackpack((ServerPlayerEntity) playerInventory.player,
+					station);
 		} else {
-			tableInventory = new SimpleInventory(BackpackModificationTableBlockEntity.SIZE);
+			this.station = null;
+			tableInventory = new SimpleInventory(
+					BackpackWorkstationStorage.SIZE);
+			backpackInventory = new SimpleInventory(1);
 		}
 
-		addSlot(new Slot(tableInventory, BackpackModificationTableBlockEntity.BACKPACK_SLOT,
+		addSlot(new Slot(backpackInventory,
+				BackpackWorkstationStorage.BACKPACK_SLOT,
 				BACKPACK_SLOT_X, BACKPACK_SLOT_Y) {
 			@Override
 			public boolean canInsert(ItemStack stack) {
-				return stack.getItem() instanceof CombatBackpackItem;
+				return stack.getItem() instanceof CombatBackpackItem
+						&& BackpackWorkstationBinding.equipped(owner)
+								.isEmpty();
 			}
 		});
 		for (int index = 0; index < PART_SLOT_POSITIONS.length; index++) {
-			int slotIndex = BackpackModificationTableBlockEntity.PART_SLOT_START + index;
+			int slotIndex = BackpackWorkstationStorage.PART_SLOT_START
+					+ index;
 			int[] position = PART_SLOT_POSITIONS[index];
 			int fixedIndex = index;
 			addSlot(new Slot(tableInventory, slotIndex, position[0], position[1]) {
@@ -109,9 +129,18 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		normalizeFixedPartSlots();
 	}
 
+	private BackpackModificationTableScreenHandler(
+			int syncId, PlayerInventory playerInventory) {
+		this(syncId, playerInventory, BlockPos.ORIGIN);
+	}
+
 	@Override
 	public ScreenHandlerType<?> getType() {
 		return TYPE;
+	}
+
+	public BlockPos pos() {
+		return pos;
 	}
 
 	@Override
@@ -135,13 +164,13 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		} else if (original.getItem() instanceof CombatBackpackItem) {
 			moved = insertItem(
 					original,
-					BackpackModificationTableBlockEntity.BACKPACK_SLOT,
-					BackpackModificationTableBlockEntity.BACKPACK_SLOT + 1,
+					BackpackWorkstationStorage.BACKPACK_SLOT,
+					BackpackWorkstationStorage.BACKPACK_SLOT + 1,
 					true);
 		} else if (original.getItem() instanceof BackpackPartItem) {
 			BackpackPartItem.Kind kind =
 					((BackpackPartItem) original.getItem()).kind();
-			int target = BackpackModificationTableBlockEntity.PART_SLOT_START
+			int target = BackpackWorkstationStorage.PART_SLOT_START
 					+ fixedSlot(kind);
 			moved = insertItem(original, target, target + 1, true);
 		} else if (slotIndex < HOTBAR_SLOT_START) {
@@ -181,8 +210,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		if (installing || !(owner instanceof ServerPlayerEntity)) {
 			return;
 		}
-		ItemStack backpack = tableInventory.getStack(
-				BackpackModificationTableBlockEntity.BACKPACK_SLOT);
+		ItemStack backpack = backpackInventory.getStack(
+				BackpackWorkstationStorage.BACKPACK_SLOT);
 		if (!(backpack.getItem() instanceof CombatBackpackItem)) {
 			if (!lastBackpack.isEmpty()) {
 				stowInstalledPart(lastBackpack, BackpackPartItem.Kind.CORE);
@@ -271,6 +300,12 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				BackpackUpgradeData.setGolemCapsule(backpack, golemCapsule);
 				BackpackUpgradeData.setGolemCapsuleSlot(
 						backpack, golemCapsule ? GOLEM_CAPSULE_PART_SLOT : -1);
+			boolean backpackChanged = !ItemStack.areEqual(
+					backpack, lastBackpack);
+			if (backpackChanged) {
+				backpackInventory.setStack(
+						BackpackWorkstationStorage.BACKPACK_SLOT, backpack);
+			}
 			lastBackpack = backpack.copy();
 			tableInventory.markDirty();
 		} finally {
@@ -279,12 +314,136 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		sendContentUpdates();
 	}
 
+	private void bindExistingBackpack(ServerPlayerEntity player,
+			ArmorDressingStationBlockEntity station) {
+		ItemStack backpack = BackpackWorkstationBinding.equipped(player);
+		if (backpack.isEmpty()) {
+			return;
+		}
+		UUID binding = BackpackUpgradeData.workstationBinding(backpack);
+		if (binding == null) {
+			binding = UUID.randomUUID();
+			BackpackUpgradeData.setWorkstationBinding(backpack, binding);
+			BackpackWorkstationBinding.update(player, backpack);
+		}
+		station.markBackpackEquipped(player.getUuid(), binding);
+	}
+
+	private void migrateStoredBackpack(ServerPlayerEntity player,
+			ArmorDressingStationBlockEntity station) {
+		ItemStack stored = station.backpackInventory().getStack(
+				BackpackWorkstationStorage.BACKPACK_SLOT);
+		if (stored.isEmpty()) {
+			return;
+		}
+		ItemStack equipped = BackpackWorkstationBinding.equipped(player);
+		if (equipped.isEmpty() && stored.getItem()
+				instanceof CombatBackpackItem) {
+			UUID binding = UUID.randomUUID();
+			if (BackpackWorkstationBinding.equip(player, stored, binding)) {
+				station.markBackpackEquipped(player.getUuid(), binding);
+				station.backpackInventory().setStack(
+						BackpackWorkstationStorage.BACKPACK_SLOT,
+						ItemStack.EMPTY);
+				return;
+			}
+		}
+		player.getInventory().offerOrDrop(stored.copy());
+		station.backpackInventory().setStack(
+				BackpackWorkstationStorage.BACKPACK_SLOT, ItemStack.EMPTY);
+	}
+
+	private final class EquippedBackpackInventory
+			extends SimpleInventory {
+		private final ServerPlayerEntity player;
+		private final ArmorDressingStationBlockEntity workstation;
+
+		private EquippedBackpackInventory(ServerPlayerEntity player,
+				ArmorDressingStationBlockEntity workstation) {
+			super(1);
+			this.player = player;
+			this.workstation = workstation;
+		}
+
+		@Override
+		public int size() {
+			return 1;
+		}
+
+		@Override
+		public ItemStack getStack(int slot) {
+			return slot == 0
+					? BackpackWorkstationBinding.equipped(player)
+					: ItemStack.EMPTY;
+		}
+
+		@Override
+		public boolean isEmpty() {
+			return BackpackWorkstationBinding.equipped(player).isEmpty();
+		}
+
+		@Override
+		public ItemStack removeStack(int slot, int amount) {
+			if (slot != 0 || amount <= 0) {
+				return ItemStack.EMPTY;
+			}
+			ItemStack removed = BackpackWorkstationBinding.remove(player);
+			if (!removed.isEmpty()) {
+				workstation.clearBackpackBinding();
+				sendContentUpdates();
+			}
+			return removed;
+		}
+
+		@Override
+		public void setStack(int slot, ItemStack stack) {
+			if (slot != 0) {
+				return;
+			}
+			ItemStack current = BackpackWorkstationBinding.equipped(player);
+			if (stack.isEmpty()) {
+				if (!current.isEmpty()) {
+					BackpackWorkstationBinding.remove(player);
+					workstation.clearBackpackBinding();
+					sendContentUpdates();
+				}
+				return;
+			}
+			if (!(stack.getItem() instanceof CombatBackpackItem)) {
+				return;
+			}
+			UUID binding = BackpackUpgradeData.workstationBinding(stack);
+			if (binding == null) {
+				binding = current.isEmpty()
+						? UUID.randomUUID()
+						: BackpackUpgradeData.workstationBinding(current);
+			}
+			if (binding == null) {
+				binding = UUID.randomUUID();
+			}
+			BackpackUpgradeData.setWorkstationBinding(stack, binding);
+			boolean changed = current.isEmpty()
+					? BackpackWorkstationBinding.equip(player, stack,
+							binding)
+					: BackpackWorkstationBinding.update(player, stack);
+			if (changed) {
+				workstation.markBackpackEquipped(player.getUuid(), binding);
+				sendContentUpdates();
+			}
+		}
+
+		@Override
+		public void markDirty() {
+			workstation.markDirty();
+		}
+	}
+
 	private void stowInstalledLauncher(ItemStack backpack) {
 		if (!BackpackUpgradeData.hasLauncher(backpack)) {
 			return;
 		}
-		for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
-				slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
+		for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+				slot < BackpackWorkstationStorage.SIZE; slot++) {
 			ItemStack stack = tableInventory.getStack(slot);
 			if (stack.getItem() instanceof BackpackPartItem part && part.isLauncherKind()) {
 				removeOne(tableInventory, slot, stack);
@@ -297,8 +456,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		if (!BackpackUpgradeData.hasMissileBox(backpack)) {
 			return;
 		}
-		for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
-				slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
+		for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+				slot < BackpackWorkstationStorage.SIZE; slot++) {
 			ItemStack stack = tableInventory.getStack(slot);
 			if (stack.getItem() instanceof BackpackPartItem part
 					&& part.kind() == BackpackPartItem.Kind.MISSILE_BOX) {
@@ -312,8 +471,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		if (!BackpackUpgradeData.hasGolemCapsule(backpack)) {
 			return;
 		}
-		for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
-				slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
+		for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+				slot < BackpackWorkstationStorage.SIZE; slot++) {
 			ItemStack stack = tableInventory.getStack(slot);
 			if (stack.getItem() instanceof BackpackPartItem part
 					&& part.kind() == BackpackPartItem.Kind.GOLEM_CAPSULE) {
@@ -330,8 +489,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 		if (!installed) {
 			return;
 		}
-		for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
-				slot < BackpackModificationTableBlockEntity.SIZE;
+		for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+				slot < BackpackWorkstationStorage.SIZE;
 				slot++) {
 			ItemStack stack = tableInventory.getStack(slot);
 			if (stack.getItem() instanceof BackpackPartItem part
@@ -359,14 +518,14 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 
 	private ItemStack launcherPartStack() {
 		ItemStack stack = tableInventory.getStack(
-				BackpackModificationTableBlockEntity.PART_SLOT_START + LAUNCHER_PART_SLOT);
+				BackpackWorkstationStorage.PART_SLOT_START + LAUNCHER_PART_SLOT);
 		return stack.getItem() instanceof BackpackPartItem part && part.isLauncherKind()
 				? stack : ItemStack.EMPTY;
 	}
 
 	private ItemStack missileBoxPartStack() {
 		ItemStack stack = tableInventory.getStack(
-				BackpackModificationTableBlockEntity.PART_SLOT_START
+				BackpackWorkstationStorage.PART_SLOT_START
 						+ MISSILE_BOX_PART_SLOT);
 		return stack.getItem() instanceof BackpackPartItem part
 				&& part.kind() == BackpackPartItem.Kind.MISSILE_BOX
@@ -375,7 +534,7 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 
 	private ItemStack golemCapsulePartStack() {
 		ItemStack stack = tableInventory.getStack(
-				BackpackModificationTableBlockEntity.PART_SLOT_START
+				BackpackWorkstationStorage.PART_SLOT_START
 						+ GOLEM_CAPSULE_PART_SLOT);
 		return stack.getItem() instanceof BackpackPartItem part
 				&& part.kind() == BackpackPartItem.Kind.GOLEM_CAPSULE
@@ -413,13 +572,13 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 
 	private int partSlot(BackpackPartItem.Kind kind) {
 		ItemStack stack = tableInventory.getStack(
-				BackpackModificationTableBlockEntity.PART_SLOT_START + fixedSlot(kind));
+				BackpackWorkstationStorage.PART_SLOT_START + fixedSlot(kind));
 		return stack.getItem() instanceof BackpackPartItem part && part.kind() == kind
 				? fixedSlot(kind) : -1;
 	}
 
 	private boolean insertPart(BackpackPartItem.Kind kind) {
-		int fixedIndex = BackpackModificationTableBlockEntity.PART_SLOT_START
+		int fixedIndex = BackpackWorkstationStorage.PART_SLOT_START
 				+ fixedSlot(kind);
 		if (tableInventory.getStack(fixedIndex).isEmpty()) {
 			tableInventory.setStack(fixedIndex, newPart(kind));
@@ -451,8 +610,8 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 			ItemStack launcher = ItemStack.EMPTY;
 				ItemStack missileBox = ItemStack.EMPTY;
 				ItemStack golemCapsule = ItemStack.EMPTY;
-			for (int slot = BackpackModificationTableBlockEntity.PART_SLOT_START;
-					slot < BackpackModificationTableBlockEntity.SIZE; slot++) {
+			for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+					slot < BackpackWorkstationStorage.SIZE; slot++) {
 				ItemStack stack = tableInventory.getStack(slot);
 				if (stack.isEmpty()) {
 					continue;
@@ -480,13 +639,13 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 				tableInventory.setStack(slot, ItemStack.EMPTY);
 			}
 			tableInventory.setStack(
-					BackpackModificationTableBlockEntity.PART_SLOT_START + CORE_PART_SLOT,
+					BackpackWorkstationStorage.PART_SLOT_START + CORE_PART_SLOT,
 					core);
 			tableInventory.setStack(
-					BackpackModificationTableBlockEntity.PART_SLOT_START + LAUNCHER_PART_SLOT,
+					BackpackWorkstationStorage.PART_SLOT_START + LAUNCHER_PART_SLOT,
 					launcher);
 				tableInventory.setStack(
-						BackpackModificationTableBlockEntity.PART_SLOT_START
+						BackpackWorkstationStorage.PART_SLOT_START
 								+ MISSILE_BOX_PART_SLOT,
 						missileBox.isEmpty() ? golemCapsule : missileBox);
 			tableInventory.markDirty();
@@ -550,12 +709,75 @@ public final class BackpackModificationTableScreenHandler extends ScreenHandler 
 	}
 
 	@Override
+	public void onClosed(PlayerEntity player) {
+		syncTableState();
+		if (backpackInventory.getStack(
+				BackpackWorkstationStorage.BACKPACK_SLOT).isEmpty()) {
+			for (int slot = BackpackWorkstationStorage.PART_SLOT_START;
+					slot < BackpackWorkstationStorage.SIZE; slot++) {
+				ItemStack stack = tableInventory.getStack(slot);
+				if (!stack.isEmpty()) {
+					player.getInventory().offerOrDrop(stack.copy());
+				}
+			}
+		}
+		tableInventory.clear();
+		tableInventory.markDirty();
+		super.onClosed(player);
+	}
+
+	@Override
 	public boolean canUse(PlayerEntity player) {
-		return player.getWorld().getBlockState(pos)
-				.isOf(TkGunServer.BACKPACK_MODIFICATION_TABLE)
+		var state = player.getWorld().getBlockState(pos);
+		return com.tk.gun.block.ArmorDressingStationBlock.isStation(state)
+				&& player instanceof ServerPlayerEntity serverPlayer
+				&& com.tk.gun.block.ArmorDressingStationService
+						.isMounted(serverPlayer)
 				&& player.squaredDistanceTo(
 						pos.getX() + 0.5D,
 						pos.getY() + 0.5D,
 						pos.getZ() + 0.5D) <= 64.0D;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static ScreenHandlerType<BackpackModificationTableScreenHandler>
+			createVanillaType() {
+		try {
+			Class<?> factoryType = Arrays.stream(
+							ScreenHandlerType.class.getDeclaredClasses())
+					.filter(Class::isInterface)
+					.filter(type -> Arrays.stream(type.getDeclaredMethods())
+							.anyMatch(method -> method.getParameterCount() == 2
+									&& method.getParameterTypes()[0] == int.class
+									&& method.getParameterTypes()[1]
+											== PlayerInventory.class))
+					.findFirst()
+					.orElseThrow(() -> new IllegalStateException(
+							"ScreenHandlerType.Factory not found"));
+			Object factory = Proxy.newProxyInstance(
+					BackpackModificationTableScreenHandler.class.getClassLoader(),
+					new Class<?>[]{factoryType},
+					(proxy, method, args) -> {
+						if (method.getDeclaringClass() == Object.class) {
+							return switch (method.getName()) {
+								case "toString" ->
+										"mechaniciancombat:backpack_station_factory";
+								case "hashCode" -> System.identityHashCode(proxy);
+								case "equals" -> proxy == args[0];
+								default -> null;
+							};
+						}
+						return new BackpackModificationTableScreenHandler(
+								(int) args[0], (PlayerInventory) args[1]);
+					});
+			Constructor<ScreenHandlerType> constructor =
+					(Constructor<ScreenHandlerType>) ScreenHandlerType.class
+							.getDeclaredConstructor(factoryType, FeatureSet.class);
+			constructor.setAccessible(true);
+			return (ScreenHandlerType<BackpackModificationTableScreenHandler>)
+					constructor.newInstance(factory, FeatureSet.empty());
+		} catch (Throwable throwable) {
+			throw new ExceptionInInitializerError(throwable);
+		}
 	}
 }

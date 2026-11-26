@@ -41,8 +41,8 @@ public final class TkGun {
 		SLIDE(6),       // 滑铲            = sliding
 		ROLL(7),        // 翻滚            = roll（资源包里 combat_roll 那段也换成了这套素材）
 		SLIDE_READY(8), // 滑铲收势        = sliding_ready，结束后回 IDLE/重新举枪
-		AIM_FAST(9),    // 快速举枪        = fast_ready
-		AIM_SLIDE(10),  // 滑铲抢枪        = sliding_fast_ready
+		AIM_FAST(9),    // 快速部署 = sliding_fast_ready
+		AIM_SLIDE(10),  // 滑铲快速部署 = sliding_fast_ready
 		/** 打完一枪且仍处于专注时，保持该射击动画的尾帧，不重播举枪动画。 */
 		AIM_HOLD(11),
 		/** 退出专注时播放 Focus_over，结束后回到 IDLE。 */
@@ -53,9 +53,7 @@ public final class TkGun {
 		 */
 		RELOAD(13),
 		/**
-		 * **翻滚后的快速蹲射过门**：更新后的 `rolling_fast_ready` 为 0.5 秒，
-		 * 因此单独使用 10 tick；客户端必须播作者新给的这段，不能借用滑铲的
-		 * `sliding_fast_ready`。独立成一个状态，避免换弹后的快速举枪也误播翻滚动作。
+		 * **翻滚后的快速蹲射过门**：使用 rolling_fast_ready。
 		 */
 		AIM_ROLL(14),
 		/** 翻滚结束、玩家没有继续移动：播作者的 `roll_to_idle` 过渡，再回 IDLE。 */
@@ -352,7 +350,10 @@ public final class TkGun {
 	public static final int JUMP_BACKPACK_ENERGY_GROUND_RECOVERY_TICKS = 10;
 	public static final int JUMP_BACKPACK_ENERGY_EMPTY_RECOVERY_TICKS = 5;
 	public static final double JUMP_BACKPACK_BOOST_RISE = 0.15D;
-	public static final double JUMP_BACKPACK_HORIZONTAL_SPEED = 1.25D;
+	public static final double JUMP_BACKPACK_HORIZONTAL_SPEED = 0.75D;
+	public static final double JUMP_BACKPACK_HOVER_DRAG = 0.88D;
+	public static final double JUMP_BACKPACK_HOVER_STOP_SPEED = 0.03D;
+	public static final double JUMP_BACKPACK_HOVER_DESCENT_SPEED = 0.04D;
 	public static final double JUMP_BACKPACK_MIN_START_RISE = 0.5D;
 	public static final double JUMP_BACKPACK_MAX_HEIGHT = 6.0D;
 	/** Slow Falling duration before the fall attack acquires and dives at a target. */
@@ -440,14 +441,17 @@ public final class TkGun {
 	/**
 	 * 部署（架枪）时长：普通右键慢、滑铲/蹲着右键快、滑铲里抢架枪最快。见 {@link TkGunServer#startAim}。
 	 *
-	 * <p>⚠️ 2026-10-14 换新素材后**快档改用作者新做的 `fast_ready`**（0.667 秒，专门是"快速起枪"）——
-	 * 老做法是拿 `Focus_ready` 按 2x/3x 倍速播，那是老素材没有 fast_ready 时的凑合。
+	 * <p>快速部署统一保留原有 0.5 秒作者动画。
 	 */
 	public static final int AIM_TICKS_NORMAL = 24;    // 1.2s（Focus_ready 0.83 倍速）
-	public static final int AIM_TICKS_FAST = 14;      // 0.7s（fast_ready 1 倍速）
-	/** sliding_fast_ready is authored at 0.5 s and now plays at 1x. */
+	public static final int AIM_TICKS_FAST = 14;      // 0.7s state window, 0.5s quick clip
+	/** Hip-fire raise action: 0.16667 seconds at 20 TPS. */
+	public static final int HIP_AIM_RAISE_TICKS = 4;
+	/** Hip-fire return action: 0.25 seconds at 20 TPS. */
+	public static final int HIP_AIM_LOWER_TICKS = 5;
+	/** Fast deployment uses the authored sliding_fast_ready clip. */
 	public static final int AIM_TICKS_SLIDE = 10;
-	/** BG261015 updated rolling_fast_ready to 0.5 s (10 ticks at 1x). */
+	/** Fast roll deployment uses the authored rolling_fast_ready clip. */
 	public static final int AIM_TICKS_ROLL = 10;
 	/**
 	 * **主动装填**：播放作者的 `reload` 动画。空闲弹匣不会自动装填。
@@ -783,6 +787,12 @@ public final class TkGun {
 			id("hunter_bolt3");
 	public static final Identifier SND_HELMET_STEAM_HISS =
 			id("helmet_steam_hiss");
+	/** Armor dressing station charge cue authored by the updated station model. */
+	public static final Identifier SND_ARMOR_DRESSING_CHARGE =
+			id("armor_dressing_charge");
+	/** Authored armor-station bolt cue (`栓_2.mp3`). */
+	public static final Identifier SND_ARMOR_DRESSING_BOLT =
+			id("armor_dressing_bolt");
 	public static final Identifier SND_HELMET_MECH5 =
 			id("helmet_mech5");
 	public static final Identifier SND_HELMET_MECH3 =
@@ -830,6 +840,15 @@ public final class TkGun {
 					new KeyframeSound(SND_CURRENT, 1.0F, 1.0F)),
 			Map.entry("claymore_swing",
 					new KeyframeSound(SND_CLAYMORE_SWING, 1.0F, 1.0F)),
+			Map.entry("steamhiss03.mp3",
+					new KeyframeSound(SND_HELMET_STEAM_HISS, 1.0F, 1.0F)),
+			Map.entry("2", new KeyframeSound(SND_RELOAD2, 1.0F, 1.0F)),
+			Map.entry("4.mp3",
+					new KeyframeSound(SND_HUNTER_MECH4, 1.0F, 1.0F)),
+			Map.entry("_2.mp3",
+					new KeyframeSound(SND_ARMOR_DRESSING_BOLT, 1.0F, 1.0F)),
+			Map.entry("charge.mp3",
+					new KeyframeSound(SND_ARMOR_DRESSING_CHARGE, 1.0F, 1.0F)),
 			Map.entry("imp1", new KeyframeSound(SND_IMPACT, 1.0F, 1.0F)),
 			Map.entry("1", new KeyframeSound(SND_SMASH_AIR1, 1.0F, 1.0F)),
 			Map.entry("1.mp3",

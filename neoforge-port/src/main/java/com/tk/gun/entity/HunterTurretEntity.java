@@ -281,7 +281,7 @@ public final class HunterTurretEntity extends Entity implements GeoEntity {
 				|| candidate.isSpectator() || !candidate.canHit()
 				|| !(candidate instanceof Monster)
 				|| CombatTargeting.isGolem(candidate)
-				|| candidate.isTeammate(owner)) {
+				|| CombatTargeting.isFriendlyTo(candidate, owner)) {
 			return false;
 		}
 		return squaredDistanceTo(candidate)

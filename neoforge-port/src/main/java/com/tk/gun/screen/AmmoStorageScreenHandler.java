@@ -1,16 +1,14 @@
 package com.tk.gun.screen;
 
-import com.tk.gun.TkGun;
 import com.tk.gun.item.AmmoItems;
 import com.tk.gun.item.GunAmmoData;
-import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.network.RegistryByteBuf;
-import net.minecraft.network.codec.PacketCodec;
+import net.minecraft.resource.featuretoggle.FeatureSet;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
+import net.minecraft.screen.SimpleNamedScreenHandlerFactory;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.screen.ArrayPropertyDelegate;
@@ -18,8 +16,9 @@ import net.minecraft.screen.PropertyDelegate;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Proxy;
-import java.util.List;
+import java.util.Arrays;
 
 /**
  * 机械师弹药环。
@@ -35,10 +34,7 @@ public final class AmmoStorageScreenHandler extends ScreenHandler {
 	private static final int RADIUS = 37;
 
 	public static final ScreenHandlerType<AmmoStorageScreenHandler> TYPE =
-			ExtendedScreenHandlerType.create(
-					(syncId, playerInventory, data) ->
-							new AmmoStorageScreenHandler(syncId, playerInventory),
-					PacketCodec.of((value, buf) -> { }, buf -> (byte) 0));
+			createVanillaType();
 	private final PropertyDelegate selectedSlot;
 
 	public AmmoStorageScreenHandler(int syncId, PlayerInventory playerInventory) {
@@ -155,43 +151,52 @@ public final class AmmoStorageScreenHandler extends ScreenHandler {
 		return Math.round(CENTER_Y + (float) Math.sin(angle) * RADIUS) - 8;
 	}
 
-	/**
-	 * 打开 UI 用的代理工厂。
-	 *
-	 * <p>本工程没有 refmap；匿名实现 `NamedScreenHandlerFactory#getDisplayName` 时，
-	 * 方法名不会被可靠重映射，运行期会缺 `method_5476()`。代理按参数/返回类型响应，
-	 * 不依赖混淆后的方法名。
-	 */
+	/** Opens through vanilla's menu packet, including the NeoForge bridge. */
 	public static net.minecraft.screen.NamedScreenHandlerFactory createFactory() {
-		Object proxy = Proxy.newProxyInstance(
-				AmmoStorageScreenHandler.class.getClassLoader(),
-				new Class<?>[]{net.fabricmc.fabric.api.screenhandler.v1
-						.ExtendedScreenHandlerFactory.class},
-				(p, method, args) -> {
-					if (method.getDeclaringClass() == Object.class) {
-						return switch (method.getName()) {
-							case "toString" -> "mechaniciancombat:ammo_storage_factory";
-							case "hashCode" -> System.identityHashCode(p);
-							case "equals" -> p == args[0];
-							default -> null;
-						};
-					}
-					if (method.getParameterCount() == 0
-							&& Text.class.isAssignableFrom(method.getReturnType())) {
-						return Text.translatable("ui.mechaniciancombat.ammo_storage");
-					}
-					if (method.getReturnType() == boolean.class) {
-						return true;
-					}
-					if (method.getParameterCount() == 1) {
-						return (byte) 0;
-					}
-					if (method.getParameterCount() == 3) {
+		return new SimpleNamedScreenHandlerFactory(
+				(syncId, playerInventory, player) ->
+						new AmmoStorageScreenHandler(syncId, playerInventory),
+				Text.translatable("ui.mechaniciancombat.ammo_storage"));
+	}
+
+	@SuppressWarnings("unchecked")
+	private static ScreenHandlerType<AmmoStorageScreenHandler> createVanillaType() {
+		try {
+			Class<?> factoryType = Arrays.stream(
+							ScreenHandlerType.class.getDeclaredClasses())
+					.filter(Class::isInterface)
+					.filter(type -> Arrays.stream(type.getDeclaredMethods())
+							.anyMatch(method -> method.getParameterCount() == 2
+									&& method.getParameterTypes()[0] == int.class
+									&& method.getParameterTypes()[1]
+											== PlayerInventory.class))
+					.findFirst()
+					.orElseThrow(() -> new IllegalStateException(
+							"ScreenHandlerType.Factory not found"));
+			Object factory = Proxy.newProxyInstance(
+					AmmoStorageScreenHandler.class.getClassLoader(),
+					new Class<?>[]{factoryType},
+					(proxy, method, args) -> {
+						if (method.getDeclaringClass() == Object.class) {
+							return switch (method.getName()) {
+								case "toString" ->
+										"mechaniciancombat:ammo_storage_factory";
+								case "hashCode" -> System.identityHashCode(proxy);
+								case "equals" -> proxy == args[0];
+								default -> null;
+							};
+						}
 						return new AmmoStorageScreenHandler(
 								(int) args[0], (PlayerInventory) args[1]);
-					}
-					return null;
-				});
-		return (net.minecraft.screen.NamedScreenHandlerFactory) proxy;
+					});
+			Constructor<ScreenHandlerType> constructor =
+					(Constructor<ScreenHandlerType>) ScreenHandlerType.class
+							.getDeclaredConstructor(factoryType, FeatureSet.class);
+			constructor.setAccessible(true);
+			return (ScreenHandlerType<AmmoStorageScreenHandler>)
+					constructor.newInstance(factory, FeatureSet.empty());
+		} catch (Throwable throwable) {
+			throw new ExceptionInInitializerError(throwable);
+		}
 	}
 }

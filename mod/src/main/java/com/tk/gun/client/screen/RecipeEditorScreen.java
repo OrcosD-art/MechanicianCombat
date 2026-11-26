@@ -185,6 +185,7 @@ public final class RecipeEditorScreen extends HandledScreen<RecipeEditorScreenHa
 							"screen.mechaniciancombat.recipe_editor.cooking_time"),
 					x + 84, y + 221, 0xFF404040, false);
 		}
+		com.tk.gun.client.ModGuiFadeOverlay.render(this, context);
 	}
 
 	private Text pageText() {

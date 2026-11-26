@@ -78,6 +78,7 @@ public class BowgunItem extends Item {
 				tooltip.add(Text.literal(line).formatted(Formatting.GRAY));
 			}
 		}
+		WeaponControlTooltips.addWeaponControls(tooltip, definition());
 	}
 
 	@Override

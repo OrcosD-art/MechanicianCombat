@@ -4,6 +4,8 @@ import com.tk.gun.TkGun;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.Camera;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -38,12 +40,40 @@ public final class GunReticle {
 	 * </ol>
 	 * 生成脚本 `_mech_work\make_reticle.py`。
 	 */
-	private static final int RING_SIZE = 15;
-	private static final int CROSSHAIR_SIZE = 15;
-	private static final int RETICLE_X_SIZE = CROSSHAIR_SIZE + 2;
+	private static final int ARROW_SIZE = 15;
+	private static final float HOTBAR_WIDTH = 182.0F;
+	private static final int RETICLE_TEXTURE_SIZE = 64;
+	private static final int RETICLE_HALF_SIZE = RETICLE_TEXTURE_SIZE / 2;
+	private static final float RETICLE_VISUAL_HALF_SIZE = 17.0F;
+	private static final float SCREEN_JUMP_SNAP_DISTANCE = 40.0F;
+	private static final float CIRCLE_SOFT_BORDER = 6.0F;
+	private static final int HIT_MARKER_INNER = 18;
 	private static final int HIT_CROSS_BAR_LENGTH = 3;
 	private static final long HIT_MARKER_NANOS = 180_000_000L;
+	private static final long AIM_TRANSITION_NANOS = 200_000_000L;
+	private static final Identifier[] AIM_FRAMES = {
+			Identifier.of("mechaniciancombat",
+					"textures/gui/reticle/frame_0.png"),
+			Identifier.of("mechaniciancombat",
+					"textures/gui/reticle/frame_1.png"),
+			Identifier.of("mechaniciancombat",
+					"textures/gui/reticle/frame_2.png"),
+			Identifier.of("mechaniciancombat",
+					"textures/gui/reticle/frame_3.png"),
+			Identifier.of("mechaniciancombat",
+					"textures/gui/reticle/frame_4.png")
+	};
 	private static long hitMarkerUntil;
+	private static long lastTransitionNanos;
+	private static float transitionProgress;
+	private static long interpolationTick = Long.MIN_VALUE;
+	private static boolean interpolationValid;
+	private static float interpolationFromX;
+	private static float interpolationFromY;
+	private static float interpolationToX;
+	private static float interpolationToY;
+	private static float lastRawX;
+	private static float lastRawY;
 	private static int reticleScreenX;
 	private static int reticleScreenY;
 	private static boolean reticleVisible;
@@ -52,54 +82,98 @@ public final class GunReticle {
 		hitMarkerUntil = System.nanoTime() + HIT_MARKER_NANOS;
 	}
 
-	public static void render(DrawContext context) {
+	public static void render(DrawContext context, float tickDelta) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.player == null || client.world == null || client.options.hudHidden
 				|| client.currentScreen != null) {
+			lastTransitionNanos = 0L;
+			resetInterpolation();
 			return;
 		}
 		reticleVisible = false;
 		if (!TkGun.holdingGun(client.player)) {
+			transitionProgress = 0.0F;
+			lastTransitionNanos = 0L;
+			resetInterpolation();
+			return;
+		}
+		boolean aiming = GunCamera.aiming(client);
+		GunClientState.Entry state =
+				GunClientState.get(client.player.getId());
+		boolean deploying = isDeploying(state);
+		updateTransition(aiming && !deploying);
+		boolean focused = GunClientState.focusish(client.player.getId());
+		if (deploying) {
+			resetInterpolation();
 			return;
 		}
 		if (client.options.getPerspective().isFirstPerson()) {
+			resetInterpolation();
 			// 第一人称不画落点圈；越界方向箭头只在专注状态下提示，腰射不显示。
-			if (GunCamera.aiming(client) && GunCamera.aimOutsideCone()
-					&& GunClientState.focusish(client.player.getId())) {
+			if (aiming && GunCamera.aimOutsideCone()
+					&& focused) {
 				drawLostDirectionArrow(context, GunCamera.aimOutsideSide());
 			}
 			return;
 		}
-		// ⚠️ 2026-10-16 用户："这个着弹点正常情况下是不显示的，**只有在玩家长按右键的时候**它才显示。
-		//    你现在平常状态就显示，导致玩家模型在瞎转" → 圈圈只在**长按右键瞄准**时画。
-		if (!GunCamera.aiming(client)) {
+		// Outside crouch-fire focus, the reticle is only shown while the
+		// player is actively aiming with the use key.
+		// Keep the reticle through AIM_HOLD, FIRE and every other active
+		// crouch-fire state. Only the deployment transitions are hidden above.
+		if (!aiming && !focused) {
+			resetInterpolation();
 			return;
 		}
-		if (GunCamera.aimOutsideCone()) {
-			if (GunClientState.focusish(client.player.getId())) {
+		if (aiming && GunCamera.aimOutsideCone()) {
+			resetInterpolation();
+			if (focused) {
 				drawLostDirectionArrow(context, GunCamera.aimOutsideSide());
 			}
 			return;
 		}
-		drawMuzzleReticle(context);
+		drawMuzzleReticle(context, tickDelta);
 		drawHitCrossFlash(context);
 	}
 
-	/** 17x17 single-pixel X used as the replacement reticle. */
-	private static void drawReticleX(DrawContext context, int centerX, int centerY) {
-		int half = RETICLE_X_SIZE / 2;
-		int left = centerX - half;
-		int top = centerY - half;
-		int right = left + RETICLE_X_SIZE - 1;
-		int bottom = top + RETICLE_X_SIZE - 1;
-		int white = 0xFFFFFFFF;
-		// Stop two pixels before the center, leaving the cross intersection and a one-pixel gap clear.
-		for (int i = 0; i <= half - 2; i++) {
-			context.fill(left + i, top + i, left + i + 1, top + i + 1, white);
-			context.fill(right - i, top + i, right - i + 1, top + i + 1, white);
-			context.fill(left + i, bottom - i, left + i + 1, bottom - i + 1, white);
-			context.fill(right - i, bottom - i, right - i + 1, bottom - i + 1, white);
+	private static boolean isDeploying(GunClientState.Entry state) {
+		if (state == null) {
+			return false;
 		}
+		return state.state == TkGun.State.AIM
+				|| state.state == TkGun.State.AIM_FAST
+				|| state.state == TkGun.State.AIM_ROLL
+				|| state.state == TkGun.State.AIM_SLIDE;
+	}
+
+	private static void resetInterpolation() {
+		interpolationTick = Long.MIN_VALUE;
+		interpolationValid = false;
+	}
+
+	private static void updateTransition(boolean aiming) {
+		long now = System.nanoTime();
+		if (lastTransitionNanos == 0L) {
+			lastTransitionNanos = now;
+			return;
+		}
+		long elapsed = Math.max(0L,
+				Math.min(100_000_000L, now - lastTransitionNanos));
+		lastTransitionNanos = now;
+		float target = aiming ? 1.0F : 0.0F;
+		float step = (float) elapsed / AIM_TRANSITION_NANOS;
+		if (transitionProgress < target) {
+			transitionProgress = Math.min(target,
+					transitionProgress + step);
+		} else if (transitionProgress > target) {
+			transitionProgress = Math.max(target,
+					transitionProgress - step);
+		}
+	}
+
+	private static int currentFrame() {
+		return Math.max(0, Math.min(AIM_FRAMES.length - 1,
+				(int) Math.floor(transitionProgress
+						* (AIM_FRAMES.length - 1))));
 	}
 
 	/** Four 3-pixel bars flash once outside the X reticle on a confirmed hit. */
@@ -107,10 +181,8 @@ public final class GunReticle {
 		if (!reticleVisible || System.nanoTime() >= hitMarkerUntil) {
 			return;
 		}
-		int half = RETICLE_X_SIZE / 2;
-		int gap = 1;
-		int near = half + gap + 1;
-		int far = half + gap + HIT_CROSS_BAR_LENGTH;
+		int near = HIT_MARKER_INNER;
+		int far = near + HIT_CROSS_BAR_LENGTH;
 		int white = 0xFFFFFFFF;
 
 		context.fill(reticleScreenX, reticleScreenY - far,
@@ -134,19 +206,19 @@ public final class GunReticle {
 		int cx = ctx.getScaledWindowWidth() / 2;
 		int cy = ctx.getScaledWindowHeight() / 2;
 		int x = side < 0 ? cx - 34 : cx + 19;
-		int y = cy - RING_SIZE / 2;
+		int y = cy - ARROW_SIZE / 2;
 		int white = 0xFFFFFFFF;
 		// 7 段镜像斜线组成一个 15×15 的 < / >，每段都是 1px。
-		for (int i = 0; i <= RING_SIZE / 2; i++) {
-			int px = side < 0 ? x + RING_SIZE / 2 - i : x + RING_SIZE / 2 + i;
+		for (int i = 0; i <= ARROW_SIZE / 2; i++) {
+			int px = side < 0 ? x + ARROW_SIZE / 2 - i : x + ARROW_SIZE / 2 + i;
 			ctx.fill(px, y + i, px + 1, y + i + 1, white);
-			ctx.fill(px, y + RING_SIZE - 1 - i,
-					px + 1, y + RING_SIZE - i, white);
+			ctx.fill(px, y + ARROW_SIZE - 1 - i,
+					px + 1, y + ARROW_SIZE - i, white);
 		}
 	}
 
 	/** 把**弹着点**世界坐标投影到屏幕上画圈（在相机身后 / 太靠边就不画）。 */
-	private static void drawMuzzleReticle(DrawContext ctx) {
+	private static void drawMuzzleReticle(DrawContext ctx, float tickDelta) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		Vec3d muzzle = GunCamera.impactPoint();
 		if (muzzle == null) {
@@ -177,14 +249,80 @@ public final class GunReticle {
 		}
 		float ndcX = v.x() / v.w();
 		float ndcY = v.y() / v.w();
-		if (Math.abs(ndcX) > 1.4F || Math.abs(ndcY) > 1.4F) {
-			return;                                  // 出画了就别画半个圈在边上
+		float centerX = ctx.getScaledWindowWidth() * 0.5F;
+		float centerY = ctx.getScaledWindowHeight() * 0.5F;
+		float projectedX =
+				(ndcX * 0.5F + 0.5F) * ctx.getScaledWindowWidth();
+		float projectedY =
+				(0.5F - ndcY * 0.5F) * ctx.getScaledWindowHeight();
+		long worldTick = client.world.getTime();
+		if (!interpolationValid
+				|| worldTick != interpolationTick) {
+			interpolationFromX = interpolationValid
+					? lastRawX : projectedX;
+			interpolationFromY = interpolationValid
+					? lastRawY : projectedY;
+			interpolationTick = worldTick;
+			interpolationValid = true;
 		}
-		int sx = Math.round((ndcX * 0.5F + 0.5F) * ctx.getScaledWindowWidth());
-		int sy = Math.round((0.5F - ndcY * 0.5F) * ctx.getScaledWindowHeight());
-		drawReticleX(ctx, sx, sy);
-		reticleScreenX = sx;
-		reticleScreenY = sy;
+		interpolationToX = projectedX;
+		interpolationToY = projectedY;
+		lastRawX = projectedX;
+		lastRawY = projectedY;
+
+		float jumpX = interpolationToX - interpolationFromX;
+		float jumpY = interpolationToY - interpolationFromY;
+		boolean snap = jumpX * jumpX + jumpY * jumpY
+				> SCREEN_JUMP_SNAP_DISTANCE * SCREEN_JUMP_SNAP_DISTANCE;
+		float blend = snap ? 1.0F
+				: MathHelper.clamp(tickDelta, 0.0F, 1.0F);
+		float displayX = snap ? interpolationToX
+				: MathHelper.lerp(blend,
+						interpolationFromX, interpolationToX);
+		float displayY = snap ? interpolationToY
+				: MathHelper.lerp(blend,
+						interpolationFromY, interpolationToY);
+		if (snap) {
+			interpolationFromX = interpolationToX;
+			interpolationFromY = interpolationToY;
+		}
+
+		float dx = displayX - centerX;
+		float dy = displayY - centerY;
+		float hardRadius = Math.max(0.0F,
+				Math.min(HOTBAR_WIDTH * 0.5F,
+						Math.min(centerX, centerY))
+						- RETICLE_VISUAL_HALF_SIZE);
+		float distance = (float) Math.sqrt(dx * dx + dy * dy);
+		float softStart = Math.max(0.0F,
+				hardRadius - CIRCLE_SOFT_BORDER);
+		if (distance > softStart && distance > 1.0E-5F) {
+			float excess = distance - softStart;
+			float limited = softStart + CIRCLE_SOFT_BORDER
+					* (1.0F - (float) Math.exp(
+							-excess / CIRCLE_SOFT_BORDER));
+			float scale = limited / distance;
+			dx *= scale;
+			dy *= scale;
+		}
+		float sx = centerX + dx;
+		float sy = centerY + dy;
+		float drawX = sx - RETICLE_HALF_SIZE;
+		float drawY = sy - RETICLE_HALF_SIZE;
+		int baseX = (int) Math.floor(drawX);
+		int baseY = (int) Math.floor(drawY);
+		ctx.getMatrices().push();
+		try {
+			ctx.getMatrices().translate(drawX - baseX, drawY - baseY, 0.0F);
+			ctx.drawTexture(AIM_FRAMES[currentFrame()],
+					baseX, baseY,
+					0, 0, RETICLE_TEXTURE_SIZE, RETICLE_TEXTURE_SIZE,
+					RETICLE_TEXTURE_SIZE, RETICLE_TEXTURE_SIZE);
+		} finally {
+			ctx.getMatrices().pop();
+		}
+		reticleScreenX = Math.round(sx);
+		reticleScreenY = Math.round(sy);
 		reticleVisible = true;
 	}
 

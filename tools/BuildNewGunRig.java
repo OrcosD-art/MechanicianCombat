@@ -460,7 +460,8 @@ public final class BuildNewGunRig {
 					collectElements(new JsonArrayBuilder().add(child).build(), byUuid, out);
 				} else if (child.isJsonPrimitive()) {
 					JsonObject cube = byUuid.get(child.getAsString());
-					if (cube != null) {
+					if (cube != null && (!cube.has("export")
+							|| cube.get("export").getAsBoolean())) {
 						cubes.add(cube);
 					}
 				}
@@ -469,27 +470,10 @@ public final class BuildNewGunRig {
 	}
 
 	private static JsonObject matchSourceCube(ArrayDeque<JsonObject> candidates, JsonObject cube) {
-		JsonArray origin = cube.getAsJsonArray("origin");
-		JsonArray size = cube.getAsJsonArray("size");
-		for (JsonObject candidate : candidates) {
-			JsonArray from = candidate.getAsJsonArray("from");
-			JsonArray to = candidate.getAsJsonArray("to");
-			boolean sameOrigin = close(origin.get(0).getAsDouble(), from.get(0).getAsDouble())
-					&& close(origin.get(1).getAsDouble(), from.get(1).getAsDouble())
-					&& close(origin.get(2).getAsDouble(), from.get(2).getAsDouble());
-			boolean sameSize = close(size.get(0).getAsDouble(),
-					to.get(0).getAsDouble() - from.get(0).getAsDouble())
-					&& close(size.get(1).getAsDouble(),
-					to.get(1).getAsDouble() - from.get(1).getAsDouble())
-					&& close(size.get(2).getAsDouble(),
-					to.get(2).getAsDouble() - from.get(2).getAsDouble());
-			if (sameOrigin && sameSize) {
-				candidates.remove(candidate);
-				return candidate;
-			}
-		}
-		// Blockbench may rewrite mirrored/rotated cube origins while preserving
-		// source element order. Fall back to that order when bounds no longer match.
+		// GeckoLib export mirrors some local X coordinates around their group
+		// pivot. Bounds can therefore match multiple neighbours after mirroring,
+		// which previously assigned case UVs to the wrong cubes. Blockbench keeps
+		// the authored element order within each group, so pair by that order.
 		return candidates.pollFirst();
 	}
 

@@ -111,6 +111,7 @@ def export_rig(model):
         (entry.get("name"), entry.get("type"), entry.get("bytes"))
         for entry in info.get("exports", [])
     ])
+    wrote_animation = False
     for entry in info.get("exports", []):
         content = entry.get("content")
         name = (entry.get("name") or "").lower()
@@ -137,6 +138,25 @@ def export_rig(model):
             os.makedirs(os.path.dirname(OUT_ANIM), exist_ok=True)
             with open(OUT_ANIM, "w", encoding="utf-8") as handle:
                 handle.write(content)
+            wrote_animation = True
+
+    # Blockbench 4.12's GeckoLib action can expose geometry but skip the
+    # animation download dialog. The built-in compiler returns the same
+    # Bedrock animation document directly, so use it as a deterministic
+    # fallback rather than silently keeping the previous exported clips.
+    if not wrote_animation:
+        raw_builtin = mech.cdp(
+            os.path.join(TOOLS, "bb_export_builtin.js")).strip()
+        builtin = json.loads(raw_builtin)
+        animation_document = builtin.get("animation_document")
+        if not animation_document:
+            raise RuntimeError(
+                "Blockbench returned neither GeckoLib nor built-in animations")
+        content = postprocess_animations(animation_document, model)
+        os.makedirs(os.path.dirname(OUT_ANIM), exist_ok=True)
+        with open(OUT_ANIM, "w", encoding="utf-8") as handle:
+            handle.write(content)
+        print("animations: built-in fallback ->", OUT_ANIM)
 
     return texture_bytes, tex_w, tex_h
 

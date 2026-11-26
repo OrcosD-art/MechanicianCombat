@@ -35,7 +35,7 @@ public final class GrapeshotVolley {
 			candidateTick = now;
 			candidates = world.getEntitiesByClass(Entity.class, searchBox,
 					e -> e.getId() != ownerId && e.isAlive() && !e.isSpectator()
-							&& e.canHit() && !CombatTargeting.isGolem(e));
+							&& e.canHit() && CombatTargeting.isTargetable(e));
 		}
 		return candidates;
 	}

@@ -112,6 +112,58 @@ public final class ArmorHelmetController {
 		}
 	}
 
+	/**
+	 * Mirrors the helmet state of the chestplate selected for the dressing
+	 * sequence, including a chestplate still waiting in the player inventory.
+	 */
+	public static void syncForDressingStation(
+			ServerPlayerEntity player) {
+		ItemStack chest = stationChestplate(player);
+		if (chest.isEmpty()) {
+			return;
+		}
+		for (ServerPlayerEntity viewer :
+				player.getServerWorld().getPlayers()) {
+			send(viewer, player, chest);
+		}
+	}
+
+	/** Always presents the authored fold clip at the station's 1.25s cue. */
+	public static boolean closeForDressingStation(
+			ServerPlayerEntity player) {
+		ItemStack chest = stationChestplate(player);
+		if (chest.isEmpty()) {
+			return false;
+		}
+		long now = player.getWorld().getTime();
+		ArmorUpgradeData.beginHelmetTransition(chest, false, now);
+		HelmetSound sound = new HelmetSound(now,
+				ArmorUpgradeData.HELMET_FOLD_TICKS, false);
+		HELMET_SOUNDS.put(player.getUuid(), sound);
+		playHelmetSound(player, FOLD_SOUNDS[0]);
+		sound.mask = 1;
+		for (ServerPlayerEntity viewer :
+				player.getServerWorld().getPlayers()) {
+			send(viewer, player, chest);
+		}
+		return true;
+	}
+
+	private static ItemStack stationChestplate(
+			ServerPlayerEntity player) {
+		ItemStack equipped = ArmorUpgradeData.equippedChestplate(player);
+		if (!equipped.isEmpty()) {
+			return equipped;
+		}
+		for (int slot = 0; slot < player.getInventory().size(); slot++) {
+			ItemStack stack = player.getInventory().getStack(slot);
+			if (ArmorUpgradeData.isChestplate(stack)) {
+				return stack;
+			}
+		}
+		return ItemStack.EMPTY;
+	}
+
 	private static void tickHelmetSounds(MinecraftServer server) {
 		long now = server.getOverworld().getTime();
 		Iterator<Map.Entry<UUID, HelmetSound>> iterator =

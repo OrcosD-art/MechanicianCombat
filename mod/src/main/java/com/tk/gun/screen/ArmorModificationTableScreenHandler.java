@@ -62,7 +62,7 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 	};
 
 	public static final ScreenHandlerType<ArmorModificationTableScreenHandler> TYPE =
-			new ExtendedScreenHandlerType<>(
+			new ExtendedScreenHandlerType<ArmorModificationTableScreenHandler, BlockPos>(
 					(syncId, playerInventory, pos) ->
 							new ArmorModificationTableScreenHandler(
 									syncId, playerInventory, pos),
@@ -282,6 +282,10 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 		return TYPE;
 	}
 
+	public BlockPos pos() {
+		return pos;
+	}
+
 	@Override
 	public void onClosed(PlayerEntity player) {
 		// Persist modules that were inserted immediately before closing. The
@@ -293,8 +297,11 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 
 	@Override
 	public boolean canUse(PlayerEntity player) {
-		return player.getWorld().getBlockState(pos)
-				.isOf(TkGunServer.ARMOR_MODIFICATION_TABLE)
+		var state = player.getWorld().getBlockState(pos);
+		return com.tk.gun.block.ArmorDressingStationBlock.isStation(state)
+				&& player instanceof ServerPlayerEntity serverPlayer
+				&& com.tk.gun.block.ArmorDressingStationService
+						.isMounted(serverPlayer)
 				&& player.squaredDistanceTo(
 						pos.getX() + 0.5D,
 						pos.getY() + 0.5D,

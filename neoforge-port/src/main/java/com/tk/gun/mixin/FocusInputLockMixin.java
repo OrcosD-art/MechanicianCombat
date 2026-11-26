@@ -19,6 +19,33 @@ public abstract class FocusInputLockMixin {
 	private void mechaniciancombat$lockFocusInput(CallbackInfo ci) {
 		MinecraftClient client = (MinecraftClient) (Object) this;
 		if (client.player != null && client.currentScreen == null
+				&& com.tk.gun.client.ArmorDressingClientState.locksInput(
+						client.player.getId())) {
+			for (var hotbarKey : client.options.hotbarKeys) {
+				while (hotbarKey.wasPressed()) {
+					// Consume queued hotbar input during the dressing sequence.
+				}
+			}
+			ci.cancel();
+			return;
+		}
+		if (client.player != null && client.currentScreen == null
+				&& com.tk.gun.client.ArmorDressingClientState
+						.mountedStationPos(client.player.getId()) != null) {
+			for (var hotbarKey : client.options.hotbarKeys) {
+				while (hotbarKey.wasPressed()) {
+					// The mounted workstation owns vanilla input actions.
+				}
+			}
+			while (client.options.inventoryKey.wasPressed()) {
+				// TkGunClient reads the physical key and opens the armor page.
+				// Consume vanilla's queued press so the player inventory does
+				// not open over the workstation.
+			}
+			ci.cancel();
+			return;
+		}
+		if (client.player != null && client.currentScreen == null
 				&& TkGun.holdingGun(client.player)
 				&& GunClientState.focusish(client.player.getId())
 				&& !TkGunClient.isRollTriggerTick(client)) {

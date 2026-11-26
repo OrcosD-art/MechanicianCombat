@@ -15,6 +15,8 @@ import net.minecraft.util.math.Vec3d;
 public final class CameraPerspectiveTransition {
 	private static final double EQUIP_SECONDS = 0.28D;
 	private static final double UNEQUIP_SECONDS = 0.24D;
+	private static final double STATION_ACTIVATE_SECONDS = 0.32D;
+	private static final double STATION_SETTLE_SECONDS = 0.2D;
 
 	private static boolean active;
 	private static long startedAtNanos;
@@ -24,6 +26,7 @@ public final class CameraPerspectiveTransition {
 	private static float fromPitch;
 	private static double fromFov;
 	private static double progress;
+	private static String activeReason;
 
 	public record Pose(Vec3d position, float yaw, float pitch) {
 	}
@@ -36,9 +39,24 @@ public final class CameraPerspectiveTransition {
 		begin(client, UNEQUIP_SECONDS, "unequip");
 	}
 
+	public static void beginStationActivate(MinecraftClient client) {
+		begin(client, STATION_ACTIVATE_SECONDS, "station-activate");
+	}
+
+	/**
+	 * Softens the one-to-two tick passenger/collision correction when the
+	 * dressing clip hands the already-seated player to the active station.
+	 */
+	public static void beginStationSettle(MinecraftClient client) {
+		begin(client, STATION_SETTLE_SECONDS, "station-settle");
+	}
+
 	private static void begin(MinecraftClient client, double seconds,
 			String reason) {
 		if (client == null || client.gameRenderer == null) {
+			return;
+		}
+		if (active && reason.equals(activeReason)) {
 			return;
 		}
 		Camera camera = client.gameRenderer.getCamera();
@@ -51,6 +69,7 @@ public final class CameraPerspectiveTransition {
 				Math.round(seconds * 1_000_000_000.0D));
 		progress = 0.0D;
 		active = true;
+		activeReason = reason;
 		com.tk.gun.TkGun.LOGGER.info(
 				"[mechaniciancombat] camera perspective transition {} started duration={}ms",
 				reason, Math.round(seconds * 1000.0D));
@@ -96,6 +115,7 @@ public final class CameraPerspectiveTransition {
 
 	public static void reset() {
 		active = false;
+		activeReason = null;
 		progress = 1.0D;
 		durationNanos = 0L;
 	}

@@ -20,6 +20,7 @@ public final class NeoMechanicianArmorRenderLayer extends FeatureRenderer<
 		AbstractClientPlayerEntity,
 		PlayerEntityModel<AbstractClientPlayerEntity>> {
 	private static final EquipmentSlot[] ARMOR_SLOTS = {
+			EquipmentSlot.HEAD,
 			EquipmentSlot.CHEST,
 			EquipmentSlot.LEGS,
 			EquipmentSlot.FEET

@@ -35,6 +35,7 @@ public final class JumpBackpackClientState {
 	private static int ticks;
 	private static boolean sentJumpPressed;
 	private static boolean previousJumpKey;
+	private static boolean previousSneakKey;
 	private static float lastDirectionX;
 	private static float lastDirectionZ;
 
@@ -52,10 +53,11 @@ public final class JumpBackpackClientState {
 		if (player == null || client.world == null) {
 			if (sentJumpPressed) {
 				ClientPlayNetworking.send(
-						new JumpBackpackPayload(false, 0.0F, 0.0F));
+						new JumpBackpackPayload(false, 0.0F, 0.0F, false));
 				sentJumpPressed = false;
 			}
 			previousJumpKey = false;
+			previousSneakKey = false;
 			lastDirectionX = 0.0F;
 			lastDirectionZ = 0.0F;
 			return;
@@ -90,6 +92,10 @@ public final class JumpBackpackClientState {
 		boolean risingEdge = rawPressed && !previousJumpKey;
 		previousJumpKey = rawPressed;
 		boolean eligible = equipped && !TkGun.holdingGun(player);
+		boolean sneakPressed = client.currentScreen == null
+				&& client.options.sneakKey.isPressed();
+		boolean sneakRisingEdge = sneakPressed && !previousSneakKey;
+		previousSneakKey = sneakPressed;
 		float directionX = 0.0F;
 		float directionZ = 0.0F;
 		if (eligible && client.currentScreen == null) {
@@ -99,22 +105,33 @@ public final class JumpBackpackClientState {
 		}
 		boolean directionChanged = Math.abs(directionX - lastDirectionX) > 0.01F
 				|| Math.abs(directionZ - lastDirectionZ) > 0.01F;
+		if (eligible && sneakRisingEdge && isActive(player.getId())) {
+			// The player pose query is suppressed during thrust, so this must use
+			// the raw sneak key instead of player.isSneaking().
+			ClientPlayNetworking.send(
+					new JumpBackpackPayload(false, 0.0F, 0.0F, true));
+			lastDirectionX = directionX;
+			lastDirectionZ = directionZ;
+			return;
+		}
 		if (eligible && rawPressed && risingEdge && !sentJumpPressed) {
 			ClientPlayNetworking.send(
-					new JumpBackpackPayload(true, directionX, directionZ));
+					new JumpBackpackPayload(true, directionX, directionZ, false));
 			sentJumpPressed = true;
 		} else if (eligible && !rawPressed && sentJumpPressed) {
 			ClientPlayNetworking.send(
-					new JumpBackpackPayload(false, directionX, directionZ));
+					new JumpBackpackPayload(false, directionX, directionZ,
+							false));
 			sentJumpPressed = false;
 		} else if (!eligible && sentJumpPressed) {
 			ClientPlayNetworking.send(
-					new JumpBackpackPayload(false, 0.0F, 0.0F));
+					new JumpBackpackPayload(false, 0.0F, 0.0F, false));
 			sentJumpPressed = false;
 		} else if (eligible && directionChanged
 				&& (sentJumpPressed || isActive(player.getId()))) {
 			ClientPlayNetworking.send(
-					new JumpBackpackPayload(rawPressed, directionX, directionZ));
+					new JumpBackpackPayload(rawPressed, directionX, directionZ,
+							false));
 		}
 		lastDirectionX = directionX;
 		lastDirectionZ = directionZ;
@@ -178,6 +195,15 @@ public final class JumpBackpackClientState {
 				|| phase == Phase.FALLING;
 	}
 
+	/**
+	 * The backpack owns the fallen pose while thrust is active, including a
+	 * sneak-cancelled descent. The sneak key is only a control input there and
+	 * must not add the vanilla crouch pose over the authored falling clip.
+	 */
+	public static boolean suppressSneakPose(int playerId) {
+		return isActive(playerId);
+	}
+
 	public static Phase phase(int playerId) {
 		Entry entry = ENTRIES.get(playerId);
 		return entry == null ? Phase.IDLE : entry.phase;
@@ -198,6 +224,7 @@ public final class JumpBackpackClientState {
 		JumpBackpackPlayerAnimation.clearAll();
 		sentJumpPressed = false;
 		previousJumpKey = false;
+		previousSneakKey = false;
 		lastDirectionX = 0.0F;
 		lastDirectionZ = 0.0F;
 	}

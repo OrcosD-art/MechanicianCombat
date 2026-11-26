@@ -6,6 +6,7 @@ import com.tk.gun.screen.BackpackModificationTableScreenHandler;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
@@ -54,6 +55,32 @@ public final class BackpackModificationTableScreen
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
 		super.render(context, mouseX, mouseY, delta);
 		drawMouseoverTooltip(context, mouseX, mouseY);
+		com.tk.gun.client.ModGuiFadeOverlay.render(this, context);
+	}
+
+	@Override
+	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (client != null && client.player != null
+				&& com.tk.gun.client.ArmorDressingClientState
+						.mounted(client.player.getId())) {
+			if (com.tk.gun.client.TkGunClient.BACKPACK_ACTION_KEY
+					.matchesKey(keyCode, scanCode)) {
+				com.tk.gun.client.TkGunClient
+						.suppressMountedStationUiKey(1);
+				close();
+				return true;
+			}
+			if (client.options.inventoryKey.matchesKey(
+					keyCode, scanCode)) {
+				com.tk.gun.client.TkGunClient
+						.suppressMountedStationUiKey(0);
+				ClientPlayNetworking.send(
+						new com.tk.gun.net.ArmorDressingInteractPayload(
+								handler.pos(), 0));
+				return true;
+			}
+		}
+		return super.keyPressed(keyCode, scanCode, modifiers);
 	}
 
 	@Override

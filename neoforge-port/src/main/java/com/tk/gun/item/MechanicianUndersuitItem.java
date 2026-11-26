@@ -1,20 +1,25 @@
 package com.tk.gun.item;
 
 import com.tk.gun.TkGun;
-import io.wispforest.accessories.api.AccessoriesCapability;
-import io.wispforest.accessories.api.AccessoryItem;
-import io.wispforest.accessories.api.components.AccessoryItemAttributeModifiers;
-import net.minecraft.entity.LivingEntity;
+import net.minecraft.component.type.AttributeModifierSlot;
+import net.minecraft.component.type.AttributeModifiersComponent;
 import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttributeModifier;
 import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Equipment;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.tooltip.TooltipType;
 import net.minecraft.item.ArmorItem;
 import net.minecraft.item.ArmorMaterials;
-import net.minecraft.item.ItemStack;
+import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.sound.SoundEvent;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
+import net.minecraft.util.TypedActionResult;
+import net.minecraft.world.World;
 import software.bernie.geckolib.animatable.GeoItem;
 import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
 import software.bernie.geckolib.animation.AnimatableManager;
@@ -24,25 +29,54 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.List;
 
-/** Accessory under-layer that replaces the player's body while worn. */
-public final class MechanicianUndersuitItem extends AccessoryItem implements GeoItem {
+/** Helmet-slot under-layer that replaces the player's body while worn. */
+public final class MechanicianUndersuitItem extends Item
+		implements Equipment, GeoItem {
 	private static final RawAnimation IDLE =
 			RawAnimation.begin().thenLoop("idle");
 	private final AnimatableInstanceCache cache =
 			GeckoLibUtil.createInstanceCache(this);
 
 	public MechanicianUndersuitItem(Settings settings) {
-		super(settings.maxCount(1));
+		super(settings);
+	}
+
+	public static Settings createSettings() {
+		AttributeModifiersComponent modifiers =
+				AttributeModifiersComponent.builder()
+						.add(EntityAttributes.GENERIC_ARMOR,
+								new EntityAttributeModifier(
+										TkGun.id("undersuit_armor"),
+										ArmorMaterials.NETHERITE.value()
+												.getProtection(
+														ArmorItem.Type.HELMET),
+										EntityAttributeModifier.Operation.ADD_VALUE),
+								AttributeModifierSlot.HEAD)
+						.add(EntityAttributes.GENERIC_ARMOR_TOUGHNESS,
+								new EntityAttributeModifier(
+										TkGun.id("undersuit_toughness"),
+										ArmorMaterials.NETHERITE.value()
+												.toughness(),
+										EntityAttributeModifier.Operation.ADD_VALUE),
+								AttributeModifierSlot.HEAD)
+						.add(EntityAttributes.GENERIC_KNOCKBACK_RESISTANCE,
+								new EntityAttributeModifier(
+										TkGun.id("undersuit_knockback_resistance"),
+										ArmorMaterials.NETHERITE.value()
+												.knockbackResistance(),
+										EntityAttributeModifier.Operation.ADD_VALUE),
+								AttributeModifierSlot.HEAD)
+						.build();
+		return new Settings().maxCount(1).maxDamage(407)
+				.attributeModifiers(modifiers);
 	}
 
 	public static boolean isEquipped(LivingEntity entity) {
-		return AccessoriesCapability.getOptionally(entity)
-				.map(capability -> capability.isEquipped(
-						stack -> stack.getItem() instanceof MechanicianUndersuitItem))
-				.orElse(false);
+		return entity.getEquippedStack(EquipmentSlot.HEAD).getItem()
+				instanceof MechanicianUndersuitItem;
 	}
 
-	/** Full authored armor set, including the Accessories undersuit. */
+	/** Full authored armor set, including the helmet-slot undersuit. */
 	public static boolean isWearingFullSet(LivingEntity entity) {
 		return isEquipped(entity)
 				&& isPiece(entity.getEquippedStack(EquipmentSlot.CHEST),
@@ -67,6 +101,16 @@ public final class MechanicianUndersuitItem extends AccessoryItem implements Geo
 					MechanicianArmorPiece.BOOTS);
 	}
 
+	public static boolean isLockedOuterSet(LivingEntity entity) {
+		return isEquipped(entity)
+				&& ArmorUpgradeData.isStationLocked(
+						entity.getEquippedStack(EquipmentSlot.CHEST))
+				&& ArmorUpgradeData.isStationLocked(
+						entity.getEquippedStack(EquipmentSlot.LEGS))
+				&& ArmorUpgradeData.isStationLocked(
+						entity.getEquippedStack(EquipmentSlot.FEET));
+	}
+
 	/**
 	 * The core backpack supplies the dodge actuator while the complete suit
 	 * protects the wearer, so this remains available outside gun states.
@@ -85,13 +129,23 @@ public final class MechanicianUndersuitItem extends AccessoryItem implements Geo
 	}
 
 	@Override
-	public void getStaticModifiers(Item item,
-								   AccessoryItemAttributeModifiers.Builder builder) {
-		int armor = ArmorMaterials.NETHERITE.value()
-				.getProtection(ArmorItem.Type.HELMET);
-		builder.addForAny(EntityAttributes.GENERIC_ARMOR,
-				new EntityAttributeModifier(TkGun.id("undersuit_armor"),
-						armor, EntityAttributeModifier.Operation.ADD_VALUE), true);
+	public EquipmentSlot getSlotType() {
+		return EquipmentSlot.HEAD;
+	}
+
+	@Override
+	public RegistryEntry<SoundEvent> getEquipSound() {
+		return ArmorMaterials.NETHERITE.value().equipSound();
+	}
+
+	@Override
+	public TypedActionResult<ItemStack> use(World world, PlayerEntity user,
+			Hand hand) {
+		if (!world.isClient()) {
+			user.sendMessage(Text.translatable(
+					"message.mechaniciancombat.armor_station_only"), true);
+		}
+		return TypedActionResult.fail(user.getStackInHand(hand));
 	}
 
 	@Override

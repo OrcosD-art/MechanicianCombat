@@ -60,6 +60,7 @@ public final class GunDebugHarness {
 	private static int releaseRollAt = -1;
 
 	public static void tick(MinecraftClient client) {
+		LocomotionIsolationDebug.tick(client);
 		if (!ENABLED && !remoteEnabled) {
 			return;
 		}

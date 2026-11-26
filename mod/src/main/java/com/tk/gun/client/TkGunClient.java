@@ -18,6 +18,8 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.option.Perspective;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 import net.minecraft.entity.attribute.EntityAttributeModifier;
@@ -42,6 +44,9 @@ public class TkGunClient implements ClientModInitializer {
 	public static final KeyBinding HELMET_TOGGLE_KEY = KeyBindingHelper.registerKeyBinding(
 			new KeyBinding("key.mechaniciancombat.helmet_toggle", InputUtil.Type.KEYSYM,
 					GLFW.GLFW_KEY_G, "category.mechaniciancombat"));
+	public static final KeyBinding AMMO_RING_KEY = KeyBindingHelper.registerKeyBinding(
+			new KeyBinding("key.mechaniciancombat.ammo_ring", InputUtil.Type.MOUSE,
+					GLFW.GLFW_MOUSE_BUTTON_MIDDLE, "category.mechaniciancombat"));
 	private static final KeyBinding fallbackRollKey =
 			CombatRollHook.isInstalled() ? null
 					: KeyBindingHelper.registerKeyBinding(new KeyBinding(
@@ -56,6 +61,10 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean soulAnchorKeyDown = false;
 	private static boolean soulAnchorSneakDown = false;
 	private static boolean helmetToggleKeyDown = false;
+	private static boolean armorStationUseDown = false;
+	private static boolean armorStationSneakDown = false;
+	private static boolean armorStationInventoryUiDown = false;
+	private static boolean armorStationBackpackUiDown = false;
 	/** 左键已经连着按了多少 tick（用来区分"轻点"和"按住连发"）。 */
 	private static int attackHeldTicks = 0;
 	/** Z（或改键后的那个键）上一 tick 是否按着 —— 自己做边沿检测，不依赖原版 KeyBinding。 */
@@ -64,6 +73,8 @@ public class TkGunClient implements ClientModInitializer {
 	private static boolean kineticSwordMoveInput = false;
 	private static boolean kineticSwordBackwardInput = false;
 	private static int kineticSwordSpecialPacketShotSeq = -1;
+	/** One physical press is shared by the keybinding and Pick Block bridge. */
+	private static boolean ammoRingHandledThisTick = false;
 	/** 连发补包是否已经打过日志（一次按住只打一行，别刷屏）。 */
 	private static boolean autoFireLogged = false;
 	/** F 键上一 tick 是否按着（自己做边沿检测）。 */
@@ -154,37 +165,82 @@ public class TkGunClient implements ClientModInitializer {
 		return InputUtil.Type.KEYSYM.createFromCode(fallback);
 	}
 
-	/** 某个按键绑定当前是否指向指定鼠标键（供中键兼容层判断优先级）。 */
-	public static boolean isBoundToMouse(KeyBinding binding, int button) {
-		if (binding == null) {
+	/** Whether both bindings resolve to the same physical key or mouse button. */
+	private static boolean isBoundToSameInput(KeyBinding first, KeyBinding second) {
+		if (first == null || second == null) {
 			return false;
 		}
 		try {
-			InputUtil.Key key = InputUtil.fromTranslationKey(binding.getBoundKeyTranslationKey());
-			return key.getCategory() == InputUtil.Type.MOUSE && key.getCode() == button;
+			InputUtil.Key firstKey =
+					InputUtil.fromTranslationKey(first.getBoundKeyTranslationKey());
+			InputUtil.Key secondKey =
+					InputUtil.fromTranslationKey(second.getBoundKeyTranslationKey());
+			return firstKey.getCode() >= 0
+					&& firstKey.getCategory() == secondKey.getCategory()
+					&& firstKey.getCode() == secondKey.getCode();
 		} catch (Throwable ignored) {
 			return false;
 		}
 	}
+
+	private static boolean canOpenAmmoRing(MinecraftClient client) {
+		return client != null && client.player != null
+				&& client.currentScreen == null
+				&& TkGun.holdingGun(client.player)
+				&& !TkGun.isMeleeWeapon(client.player);
+	}
+
+	private static void openAmmoRing(MinecraftClient client, String source) {
+		if (!canOpenAmmoRing(client)) {
+			return;
+		}
+		InputUtil.Key key = bindingKey(
+				AMMO_RING_KEY, GLFW.GLFW_MOUSE_BUTTON_MIDDLE);
+		ClientPlayNetworking.send(new com.tk.gun.net.OpenAmmoStoragePayload());
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] 弹药环键 {}（码 {}，来源 {}）-> 打开弹药环",
+				key.getLocalizedText().getString(), key.getCode(), source);
+	}
+
 	/**
-	 * Handles Pick Block on the exact button/key press that invokes
-	 * {@code MinecraftClient#doItemPick()}. Polling the physical mouse button
-	 * from the client tick can miss short middle-clicks, especially on NeoForge.
+	 * Receives the exact GLFW key/mouse press before vanilla input locks run.
+	 * This keeps short presses from being lost while focus or another input
+	 * handler owns {@code handleInputEvents()}.
+	 */
+	public static void handleAmmoRingRawInput(InputUtil.Key pressed) {
+		if (pressed == null || pressed.getCode() < 0
+				|| ammoRingHandledThisTick) {
+			return;
+		}
+		InputUtil.Key bound = bindingKey(
+				AMMO_RING_KEY, GLFW.GLFW_MOUSE_BUTTON_MIDDLE);
+		if (bound.getCategory() != pressed.getCategory()
+				|| bound.getCode() != pressed.getCode()) {
+			return;
+		}
+		MinecraftClient client = MinecraftClient.getInstance();
+		if (!canOpenAmmoRing(client)) {
+			return;
+		}
+		openAmmoRing(client, "raw_input");
+		ammoRingHandledThisTick = true;
+	}
+
+	/**
+	 * Cancels vanilla Pick Block only while it shares the ammo-ring binding.
+	 * The raw input hook normally handles the request first; this callback is
+	 * the fallback for launchers/loaders where that hook is unavailable.
 	 */
 	public static boolean openAmmoRingFromPickBlock(MinecraftClient client) {
-		if (client == null || client.player == null
-				|| client.currentScreen != null
-				|| !TkGun.holdingGun(client.player)
-				|| TkGun.isMeleeWeapon(client.player)) {
+		if (!canOpenAmmoRing(client)
+				|| !isBoundToSameInput(
+						AMMO_RING_KEY, client.options.pickItemKey)) {
 			return false;
 		}
-		InputUtil.Key key = bindingKey(client.options.pickItemKey,
-				GLFW.GLFW_KEY_K);
-		ClientPlayNetworking.send(
-				new com.tk.gun.net.OpenAmmoStoragePayload());
-		TkGun.LOGGER.info(
-				"[mechaniciancombat] 弹药环键 {}（码 {}）-> 打开弹药环",
-				key.getLocalizedText().getString(), key.getCode());
+		if (!ammoRingHandledThisTick) {
+			openAmmoRing(client, "pick_block_bridge");
+			ammoRingHandledThisTick = true;
+		}
 		return true;
 	}
 	private static boolean selfTested = false;
@@ -238,6 +294,11 @@ public class TkGunClient implements ClientModInitializer {
 	private static final float WALK_BOB_FADE_PER_TICK = 0.25F;
 	/** 每 tick 水平位移超过 0.02 格（= 0.4 格/秒）才算走（潜行 0.065、疾跑 0.28 都远超它）。 */
 	private static final double MOVING_EPS2 = 0.02 * 0.02;
+	/** Gun walk cycles are authored at 1.0 s. Match the 0.75 s sword reference. */
+	public static final float GUN_WALK_SPEED_MULTIPLIER = 0.75F;
+	private static final float NORMAL_WALK_ANIMATION_SPEED = 0.216F;
+	private static final float GUN_WALK_ANIMATION_SPEED =
+			NORMAL_WALK_ANIMATION_SPEED * GUN_WALK_SPEED_MULTIPLIER;
 
 	/** 某个玩家现在算不算"在走/在跑"（走路和疾跑共用 run 动画，见 BowgunRig.pick）。 */
 	public static boolean isMoving(int entityId) {
@@ -300,6 +361,30 @@ public class TkGunClient implements ClientModInitializer {
 					|| client.options.rightKey.isPressed());
 		}
 		return Math.abs(player.forwardSpeed) > 0.01F || Math.abs(player.sidewaysSpeed) > 0.01F;
+	}
+
+	/**
+	 * Ordinary grounded walking with a ranged gun is 25% slower so its authored
+	 * 1.0 s walk cycle matches the pace of the 0.75 s melee-walk reference.
+	 * Sprinting, dodging, skills, flight, swimming and first-person menus are
+	 * deliberately excluded. Camera/FOV code is not touched.
+	 */
+	public static boolean shouldApplyGunWalkSlowdown(MinecraftClient client) {
+		if (client.player == null || client.currentScreen != null) {
+			return false;
+		}
+		AbstractClientPlayerEntity player = client.player;
+		if (!player.isOnGround() || player.isSprinting() || player.isSwimming()
+				|| player.isFallFlying() || TkGun.isMeleeWeapon(player)
+				|| !TkGun.holdingGun(player)
+				|| GunClientState.dashing(player.getId())) {
+			return false;
+		}
+		GunClientState.Entry entry = GunClientState.get(player.getId());
+		return entry == null || switch (entry.state) {
+			case IDLE, RUN, FIRE, RELOAD, AIM_HOLD -> true;
+			default -> false;
+		};
 	}
 
 	/**
@@ -437,7 +522,7 @@ public class TkGunClient implements ClientModInitializer {
 			double dz = player.getZ() - m.z;
 			// 翻滚、滑铲和快速蹲射产生的位移是技能惯性，不是玩家移动输入。
 			// 特别是滑铲转 AIM_HOLD 时，残余速度会被 MOVING_HOLD_TICKS 续成 walk_front，
-			// 让蹲射保持先切成走路、再切回 Focus_hold / sliding_fast_ready，形成动画重播。
+			// 让蹲射保持先切成走路、再切回 Focus_hold / 快速 Focus_ready，形成动画重播。
 			// 只在没有真实方向键输入时屏蔽；玩家主动移动时仍按正常采样进入 walk_*。
 			GunClientState.Entry ge = GunClientState.get(player.getId());
 			boolean skillMotion = ge != null
@@ -494,8 +579,11 @@ public class TkGunClient implements ClientModInitializer {
 						&& (!soulAnchorReady || anchorDashSprint);
 				m.aiming = aiming;
 				float horizontalSpeed = (float) Math.sqrt(dx * dx + dz * dz);
+				float animationSpeedBase = isGunWalkSample(player, m.sprinting)
+						? GUN_WALK_ANIMATION_SPEED
+						: NORMAL_WALK_ANIMATION_SPEED;
 				m.walkAnimationSpeed = net.minecraft.util.math.MathHelper.clamp(
-						horizontalSpeed / 0.216F, 0.55F, 1.35F);
+						horizontalSpeed / animationSpeedBase, 0.55F, 1.35F);
 				m.walkPhase += 0.05F * m.walkAnimationSpeed;
 				if (m.walkPhase >= 1.0F) {
 					m.walkPhase -= 1.0F;
@@ -517,6 +605,13 @@ public class TkGunClient implements ClientModInitializer {
 			m.x = player.getX();
 			m.z = player.getZ();
 		}
+	}
+
+	private static boolean isGunWalkSample(AbstractClientPlayerEntity player,
+			boolean sprinting) {
+		return !sprinting && player.isOnGround()
+				&& TkGun.holdingGun(player) && !TkGun.isMeleeWeapon(player)
+				&& !GunClientState.dashing(player.getId());
 	}
 	/** 手持弩炮强制**越肩视角**：记住进枪之前是什么视角，枪一离手就还原。 */
 	private static boolean thirdPersonForced = false;
@@ -708,6 +803,15 @@ public class TkGunClient implements ClientModInitializer {
 		if (client.player == null) {
 			return;
 		}
+		if (!GunClientState.focusish(client.player.getId())
+				&& !com.tk.gun.client.rig.BowgunRigClient.hipAimFireReady(
+						client.player.getId())) {
+			if (why != null) {
+				TkGun.LOGGER.info(
+						"[mechaniciancombat] 左键被拒：腰射举枪/恢复动作未完成");
+			}
+			return;
+		}
 		double mx = muzzleX;
 		double my = muzzleY;
 		double mz = muzzleZ;
@@ -794,8 +898,17 @@ public class TkGunClient implements ClientModInitializer {
 				com.tk.gun.TkGunServer.STEEL_ARROW_IMPACT_ENTITY,
 				com.tk.gun.client.entity.SteelArrowImpactEntityRenderer::new);
 		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
+				com.tk.gun.TkGunServer.ARMOR_DRESSING_PERFORMER_ENTITY,
+				com.tk.gun.client.entity
+						.ArmorDressingPerformerRenderer::new);
+		net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry.register(
 				com.tk.gun.TkGunServer.SOUL_ANCHOR_ENTITY,
 				com.tk.gun.client.entity.SoulAnchorProjectileGeoRenderer::new);
+		if (!isNeoForgeRuntime()) {
+			net.fabricmc.fabric.api.client.rendering.v1.BlockEntityRendererRegistry.register(
+					com.tk.gun.TkGunServer.ARMOR_DRESSING_STATION_BLOCK_ENTITY,
+					context -> new ArmorDressingStationRenderer());
+		}
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
 				.register(com.tk.gun.TkGunParticles.HEAT_VENT, HeatVentParticle.Factory::new);
 		net.fabricmc.fabric.api.client.particle.v1.ParticleFactoryRegistry.getInstance()
@@ -859,7 +972,8 @@ public class TkGunClient implements ClientModInitializer {
 				(context, tickCounter) -> OffhandStorageHud.render(context));
 		// 越肩视角的准星：中间 `- . -` + 枪口那个圈圈
 		net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback.EVENT.register(
-				(context, tickCounter) -> GunReticle.render(context));
+				(context, tickCounter) -> GunReticle.render(
+						context, tickCounter.getTickDelta(false)));
 		SoulChainWorldRenderer.register();
 		AnchorLockParticleRenderer.register();
 		BackpackLockOnParticleRenderer.register();
@@ -970,22 +1084,30 @@ public class TkGunClient implements ClientModInitializer {
 								LocatorShriekBurst.Source.GUN,
 								new net.minecraft.util.math.Vec3d(
 										payload.x(), payload.y(), payload.z()))));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.ArmorDressingStatePayload.ID,
+				(payload, context) -> context.client().execute(
+						() -> ArmorDressingClientState.apply(payload)));
+		ClientPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.ArmorDressingMountPayload.ID,
+				(payload, context) -> context.client().execute(
+						() -> ArmorDressingClientState.applyMount(payload)));
 
-
-		com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
-		com.tk.gun.client.screen.BackpackModificationTableScreen.registerClientScreen();
+		if (!isNeoForgeRuntime()) {
+			com.tk.gun.client.screen.AmmoStorageScreen.registerClientScreen();
+			com.tk.gun.client.screen.BackpackModificationTableScreen
+					.registerClientScreen();
 			com.tk.gun.client.screen.ArmorModificationTableScreen.registerClientScreen();
-		com.tk.gun.client.screen.RecipeEditorScreen.registerClientScreen();
+			com.tk.gun.client.screen.RecipeEditorScreen.registerClientScreen();
+		}
 		for (com.tk.gun.item.CombatBackpackItem backpack :
 				com.tk.gun.TkGunServer.COMBAT_BACKPACKS) {
 			io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
 					backpack, com.tk.gun.client.CombatBackpackAccessoryRenderer::new);
 		}
-		io.wispforest.accessories.api.client.AccessoriesRendererRegistry.registerRenderer(
-				com.tk.gun.TkGunServer.MECHANICIAN_UNDERSUIT,
-				com.tk.gun.client.MechanicianUndersuitRenderer::new);
 		net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer.register(
 				new com.tk.gun.client.MechanicianArmorRenderer(),
+				com.tk.gun.TkGunServer.MECHANICIAN_UNDERSUIT,
 				com.tk.gun.TkGunServer.MECHANICIAN_CHESTPLATE,
 				com.tk.gun.TkGunServer.MECHANICIAN_LEGGINGS,
 				com.tk.gun.TkGunServer.MECHANICIAN_BOOTS);
@@ -1001,6 +1123,9 @@ public class TkGunClient implements ClientModInitializer {
 	}
 
 	private static void tick(MinecraftClient client) {
+		boolean ammoRingAlreadyHandled = ammoRingHandledThisTick;
+		ammoRingHandledThisTick = false;
+		boolean ammoRingPressed = AMMO_RING_KEY.wasPressed();
 		net.minecraft.resource.ResourceManager resourceManager =
 				client.getResourceManager();
 		if (resourceManager != lastResourceManager) {
@@ -1055,6 +1180,10 @@ public class TkGunClient implements ClientModInitializer {
 			soulAnchorSneakDown = false;
 				missileBoxHeld = false;
 			helmetToggleKeyDown = false;
+			armorStationUseDown = false;
+			armorStationSneakDown = false;
+			armorStationInventoryUiDown = false;
+			armorStationBackpackUiDown = false;
 			CombatBackpackClientState.resetAll();
 			JumpBackpackClientState.resetAll();
 				ArmorAbilityClientState.reset();
@@ -1068,6 +1197,7 @@ public class TkGunClient implements ClientModInitializer {
 				KineticSwordSparkClientState.clear();
 				RoundAttackClientState.clear();
 				CycloneClientState.clear();
+				ArmorDressingClientState.clearAll();
 			PlayerLocomotionAnimation.clearAll();
 			com.tk.gun.client.rig.PlayerLocomotionRigClient.clear();
 			com.tk.gun.client.rig.PlayerLocomotionPoseBridge.clear();
@@ -1075,8 +1205,39 @@ public class TkGunClient implements ClientModInitializer {
 			com.tk.gun.client.rig.BowgunRigClient.clear();
 			return;
 		}
+		ArmorDressingClientState.tick(client);
+		if (ArmorDressingClientState.locksInput(client.player.getId())) {
+			// PlayerAnimator owns the authored dressing pose. Polling input in
+			// this tick would otherwise still fire weapons, hotkeys and backpack
+			// actions even though FocusInputLockMixin cancelled vanilla input.
+			attackHeldTicks = 0;
+			attackWasDown = false;
+			meleeAttackDown = false;
+			backpackActionDown = false;
+			missileBoxHeld = false;
+			soulAnchorKeyDown = false;
+			soulAnchorSneakDown = false;
+			rollKeyDown = false;
+			reloadKeyDown = false;
+			jumpKeyDown = false;
+			focusKeyDown = false;
+			helmetToggleKeyDown = false;
+			kineticSwordSpecialPacketShotSeq = -1;
+			return;
+		}
+		if (handleMountedStationInput(client)) {
+			return;
+		}
+		if (ArmorDressingClientState.holdsCameraSession(
+				client.player.getId())) {
+			return;
+		}
+		tickArmorStationExtendedUse(client);
 		// Backpack X is intentionally handled before focus, roll, reload and other
 		// state-specific input so those input locks cannot consume or suppress it.
+		if (!ammoRingAlreadyHandled && ammoRingPressed) {
+			openAmmoRing(client, "keybinding_fallback");
+		}
 		handleBackpackActionKey(client);
 		tickSoulAnchorInput(client);
 		InputUtil.Key helmetKey = bindingKey(
@@ -1572,6 +1733,105 @@ public class TkGunClient implements ClientModInitializer {
 		} catch (Throwable t) {
 			return false;
 		}
+	}
+
+	private static boolean isNeoForgeRuntime() {
+		try {
+			Class.forName("net.neoforged.fml.ModList", false,
+					TkGunClient.class.getClassLoader());
+			return true;
+		} catch (ClassNotFoundException ignored) {
+			return false;
+		}
+	}
+
+	private static void tickArmorStationExtendedUse(MinecraftClient client) {
+		boolean down = client.currentScreen == null
+				&& client.player != null
+				&& client.options.useKey.isPressed();
+		if (down && !armorStationUseDown
+				&& client.crosshairTarget
+						instanceof BlockHitResult hit
+				&& client.world != null
+				&& client.world.getBlockState(hit.getBlockPos())
+						.isOf(com.tk.gun.TkGunServer
+								.ARMOR_DRESSING_STATION)) {
+			Vec3d center = Vec3d.ofCenter(hit.getBlockPos());
+			Vec3d offset = hit.getPos().subtract(center);
+			boolean outsideVanillaBlockCheck =
+					Math.abs(offset.x) >= 1.0000001D
+					|| Math.abs(offset.y) >= 1.0000001D
+					|| Math.abs(offset.z) >= 1.0000001D;
+			if (outsideVanillaBlockCheck) {
+				ClientPlayNetworking.send(
+						new com.tk.gun.net.ArmorDressingInteractPayload(
+								hit.getBlockPos(), 0));
+			}
+		}
+		armorStationUseDown = down;
+	}
+
+	private static boolean handleMountedStationInput(MinecraftClient client) {
+		BlockPos stationPos = ArmorDressingClientState.mountedStationPos(
+				client.player == null ? -1 : client.player.getId());
+		if (stationPos == null) {
+			armorStationSneakDown = false;
+			armorStationInventoryUiDown = false;
+			armorStationBackpackUiDown = false;
+			return false;
+		}
+		boolean sneak = client.options.sneakKey.isPressed();
+		if (sneak && !armorStationSneakDown) {
+			ClientPlayNetworking.send(
+					new com.tk.gun.net.ArmorDressingDismountPayload());
+		}
+		armorStationSneakDown = sneak;
+
+		InputUtil.Key inventoryKey = bindingKey(
+				client.options.inventoryKey, GLFW.GLFW_KEY_E);
+		InputUtil.Key stationKey = bindingKey(
+				BACKPACK_ACTION_KEY, GLFW.GLFW_KEY_X);
+		boolean inventoryKeyDown = isInputDown(client, inventoryKey);
+		boolean stationKeyDown = isInputDown(client, stationKey);
+		boolean gameplayScreen = client.currentScreen == null;
+		if (gameplayScreen
+				&& inventoryKeyDown && !armorStationInventoryUiDown) {
+			toggleMountedStationPage(client, stationPos, 0);
+		}
+		if (gameplayScreen
+				&& stationKeyDown && !armorStationBackpackUiDown) {
+			toggleMountedStationPage(client, stationPos, 1);
+		}
+		armorStationInventoryUiDown = inventoryKeyDown;
+		armorStationBackpackUiDown = stationKeyDown;
+		backpackActionDown = stationKeyDown;
+		return true;
+	}
+
+	public static void suppressMountedStationUiKey(int page) {
+		if (page == 0) {
+			armorStationInventoryUiDown = true;
+		} else {
+			armorStationBackpackUiDown = true;
+		}
+	}
+
+	private static void toggleMountedStationPage(MinecraftClient client,
+			BlockPos stationPos, int page) {
+		boolean armorPage = client.currentScreen
+				instanceof com.tk.gun.client.screen
+						.ArmorModificationTableScreen;
+		boolean backpackPage = client.currentScreen
+				instanceof com.tk.gun.client.screen
+						.BackpackModificationTableScreen;
+		if ((page == 0 && armorPage) || (page == 1 && backpackPage)) {
+			client.player.closeHandledScreen();
+			client.setScreen(null);
+			return;
+		}
+		ClientPlayNetworking.send(
+				new com.tk.gun.net.ArmorDressingInteractPayload(
+						stationPos, page));
 	}
 
 }

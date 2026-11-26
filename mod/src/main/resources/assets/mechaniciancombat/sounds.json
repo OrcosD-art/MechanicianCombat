@@ -480,6 +480,22 @@
                                         }
                                     ]
                      },
+    "armor_dressing_charge":  {
+                                  "sounds":  [
+                                                 {
+                                                     "name":  "mechaniciancombat:armor_dressing_charge",
+                                                     "stream":  false
+                                                 }
+                                             ]
+                              },
+    "armor_dressing_bolt":  {
+                                "sounds":  [
+                                               {
+                                                   "name":  "mechaniciancombat:armor_dressing_bolt",
+                                                   "stream":  false
+                                               }
+                                           ]
+                            },
     "chain":  {
                   "sounds":  [
                                  {

@@ -175,6 +175,22 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 								  VertexConsumerProvider bufferSource, VertexConsumer buffer, boolean isReRender,
 								  float partialTick, int packedLight, int packedOverlay, int colour) {
 		String name = bone.getName();
+		String activeAnimation = animatable.currentUpperAnimation() != null
+				? animatable.currentUpperAnimation()
+				: animatable.currentAnimation();
+		if ("Great_sword".equals(name)
+				&& com.tk.gun.client.LocomotionIsolationDebug
+						.freezeGreatSwordWalk()
+				&& activeAnimation != null
+				&& activeAnimation.startsWith("GS_walk_")) {
+			// Visual A/B: GS_walk_* first-frame authored pose.
+			bone.setPosX(3.4588039F);
+			bone.setPosY(2.0F);
+			bone.setPosZ(-6.6934371F);
+			bone.setRotX((float) Math.toRadians(-90.0D));
+			bone.setRotY((float) Math.toRadians(-67.5D));
+			bone.setRotZ(0.0F);
+		}
 		Entity renderedEntity = getCurrentEntity();
 		KineticSwordRotateEffect.apply(bone, renderedEntity,
 				animatable.currentAnimation(), partialTick);
@@ -184,6 +200,26 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		}
 		boolean currentFrame = !isReRender && renderedEntity != null;
 		boolean local = currentFrame && renderedEntity == MinecraftClient.getInstance().player;
+		if ("body".equals(name)
+				&& renderedEntity instanceof net.minecraft.entity.player.PlayerEntity) {
+			// GeckoLib preserves bones/channels omitted by the next animation.
+			// Reset root translation/rotation only when neither the base clip nor
+			// the upper clip owns that channel. This prevents sliding/landing Y
+			// offsets and run pitch from leaking into idle without flattening
+			// authored crouch, jump or airborne poses.
+			if (!animationOwnsBodyChannel(
+					renderedEntity, animatable, "body.position")) {
+				bone.setPosX(0.0F);
+				bone.setPosY(0.0F);
+				bone.setPosZ(0.0F);
+			}
+			if (!animationOwnsBodyChannel(
+					renderedEntity, animatable, "body.rotation")) {
+				bone.setRotX(0.0F);
+				bone.setRotY(0.0F);
+				bone.setRotZ(0.0F);
+			}
+		}
 		BowgunCloseCombatEffectLayer.applyScheduledVisibility(
 				bone, renderedEntity, partialTick,
 				animatable.currentUpperAnimation(),
@@ -235,7 +271,9 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 		}
 		boolean chestBobTransform = false;
 		float chestBobPx = 0.0F;
-		if (CHEST_BONE.equals(name)) {
+		if (com.tk.gun.client.LocomotionIsolationDebug
+				.manualChestBobEnabled()
+				&& CHEST_BONE.equals(name)) {
 			float bobWeight = TkGunClient.walkBobWeight(poseEntity.getId());
 			String walk = TkGunClient.walkAnimation(poseEntity.getId());
 			boolean authoredUpperWalk = bodyLocked && walk != null
@@ -603,8 +641,11 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 							bone.getPivotZ())));
 		}
 		GunClientState.Entry entry = GunClientState.get(player.getId());
-		boolean secondaryMotion = entry == null
-				|| entry.state == TkGun.State.IDLE && !entry.airborneIdle;
+		boolean secondaryMotion =
+				com.tk.gun.client.LocomotionIsolationDebug
+						.secondaryMotionEnabled()
+				&& (entry == null
+				|| entry.state == TkGun.State.IDLE && !entry.airborneIdle);
 		Map<String, BowgunPlayerAnimatorPose.BonePose> smoothed =
 				PlayerLocomotionSmoother.smoothWeapon(
 						player, raw, partialTick, secondaryMotion);
@@ -638,6 +679,18 @@ public class BowgunRigRenderer extends GeoReplacedEntityRenderer<AbstractClientP
 				|| e.state == TkGun.State.FORTRESS_SKILL_READY_GATHER
 				|| e.state == TkGun.State.FORTRESS_SKILL_GATHER
 				|| e.state == TkGun.State.FORTRESS_SKILL_HIT);
+	}
+
+	private static boolean animationOwnsBodyChannel(
+			Entity entity, BowgunRig animatable, String channel) {
+		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)) {
+			return false;
+		}
+		var resource = TkGun.definition(player).animationResource();
+		return BowgunPlayerAnimatorPose.hasChannel(
+					resource, animatable.currentAnimation(), channel)
+				|| BowgunPlayerAnimatorPose.hasChannel(
+					resource, animatable.currentUpperAnimation(), channel);
 	}
 
 	// 2026-10-17：**第四十二/四十三轮的 chest 俯仰补偿整段撤销**（用户："撤销 42 与 43 轮俯仰角的修正"）。

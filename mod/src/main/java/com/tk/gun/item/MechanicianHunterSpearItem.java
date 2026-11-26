@@ -49,6 +49,7 @@ public final class MechanicianHunterSpearItem extends Item implements GeoItem {
 				.formatted(Formatting.GRAY));
 		tooltip.add(Text.translatable("tooltip.mechaniciancombat.hunter_spear.return")
 				.formatted(Formatting.GRAY));
+		WeaponControlTooltips.addHunterSpearControls(tooltip);
 	}
 
 	@Override

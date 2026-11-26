@@ -142,7 +142,7 @@ public class BulletEntity extends Entity {
 					LivingEntity.class, search,
 					e -> e.getId() != getId() && e.getId() != ownerId
 							&& e.isAlive() && !e.isSpectator() && e.canHit()
-							&& !CombatTargeting.isGolem(e));
+							&& CombatTargeting.isTargetable(e));
 			Vec3d guided = guidedDirection(
 					guidedWorld, from, currentDirection, roseCandidates);
 			if (guided.squaredDistanceTo(currentDirection) > 1.0E-12D) {
@@ -275,7 +275,7 @@ public class BulletEntity extends Entity {
 	private boolean isRoseTargetValid(LivingEntity target, Vec3d from, Vec3d direction) {
 		if (target == null || target.isRemoved() || !target.isAlive()
 				|| target.isSpectator() || !target.canHit()
-				|| CombatTargeting.isGolem(target)) {
+				|| !CombatTargeting.isTargetable(target)) {
 			return false;
 		}
 		Vec3d offset = target.getBoundingBox().getCenter().subtract(from);

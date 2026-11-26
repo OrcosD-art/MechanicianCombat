@@ -16,6 +16,7 @@
     "FireworkRocketEntityAccessor",
     "OffhandSwapGuardMixin",
     "OffhandPlacementGuardMixin",
+    "PlayerArmorEquipGuardMixin",
     "BackpackFireworkSelfDamageMixin",
     "PlayerBackpackAmmoSlotMixin",
     "ScreenHandlerAddSlotAccessor",

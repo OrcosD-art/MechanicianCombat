@@ -5,6 +5,8 @@ import net.minecraft.component.type.NbtComponent;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
 
+import java.util.UUID;
+
 /** Persistent installed-component flags stored on a Combat Backpack item. */
 public final class BackpackUpgradeData {
 	public enum LauncherType {
@@ -27,6 +29,8 @@ public final class BackpackUpgradeData {
 			"mechaniciancombat_backpack_golem_capsule";
 	private static final String GOLEM_CAPSULE_SLOT =
 			"mechaniciancombat_backpack_golem_capsule_slot";
+	private static final String WORKSTATION_BINDING =
+			"mechaniciancombat_backpack_workstation_binding";
 
 	public static boolean hasCore(ItemStack backpack) {
 		return isBackpack(backpack) && customData(backpack).getBoolean(CORE);
@@ -56,6 +60,29 @@ public final class BackpackUpgradeData {
 	public static boolean hasGolemCapsule(ItemStack backpack) {
 		return isBackpack(backpack)
 				&& customData(backpack).getBoolean(GOLEM_CAPSULE);
+	}
+
+	public static UUID workstationBinding(ItemStack backpack) {
+		if (!isBackpack(backpack)) {
+			return null;
+		}
+		NbtCompound data = customData(backpack);
+		return data.containsUuid(WORKSTATION_BINDING)
+				? data.getUuid(WORKSTATION_BINDING) : null;
+	}
+
+	public static void setWorkstationBinding(ItemStack backpack,
+			UUID binding) {
+		if (!isBackpack(backpack)) {
+			return;
+		}
+		NbtComponent.set(DataComponentTypes.CUSTOM_DATA, backpack, nbt -> {
+			if (binding == null) {
+				nbt.remove(WORKSTATION_BINDING);
+			} else {
+				nbt.putUuid(WORKSTATION_BINDING, binding);
+			}
+		});
 	}
 
 	public static boolean canSummonGolems(ItemStack backpack) {

@@ -1,6 +1,8 @@
 package com.tk.gun.client;
 
 import com.tk.gun.item.MechanicianArmorItem;
+import com.tk.gun.item.MechanicianArmorPiece;
+import com.tk.gun.item.MechanicianUndersuitItem;
 import net.fabricmc.fabric.api.client.rendering.v1.ArmorRenderer;
 import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.entity.model.BipedEntityModel;
@@ -16,12 +18,27 @@ public final class MechanicianArmorRenderer implements ArmorRenderer {
 					   ItemStack stack, LivingEntity entity, EquipmentSlot slot,
 					   int light,
 					   BipedEntityModel<LivingEntity> baseModel) {
-		if (!(stack.getItem() instanceof MechanicianArmorItem item)) {
-			return;
-		}
 		float limbAngle = entity.limbAnimator.getPos();
 		float limbDistance = entity.limbAnimator.getSpeed();
 		float headYaw = entity.getHeadYaw() - entity.getBodyYaw();
+		if (stack.getItem() instanceof MechanicianUndersuitItem) {
+			MechanicianArmorGeometry.renderAll(
+					MechanicianArmorPiece.UNDERSUIT, matrices, consumers,
+					baseModel, light, entity, limbAngle, limbDistance,
+					headYaw);
+			if (MechanicianUndersuitItem.isWearingOuterSet(entity)) {
+				HelmetClientState.Pose pose =
+						HelmetClientState.pose(entity);
+				MechanicianArmorGeometry.renderHelmet(
+						matrices, consumers, baseModel, light, entity,
+						limbAngle, limbDistance, headYaw,
+						pose.animation(), pose.seconds());
+			}
+			return;
+		}
+		if (!(stack.getItem() instanceof MechanicianArmorItem item)) {
+			return;
+		}
 		switch (item.piece()) {
 			case CHESTPLATE -> MechanicianArmorGeometry.render(
 					item.piece(), stack, matrices, consumers, baseModel, light, entity,

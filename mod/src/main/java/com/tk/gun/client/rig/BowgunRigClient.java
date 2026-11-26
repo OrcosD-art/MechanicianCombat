@@ -64,6 +64,16 @@ public final class BowgunRigClient {
 				? activeAnimation(player) : null;
 	}
 
+	public static boolean hipAimFireReady(int entityId) {
+		for (RigBundle bundle : RIGS.values()) {
+			if (bundle.player().getId() == entityId
+					&& bundle.player() == bundle.animatable().player()) {
+				return bundle.animatable().hipAimFireReady();
+			}
+		}
+		return true;
+	}
+
 	public static void clear() {
 		RIGS.clear();
 	}

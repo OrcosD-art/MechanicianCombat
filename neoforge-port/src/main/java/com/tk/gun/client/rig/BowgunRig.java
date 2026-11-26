@@ -811,6 +811,12 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return PlayState.STOP;
 		}
 		String name = entity == null ? null : upperAnimationFor(entity);
+		String hipPoseName = entity == null ? null
+				: pickHipAimPose(entity,
+						GunClientState.get(entity.getId()));
+		if (hipPoseName != null) {
+			name = hipPoseName;
+		}
 		state.setControllerSpeed(1.0F);
 		// 诊断（用户 2026-10-17："蹲射结束 / 冲刺窗口 + 疾跑 + 装填时上半身换弹动作不完整"）：
 		// 换弹还没结束时上层就离开 `reload_upper` = 动画被切断。正常这段里名字应该一直是它。
@@ -861,7 +867,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (changed) {
 			upperName = play;
 			state.getController().transitionLength(
-					"skill_load_focus_upper".equals(play) ? 0 : 1);
+					"skill_load_focus_upper".equals(play)
+							|| isHipAimTransition(play) ? 0 : 1);
 			return state.setAndContinue(RawAnimation.begin().thenPlayAndHold(play));
 		}
 		if (newShot) {
@@ -879,6 +886,93 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return state.setAndContinue(RawAnimation.begin().thenPlayAndHold(play));
 		}
 		return state.setAndContinue(rawFor(play));
+	}
+
+	private String pickHipAimPose(Entity entity, GunClientState.Entry entry) {
+		if (!(entity instanceof net.minecraft.entity.player.PlayerEntity player)
+				|| entry == null || TkGun.isMeleeWeapon(player)
+				|| GunClientState.focusish(entity.getId())
+				|| entry.state != TkGun.State.IDLE
+						&& entry.state != TkGun.State.FIRE) {
+			resetHipAimPose();
+			return null;
+		}
+
+		long now = player.getWorld().getTime();
+		boolean holding = holdingGunUp(entity);
+		boolean firing = entry.active() && entry.state == TkGun.State.FIRE;
+
+		if (hipAimPose == HipAimPose.LOWERING
+				&& now - hipAimPoseStartedAt >= TkGun.HIP_AIM_LOWER_TICKS) {
+			hipAimPose = HipAimPose.LOWERED;
+		}
+		if (hipAimPose == HipAimPose.RAISING
+				&& now - hipAimPoseStartedAt >= TkGun.HIP_AIM_RAISE_TICKS) {
+			hipAimPose = HipAimPose.READY;
+		}
+		if (hipAimPose == HipAimPose.RESUMING
+				&& now - hipAimPoseStartedAt >= hipAimResumeTicks) {
+			hipAimPose = HipAimPose.READY;
+		}
+
+		if (holding && !hipAimHeldLast) {
+			if (hipAimPose == HipAimPose.LOWERING) {
+				int elapsed = (int) Math.max(0L,
+						now - hipAimPoseStartedAt);
+				if (elapsed <= 0) {
+					hipAimPose = HipAimPose.READY;
+				} else {
+					hipAimResumeTicks = Math.min(
+							TkGun.HIP_AIM_LOWER_TICKS, elapsed);
+					hipAimPose = HipAimPose.RESUMING;
+					hipAimPoseStartedAt = now;
+				}
+			} else if (hipAimPose == HipAimPose.LOWERED) {
+				hipAimPose = HipAimPose.RAISING;
+				hipAimPoseStartedAt = now;
+			}
+		}
+		if (!holding && !firing
+				&& (hipAimPose == HipAimPose.RAISING
+				|| hipAimPose == HipAimPose.READY
+				|| hipAimPose == HipAimPose.RESUMING)) {
+			hipAimPose = HipAimPose.LOWERING;
+			hipAimPoseStartedAt = now;
+		}
+		hipAimHeldLast = holding;
+
+		if (firing) {
+			return null;
+		}
+		return switch (hipAimPose) {
+			case RAISING -> "idle-to_stand_shooting";
+			case READY -> "stand_shooting_hold";
+			case RESUMING -> "stand_shooting_resume_"
+					+ Math.max(1, Math.min(
+							TkGun.HIP_AIM_LOWER_TICKS,
+							hipAimResumeTicks));
+			case LOWERING -> "stand_shooting_back-idle";
+			case LOWERED -> null;
+		};
+	}
+
+	public boolean hipAimFireReady() {
+		return hipAimPose == HipAimPose.READY;
+	}
+
+	private void resetHipAimPose() {
+		hipAimPose = HipAimPose.LOWERED;
+		hipAimHeldLast = false;
+		hipAimPoseStartedAt = 0L;
+		hipAimResumeTicks = 0;
+	}
+
+	private static boolean isHipAimTransition(String animation) {
+		return "idle-to_stand_shooting".equals(animation)
+				|| "stand_shooting_hold".equals(animation)
+				|| "stand_shooting_back-idle".equals(animation)
+				|| animation != null
+						&& animation.startsWith("stand_shooting_resume_");
 	}
 
 	/**
@@ -969,7 +1063,8 @@ public final class BowgunRig implements GeoReplacedEntity {
 			return PlayState.STOP;
 		}
 		net.minecraft.util.Identifier gunId = TkGun.definition(player).id();
-		if (!gunId.equals(TkGun.id("abyssal_ancient_cannon"))
+		if (!gunId.equals(TkGun.id("bowgun"))
+				&& !gunId.equals(TkGun.id("abyssal_ancient_cannon"))
 				&& !gunId.equals(TkGun.id("veritas_et_justitia"))) {
 			return PlayState.STOP;
 		}
@@ -977,17 +1072,14 @@ public final class BowgunRig implements GeoReplacedEntity {
 		if (entry == null) {
 			return PlayState.STOP;
 		}
-		// Focus_shooting* already animates the complete gun subtree. A later
-		// gun_pose controller must not replace its recoil with a static pose.
-		if (entry.state == TkGun.State.FIRE) {
-			return PlayState.STOP;
-		}
-		// Silent Storm's Focus_hold is already the canonical Fortress aim pose.
-		// Applying its source-only open clip afterwards shifts the assembled gun.
-		boolean silentStorm = gunId.equals(TkGun.id("abyssal_ancient_cannon"));
-		if (silentStorm && entry.state == TkGun.State.AIM_HOLD) {
+		// Focus_shooting* and stand_shooting retain the BG261015 gun-root recoil.
+		// open/close only carry the folding mechanisms below that root, so they
+		// can remain active while the base fire animation plays.
+		if (entry.state == TkGun.State.FIRE
+				|| entry.state == TkGun.State.AIM_HOLD) {
+			state.getController().transitionLength(0);
 			return state.setAndContinue(
-					rawFor("silent_storm_open_static"));
+					rawFor(entry.focus ? "open" : "close"));
 		}
 		if (!GunClientState.focusish(entity.getId())
 				&& "run".equals(TkGunClient.walkAnimation(entity.getId()))) {
@@ -995,9 +1087,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 			// canonical Fortress gun keys. Applying the separate folded pose here
 			// would override those keys and tilt the gun differently.
 			return PlayState.STOP;
-		}
-		if (!silentStorm && entry.state == TkGun.State.AIM_HOLD && entry.focus) {
-			return state.setAndContinue(rawFor("open"));
 		}
 		boolean nonFocusDodge = switch (entry.state) {
 			case ROLL, ROLL_TO_IDLE, SLIDE, SLIDE_READY -> true;
@@ -1011,13 +1100,12 @@ public final class BowgunRig implements GeoReplacedEntity {
 						|| entry.state == TkGun.State.SLIDE_READY)) {
 			return state.setAndContinue(rawFor("open"));
 		}
-		boolean hipAiming = holdingGunUp(entity);
 		// The accelerated run is a complete authored locomotion clip, including
 		// the gun subtree. gun_pose is registered after the rig controller, so
 		// applying the folded "close" pose here overrides the authored gun
 		// position/rotation for the entire dash window.
 		if (!isVeritasAcceleratedRun(entity, entry)
-				&& !GunClientState.focusish(entity.getId()) && !hipAiming
+				&& !GunClientState.focusish(entity.getId())
 				&& (entry.state == TkGun.State.IDLE || nonFocusDodge)) {
 			// Non-focus locomotion and every dodge/recovery phase keep the
 			// folded gun pose. Upper/body control remains independent.
@@ -1030,6 +1118,17 @@ public final class BowgunRig implements GeoReplacedEntity {
 
 	/** upper 控制器当前在播哪一段（换段才给新实例）。 */
 	private String upperName;
+	private enum HipAimPose {
+		LOWERED,
+		RAISING,
+		READY,
+		LOWERING,
+		RESUMING
+	}
+	private HipAimPose hipAimPose = HipAimPose.LOWERED;
+	private boolean hipAimHeldLast;
+	private long hipAimPoseStartedAt;
+	private int hipAimResumeTicks;
 	/** 本次装填用不用"只叠上半身"（**装填开始那一刻**定死，避免中途切换导致动画重播）。 */
 	/** 上面这个值本轮装填定过没有（装填结束时清掉，下一次重新判定）。 */
 
@@ -1624,37 +1723,26 @@ public final class BowgunRig implements GeoReplacedEntity {
 					return play(state, name);
 				}
 				case AIM:
-					// 部署 = 播 Focus_ready 整段（结尾就是作者那个架枪姿势），倍速见 animationSpeed()
 					return play(state, "Focus_ready");
 				case AIM_FAST:
-					// 换弹收尾 / 其他快速举枪仍用滑铲快档。
+				case AIM_SLIDE:
+					// Restore the original quick-deploy clip for every gun.
 					return play(state, "sliding_fast_ready");
 				case AIM_ROLL:
-					// 用户 2026-10-18："将翻滚时蹲射的快速动画改为 `rolling_fast_ready`"。
+					// Restore the original roll-deploy clip for every gun.
 					return play(state, "rolling_fast_ready");
-				case AIM_SLIDE:
-					// 滑铲里按 Z 抢枪 / 滑铲中点 Z 中断 → 作者新加的 `sliding_fast_ready`（用户 2026-10-17）。
-					return play(state, "sliding_fast_ready");
 				case AIM_HOLD:
 					// 打完一发的"保持"：**什么都不换**，停在上一段射击动画的最后一帧
 					// （用户 2026-10-13："射击完保持尾针，别做成收枪动作"）。
 					// ⚠️ 这里必须是 CONTINUE：换成 play(...) 会从头重播那段（= 又变成"举枪动作"），
 					//    而 STOP 更糟（GeckoLib 会把整模型弹回 geo 初始姿势）。
-					// 快速蹲射的尾帧必须优先于移动判断：滑铲残余惯性即使晚一 tick 才清掉，
-					// 也不能在这里插入 walk_* 或 Focus_hold，否则会再次取样 sliding_fast_ready。
-					if (e != null && e.readyHoldAnimation != null) {
-						return play(state, e.readyHoldAnimation);
-					}
-					// 一动方向键立刻脱离，进 run（和服务器那边 stopAim 的判定一致）。
-					if (TkGunClient.isMoving(entity.getId())) {
-						return play(state, walkOrIdle(entity));
-					}
-					if (stillAndWasWalking(entity, e)) {
-						return play(state, walkOrIdle(entity));
-					}
+					// Focus itself locks movement before the rig is sampled. Raw
+					// WASD may still be pressed without producing motion, so using
+					// it here would inject walk_front over the deployment tail.
 					// **架枪保持 = 播 `Focus` 循环**（2026-10-17 用户给了这段循环动画，专门用来防
 					// "专注姿势被 idle 之类顶掉"）。以前这里是 CONTINUE（保持上一发尾帧），
 					// 状态包稍有偏差就会掉回 idle。
+					state.getController().transitionLength(0);
 					return e == null
 							? play(state, "Focus_hold")
 							: play(state, TkGun.focusHoldAnimation(e.shotIndex, e.maxShotIndex));
@@ -1717,11 +1805,6 @@ public final class BowgunRig implements GeoReplacedEntity {
 				default:
 					break;
 			}
-		}
-		// 客户端短状态先于服务端 AIM_HOLD 过期时，仍保持快速预备动画的尾帧，
-		// 不在 IDLE 与 Focus_hold 之间切换。首次射击会把该标记清掉。
-		if (e != null && e.readyHoldAnimation != null && GunClientState.focusish(entity.getId())) {
-			return play(state, e.readyHoldAnimation);
 		}
 		if (entity instanceof net.minecraft.entity.player.PlayerEntity player) {
 			// 走路 = 四个方向的 walk_*（作者 2026-10-14 新加的），疾跑 = run。

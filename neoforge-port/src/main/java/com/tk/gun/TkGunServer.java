@@ -76,13 +76,11 @@ public class TkGunServer implements ModInitializer {
 	public static Item KINETIC_SWORD;
 	public static Item BOLT;
 	public static Item HUNTER_SPEAR;
-	public static net.minecraft.block.Block BACKPACK_MODIFICATION_TABLE;
-	public static net.minecraft.item.BlockItem BACKPACK_MODIFICATION_TABLE_ITEM;
+	public static net.minecraft.block.Block ARMOR_DRESSING_STATION;
+	public static net.minecraft.item.BlockItem ARMOR_DRESSING_STATION_ITEM;
 	public static net.minecraft.block.entity.BlockEntityType<
-			com.tk.gun.block.BackpackModificationTableBlockEntity>
-			BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
-	public static net.minecraft.block.Block ARMOR_MODIFICATION_TABLE;
-	public static net.minecraft.item.BlockItem ARMOR_MODIFICATION_TABLE_ITEM;
+			com.tk.gun.block.ArmorDressingStationBlockEntity>
+			ARMOR_DRESSING_STATION_BLOCK_ENTITY;
 	public static net.minecraft.block.Block ARCANE_ALLOY_BLOCK;
 	public static net.minecraft.item.BlockItem ARCANE_ALLOY_BLOCK_ITEM;
 	public static com.tk.gun.item.CombatBackpackItem COMBAT_BACKPACK;
@@ -280,6 +278,7 @@ public class TkGunServer implements ModInitializer {
 		double jumpMoveX;
 		double jumpMoveZ;
 		boolean jumpHovering;
+		boolean jumpSneakCancelled;
 		boolean jumpThrustSoundPlayed;
 		long lastJumpThrustSoundAt;
 		boolean missileAiming;
@@ -289,6 +288,8 @@ public class TkGunServer implements ModInitializer {
 		long missileNextShotAt;
 		int missileShotIndex;
 		final java.util.List<UUID> missileTargets = new java.util.ArrayList<>();
+		final java.util.List<UUID> missileMarkedTargets =
+				new java.util.ArrayList<>();
 		final double[] missilePorts = new double[18];
 		double missileHalfHorizontalTan;
 		double missileHalfVerticalTan;
@@ -297,7 +298,8 @@ public class TkGunServer implements ModInitializer {
 	private static final class MissileTracker {
 		final ServerWorld world;
 		final UUID projectileUuid;
-		final int targetEntityId;
+		int targetEntityId;
+		final UUID ownerUuid;
 		final long expiresAt;
 		final Vec3d coldOrigin;
 		final Vec3d coldDirection;
@@ -308,12 +310,13 @@ public class TkGunServer implements ModInitializer {
 		boolean descending;
 
 		private MissileTracker(ServerWorld world, UUID projectileUuid,
-							   int targetEntityId, long expiresAt,
+							   int targetEntityId, UUID ownerUuid, long expiresAt,
 							   Vec3d coldOrigin, Vec3d coldDirection,
 							   long launchedAt) {
 			this.world = world;
 			this.projectileUuid = projectileUuid;
 			this.targetEntityId = targetEntityId;
+			this.ownerUuid = ownerUuid;
 			this.expiresAt = expiresAt;
 			this.coldOrigin = coldOrigin;
 			this.coldDirection = coldDirection;
@@ -439,6 +442,11 @@ public class TkGunServer implements ModInitializer {
 		public long aimLockUntil;
 		/** 这段时间内右键 = 快速部署（滑铲/收势后短时间内有效） */
 		public long fastAimUntil;
+		/** Hip-fire raise/return transition timestamps. */
+		public boolean hipAimUsingLast;
+		public long hipAimReadyAt;
+		public long hipAimLowerStartedAt;
+		public long hipAimLowerUntil;
 		/** 专注模式标记。按 Z 切换；开火后用于恢复架枪姿势，退出时播放 Focus_over。 */
 		public boolean deployed;
 		/** 滑铲方向（起铲时定下来） */
@@ -733,6 +741,8 @@ public class TkGunServer implements ModInitializer {
 			HUNTER_SPEAR_RETURN_ENTITY;
 	public static EntityType<com.tk.gun.entity.SteelArrowImpactEntity>
 			STEEL_ARROW_IMPACT_ENTITY;
+	public static EntityType<com.tk.gun.entity.ArmorDressingPerformerEntity>
+			ARMOR_DRESSING_PERFORMER_ENTITY;
 	public static EntityType<com.tk.gun.entity.MoltenGolemEntity> MOLTEN_GOLEM;
 	public static EntityType<com.tk.gun.entity.WarBannerEntity> WAR_BANNER_ENTITY;
 	public static EntityType<com.tk.gun.entity.SoulAnchorEntity>
@@ -867,11 +877,8 @@ public class TkGunServer implements ModInitializer {
 		MECHANICIAN_UNDERSUIT = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.ITEM, TkGun.id("mechanician_undersuit"),
 				new com.tk.gun.item.MechanicianUndersuitItem(
-						new Item.Settings().maxCount(1)));
-		io.wispforest.accessories.api.AccessoriesAPI.registerAccessory(
-				MECHANICIAN_UNDERSUIT,
-				(io.wispforest.accessories.api.Accessory)
-						MECHANICIAN_UNDERSUIT);
+						com.tk.gun.item.MechanicianUndersuitItem
+								.createSettings()));
 		MECHANICIAN_CHESTPLATE = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.ITEM, TkGun.id("mechanician_chestplate"),
 				new com.tk.gun.item.MechanicianArmorItem(
@@ -919,11 +926,30 @@ public class TkGunServer implements ModInitializer {
 	 */
 	private static void enforceArmorRequirement(MinecraftServer server) {
 		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
-			if (com.tk.gun.item.MechanicianUndersuitItem.isEquipped(player)) {
-				continue;
+			migrateUndersuitAccessory(player);
+			boolean hasUndersuit = com.tk.gun.item.MechanicianUndersuitItem
+					.isEquipped(player);
+			boolean fullLegacySet = com.tk.gun.item.MechanicianUndersuitItem
+					.isWearingOuterSet(player);
+			ItemStack head = player.getEquippedStack(
+					net.minecraft.entity.EquipmentSlot.HEAD);
+			if (com.tk.gun.item.ArmorUpgradeData.isStationLocked(head)) {
+				com.tk.gun.item.ArmorUpgradeData.setStationLocked(
+						head, false);
+			}
+			if (hasUndersuit && fullLegacySet) {
+				for (net.minecraft.entity.EquipmentSlot slot :
+						new net.minecraft.entity.EquipmentSlot[]{
+								net.minecraft.entity.EquipmentSlot.CHEST,
+								net.minecraft.entity.EquipmentSlot.LEGS,
+								net.minecraft.entity.EquipmentSlot.FEET}) {
+					com.tk.gun.item.ArmorUpgradeData.setStationLocked(
+							player.getEquippedStack(slot), true);
+				}
 			}
 			for (net.minecraft.entity.EquipmentSlot slot :
 					new net.minecraft.entity.EquipmentSlot[]{
+							net.minecraft.entity.EquipmentSlot.HEAD,
 							net.minecraft.entity.EquipmentSlot.CHEST,
 							net.minecraft.entity.EquipmentSlot.LEGS,
 							net.minecraft.entity.EquipmentSlot.FEET}) {
@@ -932,15 +958,61 @@ public class TkGunServer implements ModInitializer {
 						instanceof com.tk.gun.item.MechanicianArmorItem)) {
 					continue;
 				}
+				if (hasUndersuit) {
+					if (fullLegacySet) {
+						com.tk.gun.item.ArmorUpgradeData
+								.setStationLocked(equipped, true);
+					}
+					continue;
+				}
 				ItemStack removed = equipped.copy();
-				player.equipStack(slot, ItemStack.EMPTY);
+				com.tk.gun.ArmorEquipmentTransaction.begin(player);
+				try {
+					player.equipStack(slot, ItemStack.EMPTY);
+				} finally {
+					com.tk.gun.ArmorEquipmentTransaction.end(player);
+				}
 				if (!player.getInventory().insertStack(removed)) {
 					player.dropItem(removed, false);
 				}
 				player.sendMessage(net.minecraft.text.Text.translatable(
-						"message.mechaniciancombat.requires_undersuit"), true);
+						"message.mechaniciancombat.requires_undersuit"),
+						true);
 			}
 		}
+	}
+
+	private static void migrateUndersuitAccessory(ServerPlayerEntity player) {
+		if (com.tk.gun.item.MechanicianUndersuitItem.isEquipped(player)) {
+			return;
+		}
+		io.wispforest.accessories.api.AccessoriesCapability
+				.getOptionally(player)
+				.flatMap(capability -> java.util.Optional.ofNullable(
+						capability.getFirstEquipped(
+								stack -> stack.getItem()
+										instanceof com.tk.gun.item
+												.MechanicianUndersuitItem)))
+				.ifPresent(entry -> {
+					ItemStack undersuit = entry.stack().copy();
+					if (!entry.reference().setStack(ItemStack.EMPTY)) {
+						return;
+					}
+					ItemStack previous = player.getEquippedStack(
+							net.minecraft.entity.EquipmentSlot.HEAD);
+					com.tk.gun.ArmorEquipmentTransaction.begin(player);
+					try {
+						player.equipStack(
+								net.minecraft.entity.EquipmentSlot.HEAD,
+								undersuit);
+					} finally {
+						com.tk.gun.ArmorEquipmentTransaction.end(player);
+					}
+					if (!previous.isEmpty()
+							&& !player.getInventory().insertStack(previous)) {
+						player.dropItem(previous, false);
+					}
+				});
 	}
 
 	@Override
@@ -953,6 +1025,8 @@ public class TkGunServer implements ModInitializer {
 		SoulChainAbility.register();
 		ServerTickEvents.END_SERVER_TICK.register(
 				server -> enforceArmorRequirement(server));
+		ServerTickEvents.END_SERVER_TICK.register(
+				com.tk.gun.block.ArmorDressingStationService::tick);
 		ServerLifecycleEvents.SERVER_STARTED.register(
 				com.tk.gun.item.MechanicianBrewingRecipes::reload);
 		ServerLifecycleEvents.SERVER_STOPPING.register(
@@ -961,6 +1035,8 @@ public class TkGunServer implements ModInitializer {
 				(handler, server) -> {
 					cleanupWarBannerForPlayer(handler.getPlayer());
 					cleanupHunterSpearForPlayer(handler.getPlayer());
+					com.tk.gun.block.ArmorDressingStationService
+							.cancelForPlayer(handler.getPlayer());
 				});
 		// 持枪左键只用来开火，不进入方块破坏流程（类似拿着剑时原版不会挖方块）。
 		PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) ->
@@ -979,46 +1055,31 @@ public class TkGunServer implements ModInitializer {
 				Registries.SCREEN_HANDLER,
 				TkGun.id("armor_modification_table"),
 				com.tk.gun.screen.ArmorModificationTableScreenHandler.TYPE);
-		BACKPACK_MODIFICATION_TABLE = com.tk.gun.neoforge.RegistryBridge.register(
+		ARMOR_DRESSING_STATION = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.BLOCK,
-				TkGun.id("backpack_modification_table"),
-				new com.tk.gun.block.BackpackModificationTableBlock(
+				TkGun.id("armor_dressing_station"),
+				new com.tk.gun.block.ArmorDressingStationBlock(
 						net.minecraft.block.AbstractBlock.Settings.create()
 								.mapColor(net.minecraft.block.MapColor.STONE_GRAY)
 								.strength(3.5F)
 								.requiresTool()
+								.nonOpaque()
 								.sounds(net.minecraft.sound.BlockSoundGroup.STONE)));
-		BACKPACK_MODIFICATION_TABLE_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
+		ARMOR_DRESSING_STATION_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.ITEM,
-				TkGun.id("backpack_modification_table"),
+				TkGun.id("armor_dressing_station"),
 				new net.minecraft.item.BlockItem(
-						BACKPACK_MODIFICATION_TABLE,
-						new Item.Settings()));
-		BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(
+						ARMOR_DRESSING_STATION, new Item.Settings()));
+		ARMOR_DRESSING_STATION_BLOCK_ENTITY = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.BLOCK_ENTITY_TYPE,
-				TkGun.id("backpack_modification_table"),
+				TkGun.id("armor_dressing_station"),
 				net.fabricmc.fabric.api.object.builder.v1.block.entity
 						.FabricBlockEntityTypeBuilder.create(
-								com.tk.gun.block.BackpackModificationTableBlockEntity::new,
-								BACKPACK_MODIFICATION_TABLE)
+								com.tk.gun.block.ArmorDressingStationBlockEntity::new,
+								ARMOR_DRESSING_STATION)
 						.build());
-		com.tk.gun.block.BackpackModificationTableBlockEntity.TYPE =
-				BACKPACK_MODIFICATION_TABLE_BLOCK_ENTITY;
-		ARMOR_MODIFICATION_TABLE = com.tk.gun.neoforge.RegistryBridge.register(
-				Registries.BLOCK,
-				TkGun.id("armor_modification_table"),
-				new com.tk.gun.block.ArmorModificationTableBlock(
-						net.minecraft.block.AbstractBlock.Settings.create()
-								.mapColor(net.minecraft.block.MapColor.STONE_GRAY)
-								.strength(3.5F)
-								.requiresTool()
-								.sounds(net.minecraft.sound.BlockSoundGroup.STONE)));
-		ARMOR_MODIFICATION_TABLE_ITEM = com.tk.gun.neoforge.RegistryBridge.register(
-				Registries.ITEM,
-				TkGun.id("armor_modification_table"),
-				new net.minecraft.item.BlockItem(
-						ARMOR_MODIFICATION_TABLE,
-						new Item.Settings()));
+		com.tk.gun.block.ArmorDressingStationBlockEntity.TYPE =
+				ARMOR_DRESSING_STATION_BLOCK_ENTITY;
 		ARCANE_ALLOY_BLOCK = com.tk.gun.neoforge.RegistryBridge.register(
 				Registries.BLOCK,
 				TkGun.id("arcane_alloy_block"),
@@ -1215,8 +1276,7 @@ public class TkGunServer implements ModInitializer {
 						.displayName(net.minecraft.text.Text.translatable("itemGroup.mechaniciancombat"))
 						.icon(() -> new ItemStack(TAB_ICON))
 						.entries((context, entries) -> {
-							entries.add(BACKPACK_MODIFICATION_TABLE_ITEM);
-								entries.add(ARMOR_MODIFICATION_TABLE_ITEM);
+								entries.add(ARMOR_DRESSING_STATION_ITEM);
 							entries.add(ARCANE_ALLOY_BLOCK_ITEM);
 							for (Item gun : GunRegistry.items()) {
 								entries.add(gun);
@@ -1303,6 +1363,19 @@ public class TkGunServer implements ModInitializer {
 						.dimensions(2.0F, 2.0F)
 						.disableSaving()
 						.build("steel_arrow_impact"));
+		ARMOR_DRESSING_PERFORMER_ENTITY =
+				com.tk.gun.neoforge.RegistryBridge.register(
+						Registries.ENTITY_TYPE,
+						TkGun.id("armor_dressing_performer"),
+						EntityType.Builder
+								.<com.tk.gun.entity
+										.ArmorDressingPerformerEntity>create(
+										com.tk.gun.entity
+												.ArmorDressingPerformerEntity::new,
+										SpawnGroup.MISC)
+								.dimensions(3.0F, 4.0F)
+								.disableSaving()
+								.build("armor_dressing_performer"));
 		PayloadTypeRegistry.playS2C().register(GunStatePayload.ID, GunStatePayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.FortressSkillCooldownPayload.ID,
@@ -1347,6 +1420,50 @@ public class TkGunServer implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(
 				com.tk.gun.net.HunterSpearSkillPayload.ID,
 				com.tk.gun.net.HunterSpearSkillPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.ArmorDressingStatePayload.ID,
+				com.tk.gun.net.ArmorDressingStatePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(
+				com.tk.gun.net.ArmorDressingMountPayload.ID,
+				com.tk.gun.net.ArmorDressingMountPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.ArmorDressingDismountPayload.ID,
+				com.tk.gun.net.ArmorDressingDismountPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.ArmorDressingDismountPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						com.tk.gun.block.ArmorDressingStationService
+								.dismount(context.player())));
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.ArmorDressingInteractPayload.ID,
+				com.tk.gun.net.ArmorDressingInteractPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(
+				com.tk.gun.net.ArmorDressingUnequipPayload.ID,
+				com.tk.gun.net.ArmorDressingUnequipPayload.CODEC);
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.ArmorDressingInteractPayload.ID,
+				(payload, context) -> context.server().execute(() ->
+						com.tk.gun.block.ArmorDressingStationBlock
+								.interactExtended(context.player(),
+										payload.stationPos(), payload.page())));
+		ServerPlayNetworking.registerGlobalReceiver(
+				com.tk.gun.net.ArmorDressingUnequipPayload.ID,
+				(payload, context) -> context.server().execute(() -> {
+					BlockPos actualPos = payload.stationPos();
+					if (context.player().currentScreenHandler
+							instanceof com.tk.gun.screen
+									.ArmorModificationTableScreenHandler armor) {
+						actualPos = armor.pos();
+					}
+					boolean unequipped =
+							com.tk.gun.block.ArmorDressingStationService
+									.unequipAtStation(context.player(),
+											actualPos);
+					TkGun.LOGGER.info(
+							"[mechaniciancombat] armor station unequip player={} pos={} success={}",
+							context.player().getGameProfile().getName(),
+							actualPos, unequipped);
+				}));
 		PayloadTypeRegistry.playC2S().register(GunFirePayload.ID, GunFirePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(com.tk.gun.net.GunJumpPayload.ID,
 				com.tk.gun.net.GunJumpPayload.CODEC);
@@ -1404,7 +1521,7 @@ public class TkGunServer implements ModInitializer {
 				(payload, context) -> context.server().execute(() ->
 						handleJumpBackpackInput(context.player(),
 								payload.pressed(), payload.directionX(),
-								payload.directionZ())));
+								payload.directionZ(), payload.cancel())));
 		ServerPlayNetworking.registerGlobalReceiver(
 				com.tk.gun.net.GunFallAttackPayload.ID,
 				(payload, context) -> context.server().execute(() ->
@@ -1820,9 +1937,18 @@ public class TkGunServer implements ModInitializer {
 				(payload, context) -> context.server().execute(() -> {
 					ServerPlayerEntity p = context.player();
 					if (!TkGun.holdingGun(p) || TkGun.isMeleeWeapon(p)) {
+						TkGun.LOGGER.info(
+								"[mechaniciancombat] 弹药环打开被拒：holdingGun={} melee={} 玩家={}",
+								TkGun.holdingGun(p), TkGun.isMeleeWeapon(p),
+								p.getName().getString());
 						return;
 					}
-					p.openHandledScreen(com.tk.gun.screen.AmmoStorageScreenHandler.createFactory());
+					var result = p.openHandledScreen(
+							com.tk.gun.screen.AmmoStorageScreenHandler.createFactory());
+					TkGun.LOGGER.info(
+							"[mechaniciancombat] 弹药环菜单已请求：sync={} 玩家={}",
+							result.isPresent() ? result.getAsInt() : -1,
+							p.getName().getString());
 				}));
 		ServerPlayNetworking.registerGlobalReceiver(com.tk.gun.net.SwitchAmmoPayload.ID,
 				(payload, context) -> context.server().execute(() -> {
@@ -2582,10 +2708,7 @@ public class TkGunServer implements ModInitializer {
 
 	private static boolean isWarBannerFriendly(
 			LivingEntity target, ServerPlayerEntity owner) {
-		if (target instanceof PlayerEntity) {
-			return true;
-		}
-		if (target.isTeammate(owner)) {
+		if (CombatTargeting.isFriendlyTo(target, owner)) {
 			return true;
 		}
 		if (target instanceof TameableEntity pet
@@ -2865,6 +2988,11 @@ public class TkGunServer implements ModInitializer {
 		}
 		if (state.missileCooldownUntil > 0 && now >= state.missileCooldownUntil) {
 			state.missileCooldownUntil = 0;
+			state.missileTargets.clear();
+			state.missileMarkedTargets.clear();
+		}
+		if (pruneMissileMarks(player, state)) {
+			syncBackpackStatus(player, state, now);
 		}
 		if (state.missileAiming) {
 			ItemStack ammo = com.tk.gun.item.BackpackAmmoData.stored(player);
@@ -2879,6 +3007,7 @@ public class TkGunServer implements ModInitializer {
 				LivingEntity target = nextMissileTarget(player, state);
 				if (target != null) {
 					state.missileTargets.add(target.getUuid());
+					state.missileMarkedTargets.add(target.getUuid());
 					playSound(player, TkGun.SND_BACKPACK_LOCK_ON,
 							0.8F, 1.0F);
 					syncBackpackStatus(player, state, now);
@@ -2932,7 +3061,7 @@ public class TkGunServer implements ModInitializer {
 				player.getBoundingBox().expand(MISSILE_BOX_TARGET_RADIUS),
 				entity -> entity != player && entity.isAlive()
 						&& !entity.isSpectator() && entity.canHit()
-						&& !CombatTargeting.isGolem(entity)
+						&& CombatTargeting.isTargetable(entity)
 						&& !state.missileTargets.contains(entity.getUuid()))) {
 			Vec3d center = candidate.getBoundingBox().getCenter();
 			if (player.squaredDistanceTo(center)
@@ -3001,7 +3130,8 @@ public class TkGunServer implements ModInitializer {
 				now + BACKPACK_PROJECTILE_TRACK_TICKS);
 		MISSILE_TRACKERS.put(projectile.getUuid(),
 				new MissileTracker(player.getServerWorld(), projectile.getUuid(),
-						target.getId(), now + BACKPACK_PROJECTILE_TRACK_TICKS,
+						target.getId(), player.getUuid(),
+						now + BACKPACK_PROJECTILE_TRACK_TICKS,
 						spawn, coldDirection, now));
 		com.tk.gun.item.BackpackAmmoData.consumeOne(player);
 		return true;
@@ -3013,13 +3143,41 @@ public class TkGunServer implements ModInitializer {
 		state.missileNextShotAt = 0;
 		state.missileShotIndex = 0;
 		state.missileCooldownUntil = now + MISSILE_BOX_COOLDOWN_TICKS;
-		clearMissileTargets(player, state);
+		// Launched marks remain visible until their entities are hit or die.
+		state.missileTargets.clear();
 		syncBackpackStatus(player, state, now);
 	}
 
 	private static void clearMissileTargets(ServerPlayerEntity player,
 			BackpackCharge state) {
 		state.missileTargets.clear();
+		state.missileMarkedTargets.clear();
+	}
+
+	private static boolean pruneMissileMarks(ServerPlayerEntity player,
+			BackpackCharge state) {
+		boolean changed = false;
+		ServerWorld world = player.getServerWorld();
+		Iterator<UUID> iterator = state.missileMarkedTargets.iterator();
+		while (iterator.hasNext()) {
+			UUID targetId = iterator.next();
+			Entity entity = world.getEntity(targetId);
+			if (entity instanceof LivingEntity living
+					&& isAvailableMissileTarget(living)
+					&& living.hurtTime <= 0) {
+				continue;
+			}
+			iterator.remove();
+			int queuedIndex = state.missileTargets.indexOf(targetId);
+			if (queuedIndex >= 0) {
+				state.missileTargets.remove(queuedIndex);
+				if (queuedIndex < state.missileShotIndex) {
+					state.missileShotIndex--;
+				}
+			}
+			changed = true;
+		}
+		return changed;
 	}
 
 	private static void clearMissileState(ServerPlayerEntity player) {
@@ -3210,7 +3368,7 @@ public class TkGunServer implements ModInitializer {
 		for (LivingEntity candidate : player.getServerWorld().getEntitiesByClass(
 				LivingEntity.class, search,
 				entity -> entity != player && entity.isAlive() && !entity.isSpectator()
-						&& entity.canHit() && !CombatTargeting.isGolem(entity))) {
+						&& entity.canHit() && CombatTargeting.isTargetable(entity))) {
 			Vec3d offset = candidate.getBoundingBox().getCenter().subtract(cameraPos);
 			if (offset.lengthSquared() < 1.0E-8D
 					|| playerCenter.squaredDistanceTo(candidate.getBoundingBox().getCenter())
@@ -3291,9 +3449,7 @@ public class TkGunServer implements ModInitializer {
 		com.tk.gun.net.CombatBackpackParticlePayload payload =
 				new com.tk.gun.net.CombatBackpackParticlePayload(
 						player.getId(), origin.x, origin.y, origin.z);
-		for (ServerPlayerEntity viewer : world.getPlayers()) {
-			ServerPlayNetworking.send(viewer, payload);
-		}
+		sendToNearbyViewers(player, origin, payload);
 	}
 
 	public static void clearBackpackCooldown(ServerPlayerEntity player) {
@@ -3414,6 +3570,7 @@ public class TkGunServer implements ModInitializer {
 			state.jumpMoveX = 0.0D;
 			state.jumpMoveZ = 0.0D;
 			state.jumpHovering = false;
+			state.jumpSneakCancelled = false;
 			state.jumpThrustSoundPlayed = false;
 			clearMissileTargets(player, state);
 			state.missileAiming = false;
@@ -3449,7 +3606,7 @@ public class TkGunServer implements ModInitializer {
 		LivingEntity nearest = null;
 		for (LivingEntity candidate : world.getEntitiesByClass(LivingEntity.class, search,
 				entity -> entity != player && entity.isAlive() && !entity.isSpectator()
-						&& entity.canHit() && !CombatTargeting.isGolem(entity))) {
+						&& entity.canHit() && CombatTargeting.isTargetable(entity))) {
 			double distanceSq = candidate.getBoundingBox().getCenter()
 					.squaredDistanceTo(center);
 			if (distanceSq <= maxDistanceSq && distanceSq < bestDistanceSq
@@ -3660,16 +3817,11 @@ public class TkGunServer implements ModInitializer {
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_AUTO_ACTIVE
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_MARKED
 						|| phase == com.tk.gun.net.CombatBackpackStatusPayload.PHASE_SUMMON_CAST;
-		int firstMissileTarget = Math.min(state.missileShotIndex,
-				state.missileTargets.size());
-		int[] missileTargetIds = new int[Math.max(0,
-				state.missileTargets.size() - firstMissileTarget)];
-		for (int index = firstMissileTarget;
-				index < state.missileTargets.size(); index++) {
+		int[] missileTargetIds = new int[state.missileMarkedTargets.size()];
+		for (int index = 0; index < state.missileMarkedTargets.size(); index++) {
 			Entity target = world.getEntity(
-					state.missileTargets.get(index));
-			missileTargetIds[index - firstMissileTarget] =
-					target == null ? -1 : target.getId();
+					state.missileMarkedTargets.get(index));
+			missileTargetIds[index] = target == null ? -1 : target.getId();
 		}
 		com.tk.gun.net.CombatBackpackStatusPayload payload =
 				new com.tk.gun.net.CombatBackpackStatusPayload(owner.getId(),
@@ -3749,14 +3901,24 @@ public class TkGunServer implements ModInitializer {
 	}
 
 	public static void handleJumpBackpackInput(ServerPlayerEntity player,
-			boolean pressed, float directionX, float directionZ) {
+			boolean pressed, float directionX, float directionZ,
+			boolean cancel) {
 		if (!com.tk.gun.item.BackpackUpgradeData.canUseJumpThruster(
 				com.tk.gun.item.CombatBackpackItem.equippedStack(player))) {
 			return;
 		}
 		long now = player.getWorld().getTime();
 		BackpackCharge state = backpackState(player, now);
+		if (cancel) {
+			if (state.jumpAirborne) {
+				cancelJumpBackpackBySneak(player, state, now);
+			}
+			return;
+		}
 		if (state.jumpAirborne) {
+			if (state.jumpSneakCancelled) {
+				return;
+			}
 			setJumpDirection(state, directionX, directionZ);
 			boolean wasHeld = state.jumpKeyHeld;
 			boolean canThrust = pressed && !TkGun.holdingGun(player)
@@ -3791,6 +3953,7 @@ public class TkGunServer implements ModInitializer {
 		state.jumpAirborne = true;
 		setJumpDirection(state, directionX, directionZ);
 		state.jumpHovering = false;
+		state.jumpSneakCancelled = false;
 		state.jumpThrustSoundPlayed = false;
 		player.setNoGravity(false);
 		player.setSprinting(false);
@@ -3807,6 +3970,9 @@ public class TkGunServer implements ModInitializer {
 			return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FLYING;
 		}
 		if (state.jumpAirborne) {
+			if (state.jumpSneakCancelled) {
+				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_FALLING;
+			}
 			if (now < state.jumpReadyUntil) {
 				return com.tk.gun.net.CombatBackpackStatusPayload.PHASE_READY_TO_FLY;
 			}
@@ -3897,7 +4063,8 @@ public class TkGunServer implements ModInitializer {
 
 	private static boolean jumpHovering(ServerPlayerEntity player,
 			BackpackCharge state, long now) {
-		return state.jumpAirborne && !state.specialThrustActive
+		return !state.jumpSneakCancelled
+				&& state.jumpAirborne && !state.specialThrustActive
 				&& !TkGun.holdingGun(player)
 				&& now >= state.jumpReadyUntil
 				&& !state.jumpKeyHeld
@@ -4005,14 +4172,22 @@ public class TkGunServer implements ModInitializer {
 			state.jumpAirborne = false;
 			state.jumpKeyHeld = false;
 			state.jumpHovering = false;
+			state.jumpSneakCancelled = false;
 			player.setNoGravity(false);
 			return;
 		}
+		if (state.jumpSneakCancelled) {
+			state.jumpKeyHeld = false;
+			state.jumpHovering = false;
+			player.setNoGravity(false);
+			player.fallDistance = 0.0F;
+			if (player.isOnGround() || player.isTouchingWater()) {
+				finishJumpBackpack(player, state, now);
+			}
+			return;
+		}
 		if (player.isSneaking()) {
-			TkGun.LOGGER.info(
-					"[mechaniciancombat] jump thruster dismissed by sneak at y={} player={}",
-					round3(player.getY()), player.getName().getString());
-			finishJumpBackpack(player, state, now);
+			cancelJumpBackpackBySneak(player, state, now);
 			return;
 		}
 		if (TkGun.holdingGun(player)) {
@@ -4062,15 +4237,39 @@ public class TkGunServer implements ModInitializer {
 							TkGun.JUMP_BACKPACK_BOOST_RISE * speedMultiplier,
 							remainingLift))
 					: 0.0D;
+			Vec3d currentVelocity = player.getVelocity();
+			double horizontalSpeed = currentVelocity.horizontalLength();
 			if (hovering) {
-				player.setVelocity(Vec3d.ZERO);
-			} else {
+				if (horizontalSpeed * TkGun.JUMP_BACKPACK_HOVER_DRAG
+						<= TkGun.JUMP_BACKPACK_HOVER_STOP_SPEED) {
+					player.setVelocity(0.0D,
+							-TkGun.JUMP_BACKPACK_HOVER_DESCENT_SPEED, 0.0D);
+				} else {
+					player.setVelocity(
+							currentVelocity.x
+									* TkGun.JUMP_BACKPACK_HOVER_DRAG,
+							0.0D,
+							currentVelocity.z
+									* TkGun.JUMP_BACKPACK_HOVER_DRAG);
+				}
+			} else if (directional) {
 				player.setVelocity(
 						moveX * TkGun.JUMP_BACKPACK_HORIZONTAL_SPEED
 								* speedMultiplier,
 						vertical,
 						moveZ * TkGun.JUMP_BACKPACK_HORIZONTAL_SPEED
 								* speedMultiplier);
+			} else {
+				double coastSpeed = horizontalSpeed
+						* TkGun.JUMP_BACKPACK_HOVER_DRAG;
+				double directionX = horizontalSpeed > 1.0E-5D
+						? currentVelocity.x / horizontalSpeed : 0.0D;
+				double directionZ = horizontalSpeed > 1.0E-5D
+						? currentVelocity.z / horizontalSpeed : 0.0D;
+				player.setVelocity(
+						directionX * coastSpeed,
+						vertical,
+						directionZ * coastSpeed);
 			}
 			player.velocityModified = true;
 			if (!hovering) {
@@ -4078,10 +4277,16 @@ public class TkGunServer implements ModInitializer {
 			}
 			if ((now - state.jumpStartedAt) % 2L == 0L) {
 				ServerWorld world = player.getServerWorld();
+				Vec3d trailVelocity = player.getVelocity();
+				double trailSpeed = trailVelocity.horizontalLength();
+				double trailX = trailSpeed > 1.0E-5D
+						? trailVelocity.x / trailSpeed : 0.0D;
+				double trailZ = trailSpeed > 1.0E-5D
+						? trailVelocity.z / trailSpeed : 0.0D;
 				world.spawnParticles(ParticleTypes.FLAME,
-						player.getX() - moveX * (hovering ? 0.0D : 0.55D),
+						player.getX() - trailX * (hovering ? 0.0D : 0.55D),
 						player.getY() + (hovering ? 0.35D : 0.75D),
-						player.getZ() - moveZ * (hovering ? 0.0D : 0.55D),
+						player.getZ() - trailZ * (hovering ? 0.0D : 0.55D),
 						2, 0.08D, 0.08D, 0.08D, 0.01D);
 			}
 			return;
@@ -4093,6 +4298,30 @@ public class TkGunServer implements ModInitializer {
 		if (player.isOnGround() || player.isTouchingWater()) {
 			finishJumpBackpack(player, state, now);
 		}
+	}
+
+	private static void cancelJumpBackpackBySneak(ServerPlayerEntity player,
+			BackpackCharge state, long now) {
+		if (state.jumpSneakCancelled) {
+			return;
+		}
+		state.jumpSneakCancelled = true;
+		state.jumpKeyHeld = false;
+		state.jumpHovering = false;
+		state.jumpMoveX = 0.0D;
+		state.jumpMoveZ = 0.0D;
+		state.jumpThrustSoundPlayed = false;
+		Vec3d cancelVelocity = player.getVelocity();
+		player.setNoGravity(false);
+		player.setVelocity(cancelVelocity.x * 0.75D,
+				Math.min(-0.02D, cancelVelocity.y),
+				cancelVelocity.z * 0.75D);
+		player.velocityModified = true;
+		player.fallDistance = 0.0F;
+		syncBackpackStatus(player, state, now);
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] jump thruster sneak cancel -> falling at y={} player={}",
+				round3(player.getY()), player.getName().getString());
 	}
 
 	private static void playJumpThrustActivationSound(ServerPlayerEntity player,
@@ -4120,6 +4349,7 @@ public class TkGunServer implements ModInitializer {
 		state.jumpMoveX = 0.0D;
 		state.jumpMoveZ = 0.0D;
 		state.jumpHovering = false;
+		state.jumpSneakCancelled = false;
 		state.jumpCloseUntil = now + TkGun.JUMP_BACKPACK_CLOSE_TICKS;
 		player.setNoGravity(false);
 		player.fallDistance = 0.0F;
@@ -4232,7 +4462,7 @@ public class TkGunServer implements ModInitializer {
 		for (LivingEntity candidate : world.getEntitiesByClass(LivingEntity.class, search,
 				entity -> entity != player && entity.getId() != excludedEntityId
 						&& entity.isAlive() && !entity.isSpectator()
-						&& entity.canHit() && !CombatTargeting.isGolem(entity)
+						&& entity.canHit() && CombatTargeting.isTargetable(entity)
 						&& autoTargetVisible(player, entity, state, now))) {
 			double distance = candidate.squaredDistanceTo(player);
 			if (distance < nearestDistance) {
@@ -4558,10 +4788,20 @@ public class TkGunServer implements ModInitializer {
 			Map.Entry<UUID, MissileTracker> entry = missiles.next();
 			MissileTracker tracker = entry.getValue();
 			Entity projectile = tracker.world.getEntity(tracker.projectileUuid);
-			Entity target = tracker.world.getEntityById(tracker.targetEntityId);
 			if (projectile == null || !projectile.isAlive()
-					|| !(target instanceof LivingEntity living) || !living.isAlive()
 					|| now >= tracker.expiresAt) {
+				missiles.remove();
+				continue;
+			}
+			LivingEntity living = resolveMissileTarget(tracker, projectile);
+			if (living == null) {
+				if (!tracker.tracking) {
+					projectile.setVelocity(tracker.coldDirection.multiply(
+							MISSILE_BOX_COLD_SPEED));
+					projectile.velocityModified = true;
+					continue;
+				}
+				projectile.setNoGravity(false);
 				missiles.remove();
 				continue;
 			}
@@ -4672,6 +4912,52 @@ public class TkGunServer implements ModInitializer {
 			projectile.setVelocity(steered.multiply(speed));
 			projectile.velocityModified = true;
 		}
+	}
+
+	private static LivingEntity resolveMissileTarget(MissileTracker tracker,
+			Entity projectile) {
+		Entity current = tracker.world.getEntityById(tracker.targetEntityId);
+		if (current instanceof LivingEntity living
+				&& isAvailableMissileTarget(living) && living.hurtTime <= 0) {
+			return living;
+		}
+		LivingEntity replacement = nearestMissileTarget(tracker.world,
+				projectile.getPos(), tracker.ownerUuid);
+		if (replacement == null) {
+			return null;
+		}
+		tracker.targetEntityId = replacement.getId();
+		TkGun.LOGGER.info(
+				"[mechaniciancombat] missile target lost -> retarget entity={} player={}",
+				replacement.getId(), tracker.ownerUuid);
+		return replacement;
+	}
+
+	private static LivingEntity nearestMissileTarget(ServerWorld world,
+			Vec3d origin, UUID ownerUuid) {
+		net.minecraft.util.math.Box search =
+				new net.minecraft.util.math.Box(origin, origin)
+						.expand(MISSILE_BOX_TARGET_RADIUS);
+		LivingEntity nearest = null;
+		double nearestDistance = Double.MAX_VALUE;
+		for (LivingEntity candidate : world.getEntitiesByClass(
+				LivingEntity.class, search,
+				entity -> !entity.getUuid().equals(ownerUuid)
+						&& isAvailableMissileTarget(entity)
+						&& entity.hurtTime <= 0)) {
+			double distance = candidate.squaredDistanceTo(origin);
+			if (distance < nearestDistance) {
+				nearest = candidate;
+				nearestDistance = distance;
+			}
+		}
+		return nearest;
+	}
+
+	private static boolean isAvailableMissileTarget(LivingEntity entity) {
+		return entity != null && !entity.isRemoved() && entity.isAlive()
+				&& !entity.isSpectator() && entity.canHit()
+				&& CombatTargeting.isTargetable(entity);
 	}
 
 	private static void trackBackpackTurretProjectile(ServerWorld world,
@@ -6266,7 +6552,7 @@ public class TkGunServer implements ModInitializer {
 		if (wasSliding) {
 			applySlideFastFocusInertia(player, st, now);
 		}
-		TkGun.LOGGER.info("[mechaniciancombat] 滑铲中右键 -> 架枪（AIM_SLIDE 1 倍速，滑铲剩余={} tick）玩家={}",
+		TkGun.LOGGER.info("[mechaniciancombat] 滑铲中右键 -> 架枪（快速部署动画，滑铲剩余={} tick）玩家={}",
 				slideLeft, player.getName().getString());
 		if (!wasSliding) {
 			TkGun.LOGGER.info("[mechaniciancombat] （注意：这次右键进来时其实不在滑铲里，状态被强行设成 AIM_SLIDE）");
@@ -6311,6 +6597,14 @@ public class TkGunServer implements ModInitializer {
 			rebroadcast(player);
 		}
 		long now = player.getWorld().getTime();
+		syncHipAimTransition(player, st, now);
+		if (!st.deployed && player.isUsingItem()
+				&& now < st.hipAimReadyAt) {
+			TkGun.LOGGER.info(
+					"[mechaniciancombat] 扣扳机被拒（腰射举枪动作未完成）玩家={}",
+					player.getName().getString());
+			return;
+		}
 		if (now == st.lastFireTick) {                 // 同一 tick 里右键和左键都触发，只认一次
 			return;
 		}
@@ -6923,7 +7217,7 @@ public class TkGunServer implements ModInitializer {
 		if (!hitSomething) {
 			return;
 		}
-		if (CombatTargeting.isGolem(target)) {
+		if (target != null && !CombatTargeting.isTargetable(target)) {
 			return;
 		}
 		if (sculk) {
@@ -7031,7 +7325,7 @@ public class TkGunServer implements ModInitializer {
 		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
 				net.minecraft.entity.LivingEntity.class, area,
 				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
-						&& !CombatTargeting.isGolem(e))) {
+						&& CombatTargeting.isTargetable(e))) {
 			Vec3d away = living.getPos().subtract(center);
 			damaged |= living.damage(source, splashDamage);
 			if (knockback) {
@@ -7053,13 +7347,13 @@ public class TkGunServer implements ModInitializer {
 		java.util.Set<net.minecraft.entity.LivingEntity> affected =
 				java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 		if (direct instanceof net.minecraft.entity.LivingEntity living && living.isAlive()
-				&& !CombatTargeting.isGolem(living)) {
+				&& CombatTargeting.isTargetable(living)) {
 			affected.add(living);
 		}
 		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
 				net.minecraft.entity.LivingEntity.class, area,
 				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
-						&& !CombatTargeting.isGolem(e))) {
+						&& CombatTargeting.isTargetable(e))) {
 			Vec3d bodyCenter = living.getBoundingBox().getCenter();
 			if (bodyCenter.squaredDistanceTo(center) <= 2.25D) {
 				affected.add(living);
@@ -7275,7 +7569,7 @@ public class TkGunServer implements ModInitializer {
 		for (net.minecraft.entity.LivingEntity living : world.getEntitiesByClass(
 				net.minecraft.entity.LivingEntity.class, search,
 				e -> e != player && e.isAlive() && !e.isSpectator() && e.canHit()
-						&& !CombatTargeting.isGolem(e))) {
+						&& CombatTargeting.isTargetable(e))) {
 			Vec3d center = living.getBoundingBox().getCenter();
 			Vec3d relative = center.subtract(muzzle);
 			double along = relative.dotProduct(forward);
@@ -7931,7 +8225,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		/**
 		 * 这次 Z 是"翻滚过 2/3 后打断"或"翻滚刚结束的宽限窗"→ 用快档
-		 * （`AIM_ROLL` → `rolling_fast_ready`）。
+		 * （`AIM_ROLL` → 基础快速动画或 `Focus_ready_quick`）。
 		 */
 		boolean fromRoll = false;
 		boolean rolling = st.state == TkGun.State.ROLL;
@@ -7942,7 +8236,7 @@ public class TkGunServer implements ModInitializer {
 		}
 		// **翻滚中按 Z = 快速蹲射**（用户 2026-10-17："让翻滚时可以进行快速蹲射并打断翻滚动画并进入蹲射状态"）：
 		// 先把 ROLL 收掉（这样能绕过 `setState` 里"翻滚没播完不许换状态"那道闸），再照常进专注 ——
-		// 下面用专门的 `AIM_ROLL`，客户端播 `rolling_fast_ready`。
+		// 下面用专门的 `AIM_ROLL`，客户端按枪型选择快速部署资源。
 		if (rolling) {
 			// **2026-10-18 用户定档：翻滚动画 0.38s 处开始执行快速蹲射**。
 			// 0.38s × 20 向上取整 = 第 8 tick；在此之前输入的 Z 不丢，先缓存（预输入）。
@@ -7973,7 +8267,7 @@ public class TkGunServer implements ModInitializer {
 			fromRoll = true;
 		}
 		// **滑铲中点 Z = `sliding_fast_ready` 中断滑铲、进蹲射**（用户 2026-10-17）：收掉滑铲 → 下面按
-		// `AIM_SLIDE` 进（客户端这一段播作者新加的 `sliding_fast_ready`）。
+		// `AIM_SLIDE` 进（客户端按枪型选择快速部署资源）。
 		boolean fromSlide = st.state == TkGun.State.SLIDE || st.state == TkGun.State.SLIDE_READY;
 		if (fromSlide) {
 			lockAimAfterDodge(st, now);
@@ -8028,7 +8322,7 @@ public class TkGunServer implements ModInitializer {
 		// AIM_FAST 播的就是 `fast_ready`，准备音由动画关键帧自行上报。
 		// ⚠️ 2026-10-17 用户："取消加速状态下的快速专注功能" —— 冲刺窗口里按 Z 也走**普通**过门
 		// （`Focus_ready`，`AIM_TICKS_NORMAL`），不再切 `AIM_FAST`/`fast_ready`。（滑铲中按 Z 仍走
-		// `AIM_SLIDE` → `sliding_fast_ready`，那是另一条需求。）
+		// `AIM_SLIDE` → 快速部署资源，那是另一条需求。）
 		if (now < st.dashUntil) {
 			TkGun.LOGGER.info("[mechaniciancombat] 进专注 -> 清空冲刺加成（原剩余 {} tick）玩家={}",
 					st.dashUntil - now, player.getName().getString());
@@ -8040,7 +8334,7 @@ public class TkGunServer implements ModInitializer {
 		if (fromSlide) {
 			applySlideFastFocusInertia(player, st, now);
 		}
-		// 0.38 秒预输入兑现后直接进入 AIM_ROLL，播放新版 rolling_fast_ready。
+		// 0.38 秒预输入兑现后直接进入 AIM_ROLL，使用对应快速部署资源。
 		TkGun.State aimState = fromSlide ? TkGun.State.AIM_SLIDE
 				: (fromRoll ? TkGun.State.AIM_ROLL : TkGun.State.AIM);
 		int aimStateTicks = fromSlide ? TkGun.AIM_TICKS_SLIDE
@@ -8109,7 +8403,7 @@ public class TkGunServer implements ModInitializer {
 		player.velocityModified = true;
 		player.forwardSpeed = 0.0F;
 		player.sidewaysSpeed = 0.0F;
-		TkGun.LOGGER.info("[mechaniciancombat] 滑铲 -> sliding_fast_ready：继承速度 {} 格/tick，前移上限 {} 格 玩家={}",
+		TkGun.LOGGER.info("[mechaniciancombat] 滑铲 -> 快速部署动画：继承速度 {} 格/tick，前移上限 {} 格 玩家={}",
 				round3(st.slideFastFocusStartSpeed),
 				round3(TkGun.SLIDE_FAST_FOCUS_MAX_DISTANCE),
 				player.getName().getString());
@@ -8119,7 +8413,7 @@ public class TkGunServer implements ModInitializer {
 	/**
 	 * A one-shot velocity is consumed by the next movement update after the
 	 * client-side focus input lock zeroes the movement keys. Reapply a decaying
-	 * velocity for exactly the sliding_fast_ready transition.
+	 * velocity for exactly the quick deploy transition.
 	 */
 	private static void tickSlideFastFocusInertia(ServerPlayerEntity player,
 												 PState st, long now) {
@@ -8230,7 +8524,7 @@ public class TkGunServer implements ModInitializer {
 
 	/**
 	 * 滑铲真正开始时消费 Alt+Z / 潜行+Z 的组合专注意图。
-	 * 与翻滚不同，Z 在滑铲里没有 0.38s 门槛：直接进入 `AIM_SLIDE`（sliding_fast_ready）。
+	 * 与翻滚不同，Z 在滑铲里没有 0.38s 门槛：直接进入 `AIM_SLIDE`。
 	 */
 	private static void consumeSlideFocus(ServerPlayerEntity player, PState st, long now) {
 		if (!st.dodgeFocusQueued) {
@@ -8240,10 +8534,40 @@ public class TkGunServer implements ModInitializer {
 		st.dodgeFocusQueued = false;
 		st.dodgeFocusQueuedAt = 0;
 		if (valid && st.state == TkGun.State.SLIDE && TkGun.holdingGun(player)) {
-			TkGun.LOGGER.info("[mechaniciancombat] SLIDE 开始，接收 Z+闪避组合预输入 -> sliding_fast_ready 玩家={}",
+			TkGun.LOGGER.info("[mechaniciancombat] SLIDE 开始，接收 Z+闪避组合预输入 -> 快速部署动画 玩家={}",
 					player.getName().getString());
 			startFocus(player);
 		}
+	}
+
+	private static void syncHipAimTransition(ServerPlayerEntity player,
+			PState st, long now) {
+		if (!TkGun.holdingGun(player) || st.deployed) {
+			st.hipAimUsingLast = false;
+			st.hipAimReadyAt = 0L;
+			st.hipAimLowerStartedAt = 0L;
+			st.hipAimLowerUntil = 0L;
+			return;
+		}
+		boolean using = player.isUsingItem()
+				&& player.getActiveHand() == Hand.MAIN_HAND
+				&& TkGun.isGun(player.getActiveItem());
+		if (using && !st.hipAimUsingLast) {
+			long transition = TkGun.HIP_AIM_RAISE_TICKS;
+			if (st.hipAimLowerUntil > now) {
+				transition = Math.max(1L, Math.min(
+						TkGun.HIP_AIM_RAISE_TICKS,
+						now - st.hipAimLowerStartedAt));
+			}
+			st.hipAimReadyAt = now + transition;
+			st.hipAimLowerStartedAt = 0L;
+			st.hipAimLowerUntil = 0L;
+		} else if (!using && st.hipAimUsingLast) {
+			st.hipAimLowerStartedAt = now;
+			st.hipAimLowerUntil = now + TkGun.HIP_AIM_LOWER_TICKS;
+			st.hipAimReadyAt = 0L;
+		}
+		st.hipAimUsingLast = using;
 	}
 
 	// ---------------------------------------------------------------- 每 tick
@@ -8259,6 +8583,7 @@ public class TkGunServer implements ModInitializer {
 			removeGunFromOffhand(player);
 			PState st = state(player);
 			long now = player.getWorld().getTime();
+			syncHipAimTransition(player, st, now);
 			tickWarBannerCast(player, st, now);
 			tickHunterSpearDeploy(player, st, now);
 			tickRollFallback(player, st, now);
@@ -9046,9 +9371,27 @@ public class TkGunServer implements ModInitializer {
 				new com.tk.gun.net.GunLocatorVentPayload(
 						player.getId(), player.getX(), player.getY() + 1.0D,
 						player.getZ());
-		for (ServerPlayerEntity viewer :
-				player.getServer().getPlayerManager().getPlayerList()) {
-			if (viewer.getServerWorld() == world) {
+		sendToNearbyViewers(player,
+				new Vec3d(player.getX(), player.getY() + 1.0D, player.getZ()),
+				payload);
+	}
+
+	/**
+	 * Custom particle packets are client-driven world geometry, not global
+	 * broadcasts. Restrict them to clients that can actually observe the source
+	 * player, preventing unrelated players in the same dimension from receiving
+	 * and instantiating another player's effect state.
+	 */
+	private static void sendToNearbyViewers(ServerPlayerEntity source,
+			Vec3d origin, net.minecraft.network.packet.CustomPayload payload) {
+		if (source == null || origin == null || payload == null) {
+			return;
+		}
+		ServerWorld world = source.getServerWorld();
+		double maxDistanceSq = 64.0D * 64.0D;
+		for (ServerPlayerEntity viewer : world.getPlayers()) {
+			if (viewer.getServerWorld() == world
+					&& viewer.squaredDistanceTo(origin) <= maxDistanceSq) {
 				ServerPlayNetworking.send(viewer, payload);
 			}
 		}
@@ -9074,7 +9417,6 @@ public class TkGunServer implements ModInitializer {
 		for (Entity candidate : world.getOtherEntities(player, area,
 				entity -> entity instanceof LivingEntity && entity.isAlive()
 						&& entity.canHit() && !entity.isSpectator()
-						&& !CombatTargeting.isGolem(entity)
 						&& CombatTargeting.isTargetable(entity))) {
 			Vec3d targetCenter = candidate.getBoundingBox().getCenter();
 			if (targetCenter.y >= player.getY()
@@ -9121,7 +9463,7 @@ public class TkGunServer implements ModInitializer {
 		for (LivingEntity target : world.getEntitiesByClass(
 				LivingEntity.class, area,
 				entity -> entity != player && entity.isAlive()
-						&& !entity.isSpectator() && !CombatTargeting.isGolem(entity)
+						&& !entity.isSpectator()
 						&& CombatTargeting.isTargetable(entity))) {
 			Vec3d targetCenter = target.getBoundingBox().getCenter();
 			double distance = targetCenter.distanceTo(center);
@@ -9927,7 +10269,7 @@ public class TkGunServer implements ModInitializer {
 		double bestDistance = Double.MAX_VALUE;
 		for (Entity entity : world.getOtherEntities(player, search,
 				e -> e.isAlive() && !e.isSpectator() && e != player && e.canHit()
-						&& !CombatTargeting.isGolem(e))) {
+						&& CombatTargeting.isTargetable(e))) {
 			net.minecraft.util.math.Box bounds = entity.getBoundingBox();
 			Vec3d center = bounds.getCenter();
 			double along = center.subtract(start).dotProduct(direction);

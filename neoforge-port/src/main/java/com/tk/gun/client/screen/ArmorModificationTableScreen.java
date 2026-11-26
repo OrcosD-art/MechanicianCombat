@@ -5,6 +5,9 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.client.gui.tooltip.Tooltip;
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
@@ -26,7 +29,14 @@ public final class ArmorModificationTableScreen
 	private static final int PREVIEW_X = 81;
 	private static final int PREVIEW_Y = 6;
 	private static final int PREVIEW_WIDTH = 49;
-	private static final int PREVIEW_HEIGHT = 59;
+	private static final int PREVIEW_HEIGHT = 70;
+	private static final int ACTION_BUTTON_X = 192;
+	private static final int ACTION_BUTTON_Y = 48;
+	private static final int ACTION_BUTTON_SIZE = 17;
+	private static final int ACTION_BUTTON_NORMAL_U = 224;
+	private static final int ACTION_BUTTON_HOVER_U = 192;
+	private static final int ACTION_BUTTON_V = 48;
+	private ButtonWidget unequipButton;
 
 	public ArmorModificationTableScreen(
 			ArmorModificationTableScreenHandler handler,
@@ -38,9 +48,85 @@ public final class ArmorModificationTableScreen
 	}
 
 	@Override
+	protected void init() {
+		super.init();
+		if (client != null && client.player != null) {
+			com.tk.gun.client.PlayerLocomotionAnimation
+					.beginFixedIdlePreview(client.player.getId());
+		}
+		unequipButton = addDrawableChild(new ButtonWidget(
+				x + ACTION_BUTTON_X, y + ACTION_BUTTON_Y,
+				ACTION_BUTTON_SIZE, ACTION_BUTTON_SIZE,
+				Text.empty(), button -> ClientPlayNetworking.send(
+						new com.tk.gun.net.ArmorDressingUnequipPayload(
+								handler.pos())),
+				button -> Text.empty()) {
+			@Override
+			protected void renderWidget(DrawContext context, int mouseX,
+					int mouseY, float delta) {
+				int u = isHovered() ? ACTION_BUTTON_HOVER_U
+						: ACTION_BUTTON_NORMAL_U;
+				context.drawTexture(TEXTURE, getX(), getY(), u,
+						ACTION_BUTTON_V, ACTION_BUTTON_SIZE,
+						ACTION_BUTTON_SIZE, TEXTURE_WIDTH,
+						TEXTURE_HEIGHT);
+			}
+		});
+		unequipButton.setTooltip(Tooltip.of(Text.translatable(
+				"screen.mechaniciancombat.armor_dressing.unequip")));
+		updateUnequipButton();
+	}
+
+	@Override
+	public void removed() {
+		if (client != null && client.player != null) {
+			com.tk.gun.client.PlayerLocomotionAnimation
+					.endFixedIdlePreview(client.player.getId());
+		}
+		super.removed();
+	}
+
+	private void updateUnequipButton() {
+		if (unequipButton == null || client == null || client.player == null) {
+			return;
+		}
+		boolean canUnequip = com.tk.gun.item.MechanicianUndersuitItem
+				.isWearingOuterSet(client.player);
+		unequipButton.visible = canUnequip;
+		unequipButton.active = canUnequip;
+	}
+
+	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+		updateUnequipButton();
 		super.render(context, mouseX, mouseY, delta);
 		drawMouseoverTooltip(context, mouseX, mouseY);
+		com.tk.gun.client.ModGuiFadeOverlay.render(this, context);
+	}
+
+	@Override
+	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (client != null && client.player != null
+				&& com.tk.gun.client.ArmorDressingClientState
+						.mounted(client.player.getId())) {
+			if (client.options.inventoryKey.matchesKey(
+					keyCode, scanCode)) {
+				com.tk.gun.client.TkGunClient
+						.suppressMountedStationUiKey(0);
+				close();
+				return true;
+			}
+			if (com.tk.gun.client.TkGunClient.BACKPACK_ACTION_KEY
+					.matchesKey(keyCode, scanCode)) {
+				com.tk.gun.client.TkGunClient
+						.suppressMountedStationUiKey(1);
+				ClientPlayNetworking.send(
+						new com.tk.gun.net.ArmorDressingInteractPayload(
+								handler.pos(), 1));
+				return true;
+			}
+		}
+		return super.keyPressed(keyCode, scanCode, modifiers);
 	}
 
 	@Override
@@ -62,6 +148,8 @@ public final class ArmorModificationTableScreen
 		if (player == null) {
 			return;
 		}
+		int previousPreviewPlayer = com.tk.gun.client.ArmorDressingClientState
+				.beginPlayerPreview(player.getId());
 		context.enableScissor(
 				x + PREVIEW_X,
 				y + PREVIEW_Y,
@@ -108,6 +196,8 @@ public final class ArmorModificationTableScreen
 			player.setPitch(oldPitch);
 			player.prevHeadYaw = oldPreviousHeadYaw;
 			player.headYaw = oldHeadYaw;
+			com.tk.gun.client.ArmorDressingClientState
+					.endPlayerPreview(previousPreviewPlayer);
 			context.disableScissor();
 		}
 	}

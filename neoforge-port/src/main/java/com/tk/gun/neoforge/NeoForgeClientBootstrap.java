@@ -15,10 +15,15 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RegisterMenuScreensEvent;
 import net.neoforged.neoforge.client.event.RegisterParticleProvidersEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import net.neoforged.neoforge.common.NeoForge;
+
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.Arrays;
 
 public final class NeoForgeClientBootstrap {
 	private NeoForgeClientBootstrap() {
@@ -27,6 +32,7 @@ public final class NeoForgeClientBootstrap {
 	public static void initialize(IEventBus modBus) {
 		modBus.addListener(NeoForgeClientBootstrap::clientSetup);
 		modBus.addListener(NeoForgeClientBootstrap::keyMappings);
+		modBus.addListener(NeoForgeClientBootstrap::menuScreens);
 		modBus.addListener(NeoForgeClientBootstrap::particleProviders);
 		modBus.addListener(NeoForgeClientBootstrap::entityRenderers);
 		modBus.addListener(NeoForgeClientBootstrap::addLayers);
@@ -51,6 +57,98 @@ public final class NeoForgeClientBootstrap {
 		com.tk.gun.TkGun.LOGGER.info(
 				"[mechaniciancombat] NeoForge keybindings registered: {}",
 				KeyBindingHelper.KEY_BINDINGS.size());
+	}
+
+	private static void menuScreens(RegisterMenuScreensEvent event) {
+		try {
+			Method register = Arrays.stream(
+							RegisterMenuScreensEvent.class.getDeclaredMethods())
+					.filter(method -> method.getParameterCount() == 2
+							&& method.getParameterTypes()[1].isInterface())
+					.findFirst()
+					.orElseThrow(() -> new IllegalStateException(
+							"RegisterMenuScreensEvent.register not found"));
+			Class<?> constructorType = register.getParameterTypes()[1];
+			Object screenConstructor = Proxy.newProxyInstance(
+					NeoForgeClientBootstrap.class.getClassLoader(),
+					new Class<?>[]{constructorType},
+					(proxy, method, args) -> {
+						if (method.getDeclaringClass() == Object.class) {
+							return switch (method.getName()) {
+								case "toString" ->
+										"mechaniciancombat:ammo_storage_screen";
+								case "hashCode" -> System.identityHashCode(proxy);
+								case "equals" -> proxy == args[0];
+								default -> null;
+							};
+						}
+						if (method.getParameterCount() == 4) {
+							net.minecraft.text.Text title =
+									(net.minecraft.text.Text) args[0];
+							@SuppressWarnings("rawtypes")
+							net.minecraft.screen.ScreenHandlerType type =
+									(net.minecraft.screen.ScreenHandlerType) args[1];
+							net.minecraft.client.MinecraftClient client =
+									(net.minecraft.client.MinecraftClient) args[2];
+							int syncId = (int) args[3];
+							var inventory = client.player.getInventory();
+							net.minecraft.screen.ScreenHandler handler =
+									type.create(syncId, inventory);
+							net.minecraft.client.gui.screen.Screen screen =
+									createScreen(handler, inventory, title);
+							if (screen == null) {
+								return null;
+							}
+							client.player.currentScreenHandler = handler;
+							client.setScreen(screen);
+							return null;
+						}
+						if (method.getParameterCount() == 3) {
+							return createScreen(args[0],
+									(net.minecraft.entity.player.PlayerInventory) args[1],
+									(net.minecraft.text.Text) args[2]);
+						}
+						return null;
+					});
+			for (net.minecraft.screen.ScreenHandlerType<?> type : new
+					net.minecraft.screen.ScreenHandlerType<?>[] {
+						com.tk.gun.screen.AmmoStorageScreenHandler.TYPE,
+						com.tk.gun.screen.ArmorModificationTableScreenHandler.TYPE,
+						com.tk.gun.screen.BackpackModificationTableScreenHandler.TYPE,
+						com.tk.gun.screen.RecipeEditorScreenHandler.TYPE
+					}) {
+				register.invoke(event, type, screenConstructor);
+			}
+			com.tk.gun.client.screen.AmmoStorageScreen.markLoaderRegistered();
+		} catch (Throwable throwable) {
+			com.tk.gun.TkGun.LOGGER.error(
+					"[mechaniciancombat] NeoForge 弹药环菜单注册失败",
+					throwable);
+		}
+	}
+
+	private static net.minecraft.client.gui.screen.Screen createScreen(
+			Object handler, net.minecraft.entity.player.PlayerInventory inventory,
+			net.minecraft.text.Text title) {
+		if (handler instanceof com.tk.gun.screen.AmmoStorageScreenHandler ammo) {
+			return new com.tk.gun.client.screen.AmmoStorageScreen(
+					ammo, inventory, title);
+		}
+		if (handler instanceof com.tk.gun.screen
+				.ArmorModificationTableScreenHandler armor) {
+			return new com.tk.gun.client.screen.ArmorModificationTableScreen(
+					armor, inventory, title);
+		}
+		if (handler instanceof com.tk.gun.screen
+				.BackpackModificationTableScreenHandler backpack) {
+			return new com.tk.gun.client.screen.BackpackModificationTableScreen(
+					backpack, inventory, title);
+		}
+		if (handler instanceof com.tk.gun.screen.RecipeEditorScreenHandler recipe) {
+			return new com.tk.gun.client.screen.RecipeEditorScreen(
+					recipe, inventory, title);
+		}
+		return null;
 	}
 
 	@SuppressWarnings({"rawtypes", "unchecked"})
@@ -138,8 +236,15 @@ public final class NeoForgeClientBootstrap {
 				com.tk.gun.client.entity.HunterSpearReturnEntityRenderer::new);
 		event.registerEntityRenderer(com.tk.gun.TkGunServer.STEEL_ARROW_IMPACT_ENTITY,
 				com.tk.gun.client.entity.SteelArrowImpactEntityRenderer::new);
+		event.registerEntityRenderer(
+				com.tk.gun.TkGunServer.ARMOR_DRESSING_PERFORMER_ENTITY,
+				com.tk.gun.client.entity
+						.ArmorDressingPerformerRenderer::new);
 		event.registerEntityRenderer(com.tk.gun.TkGunServer.SOUL_ANCHOR_ENTITY,
 				com.tk.gun.client.entity.SoulAnchorProjectileGeoRenderer::new);
+		event.registerBlockEntityRenderer(
+				com.tk.gun.TkGunServer.ARMOR_DRESSING_STATION_BLOCK_ENTITY,
+				context -> new com.tk.gun.client.ArmorDressingStationRenderer());
 	}
 
 	@SuppressWarnings({"rawtypes", "unchecked"})

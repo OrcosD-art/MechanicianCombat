@@ -3,6 +3,7 @@ package com.tk.gun.entity;
 import com.tk.gun.TkGun;
 import com.tk.gun.TkGunServer;
 import com.tk.gun.TkGunParticles;
+import com.tk.gun.CombatTargeting;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.LivingEntity;
@@ -161,11 +162,11 @@ public final class WarBannerEntity extends Entity implements GeoEntity {
 			return true;
 		}
 		PlayerEntity owner = owner();
+		if (CombatTargeting.isFriendlyTo(candidate, owner)) {
+			return true;
+		}
 		if (owner == null) {
 			return false;
-		}
-		if (candidate.isTeammate(owner)) {
-			return true;
 		}
 		if (candidate instanceof TameableEntity pet
 				&& ownerUuid != null

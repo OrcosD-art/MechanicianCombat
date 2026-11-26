@@ -186,17 +186,58 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 
 	static Vec3f transform(String[] path, Map<String, BonePose> bones,
 			Set<String> channels, TransformType type, Vec3f fallback) {
+		String directName = path[path.length - 1];
+		boolean armPath = directName.equals("arm_left")
+				|| directName.equals("arm_right");
+		if (armPath && type == TransformType.POSITION) {
+			BonePose arm = bones.get(directName);
+			if (arm != null) {
+				// Move only the arm origin through the body/chest parents.
+				// The arm's own rotation happens around that origin and must not
+				// participate in shoulder-position reconstruction. Including it
+				// against a vanilla fallback pivot caused visible drift.
+				Matrix4f parent = new Matrix4f();
+				for (String parentName : new String[]{"body", "chest"}) {
+					BonePose pose = bones.getOrDefault(
+							parentName, BonePose.ZERO);
+					if (channels.contains(parentName + ".position")) {
+						parent.translate(localTranslation(pose));
+					}
+					Vector3f pivot = pivot(pose);
+					parent.translate(pivot);
+					if (channels.contains(parentName + ".rotation")) {
+						parent.rotate(rotation(pose));
+					}
+					parent.translate(new Vector3f(pivot).negate());
+				}
+				Vector3f restPivot = new Vector3f(
+						arm.pivotX(), arm.pivotY(), arm.pivotZ());
+				Vector3f armOrigin = new Vector3f(
+						arm.pivotX() - arm.x(),
+						arm.pivotY() + arm.y(),
+						arm.pivotZ() + arm.z());
+				Vector3f delta = parent.transformPosition(armOrigin)
+						.sub(restPivot);
+				return new Vec3f(
+						fallback.getX() - delta.x(),
+						fallback.getY() - delta.y(),
+						fallback.getZ() + delta.z());
+			}
+		}
 		if (type == TransformType.ROTATION) {
 			Quaternionf combined = new Quaternionf();
 			boolean hasRotation = false;
 			for (int i = 0; i < path.length - 1; i++) {
-				if (channels.contains(path[i] + ".rotation")) {
+				boolean parentEnabled = !armPath
+						|| com.tk.gun.client.LocomotionIsolationDebug
+								.armBridgeRotationEnabled(path[i]);
+				if (parentEnabled
+						&& channels.contains(path[i] + ".rotation")) {
 					combined.mul(playerRotation(
 							bones.getOrDefault(path[i], BonePose.ZERO)));
 					hasRotation = true;
 				}
 			}
-			String directName = path[path.length - 1];
 			if (channels.contains(directName + ".rotation")) {
 				combined.mul(playerRotation(
 						bones.getOrDefault(directName, BonePose.ZERO)));
@@ -212,10 +253,20 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 
 		boolean hasPositionEffect = false;
 		Matrix4f transform = new Matrix4f();
-		for (String name : path) {
+		for (int i = 0; i < path.length; i++) {
+			String name = path[i];
 			BonePose pose = bones.getOrDefault(name, BonePose.ZERO);
-			boolean hasPosition = channels.contains(name + ".position");
-			boolean hasRotation = channels.contains(name + ".rotation");
+			boolean direct = name.equals(directName);
+			boolean parentTransformEnabled = !armPath || direct
+					|| com.tk.gun.client.LocomotionIsolationDebug
+							.armBridgeParentPositionEnabled();
+			boolean parentRotationEnabled = direct || !armPath
+					|| com.tk.gun.client.LocomotionIsolationDebug
+							.armBridgeRotationEnabled(name);
+			boolean hasPosition = parentTransformEnabled
+					&& channels.contains(name + ".position");
+			boolean hasRotation = parentRotationEnabled
+					&& channels.contains(name + ".rotation");
 			if (hasPosition) {
 				transform.translate(localTranslation(pose));
 				hasPositionEffect = true;
@@ -301,6 +352,16 @@ public final class BowgunPlayerAnimatorPose implements IAnimation {
 
 	private static Map<String, Set<String>> channels(Identifier id) {
 		return ANIMATION_CHANNELS.computeIfAbsent(id, BowgunPlayerAnimatorPose::parseChannels);
+	}
+
+	public static boolean hasChannel(Identifier animationResource,
+			String animation, String channel) {
+		if (animationResource == null || animation == null || channel == null) {
+			return false;
+		}
+		return channels(animationResource)
+				.getOrDefault(animation, Set.of())
+				.contains(channel);
 	}
 
 	private static Map<String, Set<String>> parseChannels(Identifier id) {

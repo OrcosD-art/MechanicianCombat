@@ -523,7 +523,8 @@ public final class MoltenGolemEntity extends IronGolemEntity implements GeoEntit
 			return false;
 		}
 		PlayerEntity owner = getOwner();
-		if (isOwner(entity) || (owner != null && entity.isTeammate(owner))) {
+		if (isOwner(entity)
+				|| CombatTargeting.isFriendlyTo(entity, owner)) {
 			return true;
 		}
 		UUID ownerUuid = getOwnerUuid();

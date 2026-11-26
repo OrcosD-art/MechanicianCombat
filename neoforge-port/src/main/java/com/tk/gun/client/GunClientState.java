@@ -92,15 +92,6 @@ public final class GunClientState {
 		 * 而 AIM_HOLD 是 CONTINUE（保持当前姿势）→ 结果"保持"保成了 idle（用户看到的就是"收枪动作"）。
 		 */
 		public int holdUntil;
-		/**
-		 * 快速蹲射过门动画的尾帧保持名。
-		 *
-		 * <p>AIM_SLIDE / AIM_ROLL 只有几 tick，客户端镜像可能先过期回 IDLE，
-		 * 而服务端的 AIM_HOLD 包晚一拍到达。这里跨过这个边界保留同一段
-		 * sliding_fast_ready / rolling_fast_ready，直到首次射击或切入别的动作，
-		 * 避免 GeckoLib 在 Focus_hold 与快速预备动画之间来回取样造成前段重播。
-		 */
-		public String readyHoldAnimation;
 		/** 本地先按下的翻滚：服务端状态包到达前先锁一帧 ROLL，避免闪一帧 run。 */
 		public boolean predictedRoll;
 		public int predictedRollTicks;
@@ -178,19 +169,6 @@ public final class GunClientState {
 			e.localDodgeLockUntil = 0;
 			e.nextDodgeSlide = false;
 		}
-		if (newShotFrame && e.state == TkGun.State.AIM_HOLD) {
-			e.readyHoldAnimation = null;
-		}
-		if (e.state == TkGun.State.AIM_SLIDE) {
-			e.readyHoldAnimation = "sliding_fast_ready";
-		} else if (e.state == TkGun.State.AIM_ROLL) {
-			e.readyHoldAnimation = "rolling_fast_ready";
-		} else if (e.state != TkGun.State.IDLE && e.state != TkGun.State.AIM_HOLD) {
-			e.readyHoldAnimation = null;
-		}
-		if (!e.focus && e.state == TkGun.State.IDLE) {
-			e.readyHoldAnimation = null;
-		}
 		boolean enteredRoll = newState == TkGun.State.ROLL && previousState != TkGun.State.ROLL;
 		e.dashing = payload.dashing();
 		e.kineticSwordBoost = payload.kineticSwordBoost();
@@ -260,7 +238,6 @@ public final class GunClientState {
 		} else {
 			// FIRE owns the focus shooting clip; do not let the fast-deploy
 			// tail remain eligible and override it after the next state packet.
-			e.readyHoldAnimation = null;
 		}
 	}
 
@@ -516,7 +493,6 @@ public final class GunClientState {
 		e.predictedRoll = false;
 		e.predictedRollTicks = 0;
 		e.holdUntil = 0;
-		e.readyHoldAnimation = null;
 		e.nextDodgeSlide = false;
 		e.localDodgeLockUntil = 0;
 	}
@@ -554,12 +530,12 @@ public final class GunClientState {
 			case IDLE:
 				return "idle";                       // 待机（作者新做的 idle）
 			case AIM:
-			case AIM_FAST:
 				return "Focus_ready";                // 架枪（倍速按状态分三档，见 speedFor）
+			case AIM_FAST:
 			case AIM_SLIDE:
 				return "sliding_fast_ready";
 			case AIM_ROLL:
-				return "rolling_fast_ready";         // 翻滚后的快速蹲射过门
+				return "rolling_fast_ready";
 			case AIM_HOLD:
 				// 打完保持：客户端其实用 CONTINUE 什么都不换（就停在射击动画尾帧），
 				// 这里返回名字只是为了让日志/演示截图上的状态名好看、可读。
@@ -603,8 +579,8 @@ public final class GunClientState {
 
 	/**
 	 * 动画倍速。**架枪三档**和 {@link TkGun#AIM_TICKS_NORMAL}/{@link TkGun#AIM_TICKS_FAST}/
-	 * {@link TkGun#AIM_TICKS_SLIDE} 是同一套数：普通右键 0.83x、快速举枪 1x，
-	 * sliding_fast_ready 也按作者原速 1x 播放。
+	 * {@link TkGun#AIM_TICKS_SLIDE} 是同一套数。所有部署都使用 Focus_ready
+	 * 的 1 秒时间轴，并按状态时长缩放。
 	 */
 	/** The authored jump clip covers ascent; fall covers the descent. */
 	public static String skillJumpAnimation(int entityId) {
@@ -635,20 +611,13 @@ public final class GunClientState {
 		if (e == null) {
 			return 1.0D;
 		}
-		// 短过门状态在客户端到点后先保留原倍速一帧，等服务端 AIM_HOLD 接替；
-		// 否则会短暂切回 1.0 倍并重新取样同一段动画。
-		if (e.readyHoldAnimation != null
-				&& (e.state == TkGun.State.AIM_SLIDE || e.state == TkGun.State.AIM_HOLD
-				|| e.state == TkGun.State.AIM_ROLL)) {
-			return 1.0D;
-		}
 		if (!e.active()) {
 			return 1.0D;
 		}
 		return switch (e.state) {
-			case AIM -> 0.83D;
-			// 快档现在是作者新做的 `fast_ready`（0.667 秒），所以 1 倍速就够快；
-			// sliding_fast_ready 按作者原速播放，状态长度与 0.625 秒动画一致。
+			// Normal deploy uses the authored 1 s Focus_ready timeline at the
+			// original 0.833x pace. The quick clips are authored at 0.5 s.
+			case AIM -> 20.0D / TkGun.AIM_TICKS_NORMAL;
 			case AIM_FAST -> 1.0D;
 			case AIM_SLIDE -> 1.0D;
 			case AIM_ROLL -> 1.0D;

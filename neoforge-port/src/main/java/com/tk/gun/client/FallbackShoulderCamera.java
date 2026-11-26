@@ -37,6 +37,7 @@ public final class FallbackShoulderCamera {
 
 	private static boolean active;
 	private static boolean initialized;
+	private static boolean stationMode;
 	private static float cameraYaw;
 	private static float cameraPitch;
 	private static double distance = DEFAULT_DISTANCE;
@@ -51,18 +52,69 @@ public final class FallbackShoulderCamera {
 	}
 
 	public static boolean usesFallback(MinecraftClient client) {
-		return !SHOULDER_SURFING_INSTALLED && isEligible(client);
+		return isCameraEligible(client);
+	}
+
+	private static boolean isCameraEligible(MinecraftClient client) {
+		return stationMode && isStationEligible(client)
+				|| !SHOULDER_SURFING_INSTALLED && isEligible(client);
+	}
+
+	private static boolean isStationEligible(MinecraftClient client) {
+		return client != null
+				&& client.player != null
+				&& !client.player.isSpectator()
+				&& ArmorDressingClientState.holdsCameraSession(
+						client.player.getId())
+				&& client.options.getPerspective()
+						== Perspective.THIRD_PERSON_BACK;
 	}
 
 	private static boolean isEligible(MinecraftClient client) {
 		return client != null
 				&& client.player != null
 				&& !client.player.isSpectator()
+				&& !stationMode
+				&& !ArmorDressingClientState.locksInput(
+						client.player.getId())
 				&& TkGun.holdingGun(client.player)
 				&& client.options.getPerspective() == Perspective.THIRD_PERSON_BACK;
 	}
 
+	public static void enterStation(MinecraftClient client) {
+		if (client == null || client.player == null
+				|| client.gameRenderer == null || stationMode) {
+			return;
+		}
+		stationMode = true;
+		active = true;
+		initialized = true;
+		cameraYaw = client.gameRenderer.getCamera().getYaw();
+		cameraPitch = client.gameRenderer.getCamera().getPitch();
+		distance = DEFAULT_DISTANCE;
+		side = DEFAULT_SIDE;
+		height = DEFAULT_HEIGHT;
+	}
+
+	public static void tickStation(MinecraftClient client) {
+		if (stationMode) {
+			tick(client);
+		}
+	}
+
+	public static void leaveStation(MinecraftClient client) {
+		if (!stationMode) {
+			return;
+		}
+		stationMode = false;
+		leave(client);
+	}
+
 	public static void tick(MinecraftClient client) {
+		if (stationMode && !isStationEligible(client)) {
+			leave(client);
+			return;
+		}
 		if (!usesFallback(client)) {
 			if (active) {
 				leave(client);
@@ -82,21 +134,26 @@ public final class FallbackShoulderCamera {
 		double targetDistance = DEFAULT_DISTANCE;
 		double targetSide = DEFAULT_SIDE;
 		double targetHeight = DEFAULT_HEIGHT;
-		boolean aiming = GunCamera.aiming(client);
-		boolean focusing = GunClientState.focusish(client.player.getId());
-		GunClientState.Entry state = GunClientState.get(client.player.getId());
-		boolean action = state != null && (state.state == TkGun.State.ROLL
-				|| state.state == TkGun.State.ROLL_TO_IDLE
-				|| state.state == TkGun.State.SLIDE
-				|| state.state == TkGun.State.SLIDE_READY);
-		if (action) {
-			targetDistance = ACTION_DISTANCE;
-			targetSide = ACTION_SIDE;
-			targetHeight = ACTION_HEIGHT;
-		} else if (aiming || focusing) {
-			targetDistance = AIM_DISTANCE;
-			targetSide = AIM_SIDE;
-			targetHeight = AIM_HEIGHT;
+		if (!stationMode) {
+			boolean aiming = GunCamera.aiming(client);
+			boolean focusing = GunClientState.focusish(
+					client.player.getId());
+			GunClientState.Entry state =
+					GunClientState.get(client.player.getId());
+			boolean action = state != null
+					&& (state.state == TkGun.State.ROLL
+							|| state.state == TkGun.State.ROLL_TO_IDLE
+							|| state.state == TkGun.State.SLIDE
+							|| state.state == TkGun.State.SLIDE_READY);
+			if (action) {
+				targetDistance = ACTION_DISTANCE;
+				targetSide = ACTION_SIDE;
+				targetHeight = ACTION_HEIGHT;
+			} else if (aiming || focusing) {
+				targetDistance = AIM_DISTANCE;
+				targetSide = AIM_SIDE;
+				targetHeight = AIM_HEIGHT;
+			}
 		}
 
 		double frameDelta = Math.min(0.25D,
@@ -110,13 +167,19 @@ public final class FallbackShoulderCamera {
 	/** Applies mouse deltas to the fallback camera and prevents vanilla body rotation. */
 	public static boolean turn(ClientPlayerEntity player, double deltaX, double deltaY) {
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (!active || !initialized || client.player != player || !isEligible(client)) {
+		if (!active || !initialized || client.player != player
+				|| !isCameraEligible(client)) {
 			return false;
 		}
 		cameraYaw = MathHelper.wrapDegrees(
 				cameraYaw + (float) deltaX * 0.15F);
 		cameraPitch = MathHelper.clamp(
 				cameraPitch + (float) deltaY * 0.15F, -90.0F, 90.0F);
+		if (stationMode) {
+			// Orbit the workstation camera without feeding mouse yaw back into
+			// the player entity or its animated body and head.
+			return true;
+		}
 		player.setHeadYaw(cameraYaw);
 		player.setPitch(cameraPitch);
 		if (ShoulderCouplingState.shouldCoupleCamera(client)) {
@@ -131,7 +194,7 @@ public final class FallbackShoulderCamera {
 			return null;
 		}
 		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player != player || !isEligible(client)) {
+		if (client.player != player || !isCameraEligible(client)) {
 			return null;
 		}
 
@@ -162,7 +225,9 @@ public final class FallbackShoulderCamera {
 	}
 
 	public static void leave(MinecraftClient client) {
-		if (active && initialized && client.player != null) {
+		if (active && initialized && client.player != null
+				&& !ArmorDressingClientState.holdsCameraSession(
+						client.player.getId())) {
 			// Preserve the visible camera direction when returning to vanilla controls.
 			client.player.setYaw(cameraYaw);
 			client.player.setPitch(cameraPitch);
@@ -173,6 +238,7 @@ public final class FallbackShoulderCamera {
 		}
 		active = false;
 		initialized = false;
+		stationMode = false;
 	}
 
 	public static float cameraYaw() {

@@ -1,12 +1,17 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.client.ArmorDressingClientState;
 import com.tk.gun.client.HelmetClientState;
 import com.tk.gun.client.HunterSpearHeldRenderer;
+import com.tk.gun.client.JumpBackpackClientState;
 import com.tk.gun.client.WarBannerHeldRenderer;
+import com.tk.gun.client.MechanicianArmorGeometry;
+import com.tk.gun.client.PlayerLocomotionAnimation;
 import com.tk.gun.client.rig.BowgunRigClient;
 import com.tk.gun.client.rig.PlayerLocomotionRigClient;
 import com.tk.gun.item.MechanicianUndersuitItem;
+import com.tk.gun.item.MechanicianArmorPiece;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.client.model.ModelPart;
 import net.minecraft.client.render.entity.model.PlayerEntityModel;
@@ -41,9 +46,13 @@ public abstract class PlayerEntityRendererRigMixin {
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
-			at = @At("HEAD"))
+			at = @At("HEAD"), cancellable = true)
 	private void mechaniciancombat$renderRig(AbstractClientPlayerEntity player, float yaw, float tickDelta,
 								 MatrixStack matrices, VertexConsumerProvider consumers, int light, CallbackInfo ci) {
+		if (ArmorDressingClientState.hidesPlayerRenderer(player.getId())) {
+			ci.cancel();
+			return;
+		}
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
 		if (renderer.getModel() instanceof PlayerEntityModel<?> model) {
 			mechaniciancombat$modelVisibility = new boolean[]{
@@ -59,14 +68,17 @@ public abstract class PlayerEntityRendererRigMixin {
 					model.jacket.visible
 			};
 		}
-		PlayerLocomotionRigClient.renderIfActive(
-				player, yaw, tickDelta, matrices, consumers, light);
-		BowgunRigClient.renderIfHolding(
-				player, yaw, tickDelta, matrices, consumers, light);
-		WarBannerHeldRenderer.renderIfActive(
-				player, yaw, tickDelta, matrices, consumers, light);
-		HunterSpearHeldRenderer.renderIfActive(
-				player, yaw, tickDelta, matrices, consumers, light);
+		if (!PlayerLocomotionAnimation.isFixedIdlePreview(
+				player.getId())) {
+			PlayerLocomotionRigClient.renderIfActive(
+					player, yaw, tickDelta, matrices, consumers, light);
+			BowgunRigClient.renderIfHolding(
+					player, yaw, tickDelta, matrices, consumers, light);
+			WarBannerHeldRenderer.renderIfActive(
+					player, yaw, tickDelta, matrices, consumers, light);
+			HunterSpearHeldRenderer.renderIfActive(
+					player, yaw, tickDelta, matrices, consumers, light);
+		}
 	}
 
 	@Inject(method = "method_4215(Lnet/minecraft/class_742;FFLnet/minecraft/class_4587;Lnet/minecraft/class_4597;I)V",
@@ -100,13 +112,20 @@ public abstract class PlayerEntityRendererRigMixin {
 	@Inject(method = "method_4218(Lnet/minecraft/class_742;)V", at = @At("TAIL"))
 	private void mechaniciancombat$suppressStackedVanillaCrouch(AbstractClientPlayerEntity player,
 													CallbackInfo ci) {
-		if (!TkGun.holdingGun(player)) {
+		boolean backpackPose = JumpBackpackClientState
+				.suppressSneakPose(player.getId());
+		boolean fixedIdlePreview = PlayerLocomotionAnimation
+				.isFixedIdlePreview(player.getId());
+		if (!fixedIdlePreview && !TkGun.holdingGun(player)
+				&& !backpackPose) {
 			mechaniciancombat$hideUndersuitBody(player);
 			mechaniciancombat$updateHelmetHair(player);
 			return;
 		}
 		PlayerEntityRenderer renderer = (PlayerEntityRenderer) (Object) this;
-		if (renderer.getModel() instanceof PlayerEntityModel model) {
+		if (renderer.getModel() instanceof PlayerEntityModel model
+				&& (fixedIdlePreview || TkGun.holdingGun(player)
+						|| backpackPose)) {
 			model.sneaking = false;
 		}
 		mechaniciancombat$hideUndersuitBody(player);
@@ -127,6 +146,18 @@ public abstract class PlayerEntityRendererRigMixin {
 		if (MechanicianUndersuitItem.isEquipped(player)) {
 			arm.visible = false;
 			sleeve.visible = false;
+			PlayerEntityRenderer renderer =
+					(PlayerEntityRenderer) (Object) this;
+			if (renderer.getModel() instanceof PlayerEntityModel<?> model) {
+				MechanicianArmorGeometry.Part part =
+						arm == model.rightArm
+								? MechanicianArmorGeometry.Part.RIGHT_ARM
+								: MechanicianArmorGeometry.Part.LEFT_ARM;
+				MechanicianArmorGeometry.render(
+						MechanicianArmorPiece.UNDERSUIT, matrices,
+						consumers, model, light, player, 0.0F, 0.0F,
+						0.0F, part);
+			}
 		}
 	}
 

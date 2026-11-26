@@ -1,6 +1,7 @@
 package com.tk.gun.mixin;
 
 import com.tk.gun.TkGun;
+import com.tk.gun.client.JumpBackpackClientState;
 import com.tk.gun.client.SoulAnchorSkillClientState;
 import net.minecraft.client.network.ClientPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
@@ -18,6 +19,8 @@ public abstract class ClientPlayerCrouchGuardMixin {
 	private void mechaniciancombat$suppressClientSneaking(CallbackInfoReturnable<Boolean> cir) {
 		ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
 		if (TkGun.holdingGun(player)
+				|| JumpBackpackClientState.suppressSneakPose(
+						player.getId())
 				|| SoulAnchorSkillClientState.suppressSneakPose(
 						player.getId())) {
 			cir.setReturnValue(false);
@@ -28,6 +31,8 @@ public abstract class ClientPlayerCrouchGuardMixin {
 	private void mechaniciancombat$suppressClientSneakingPose(CallbackInfoReturnable<Boolean> cir) {
 		ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
 		if (TkGun.holdingGun(player)
+				|| JumpBackpackClientState.suppressSneakPose(
+						player.getId())
 				|| SoulAnchorSkillClientState.suppressSneakPose(
 						player.getId())) {
 			cir.setReturnValue(false);

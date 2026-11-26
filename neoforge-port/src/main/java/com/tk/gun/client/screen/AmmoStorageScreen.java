@@ -18,6 +18,7 @@ import java.lang.reflect.Proxy;
 public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHandler> {
 	private static final Identifier TEXTURE =
 			Identifier.of("mechaniciancombat", "textures/gui/ammo_storage.png");
+	private static boolean loaderRegistered;
 	private final List<int[]> ringCenters = new ArrayList<>();
 
 	public AmmoStorageScreen(AmmoStorageScreenHandler handler, PlayerInventory inventory, Text title) {
@@ -40,6 +41,9 @@ public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHand
 		// 整个面板（背景、槽位、点击区域共用 x/y）向左、向上各偏移 1 像素。
 		x -= 1;
 		y -= 1;
+		com.tk.gun.TkGun.LOGGER.info(
+				"[mechaniciancombat] 弹药环屏幕已创建 sync={}",
+				handler.syncId);
 	}
 
 	/**
@@ -47,6 +51,9 @@ public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHand
 	 * {@code Provider} 接口，避免再给原版类加一个只用于注册的 mixin。
 	 */
 	public static void registerClientScreen() {
+		if (loaderRegistered) {
+			return;
+		}
 		try {
 			// 生产环境会重映射类名/方法名，不能硬编码 register/Provider。
 			// 通过结构寻找：一个只含 create(handler, inventory, title) 的私有接口 + 接收它的静态方法。
@@ -80,9 +87,18 @@ public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHand
 					.orElseThrow(() -> new IllegalStateException("HandledScreens.register not found"));
 			register.setAccessible(true);
 			register.invoke(null, AmmoStorageScreenHandler.TYPE, provider);
+			com.tk.gun.TkGun.LOGGER.info(
+					"[mechaniciancombat] 弹药环屏幕注册完成（反射兼容路径）");
 		} catch (Throwable t) {
 			com.tk.gun.TkGun.LOGGER.error("[mechaniciancombat] 无法注册机械师弹药环屏幕", t);
 		}
+	}
+
+	/** Called by NeoForge's official menu-screen event before client setup. */
+	public static void markLoaderRegistered() {
+		loaderRegistered = true;
+		com.tk.gun.TkGun.LOGGER.info(
+				"[mechaniciancombat] 弹药环屏幕注册完成（NeoForge 菜单事件）");
 	}
 
 	@Override
@@ -90,6 +106,7 @@ public final class AmmoStorageScreen extends HandledScreen<AmmoStorageScreenHand
 		super.render(context, mouseX, mouseY, delta);
 		// HandledScreen itself does not draw slot tooltips; inventory-like screens do it here.
 		drawMouseoverTooltip(context, mouseX, mouseY);
+		com.tk.gun.client.ModGuiFadeOverlay.render(this, context);
 	}
 
 	@Override

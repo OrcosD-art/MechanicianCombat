@@ -3,7 +3,6 @@ package com.tk.gun.screen;
 import com.tk.gun.TkGunServer;
 import com.tk.gun.item.ArmorPartItem;
 import com.tk.gun.item.ArmorUpgradeData;
-import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -14,11 +13,15 @@ import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
+import net.minecraft.resource.featuretoggle.FeatureSet;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.Identifier;
 
 import java.util.Objects;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Proxy;
+import java.util.Arrays;
 
 /**
  * Equipment viewer and chestplate module installer.
@@ -62,11 +65,7 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 	};
 
 	public static final ScreenHandlerType<ArmorModificationTableScreenHandler> TYPE =
-			ExtendedScreenHandlerType.create(
-					(syncId, playerInventory, pos) ->
-							new ArmorModificationTableScreenHandler(
-									syncId, playerInventory, pos),
-					BlockPos.PACKET_CODEC);
+			createVanillaType();
 
 	private final BlockPos pos;
 	private final PlayerEntity owner;
@@ -127,6 +126,11 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 			addSlot(new Slot(playerInventory, column, 8 + column * 18, 142));
 		}
 		syncTableState();
+	}
+
+	private ArmorModificationTableScreenHandler(
+			int syncId, PlayerInventory playerInventory) {
+		this(syncId, playerInventory, BlockPos.ORIGIN);
 	}
 
 	@Override
@@ -282,6 +286,10 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 		return TYPE;
 	}
 
+	public BlockPos pos() {
+		return pos;
+	}
+
 	@Override
 	public void onClosed(PlayerEntity player) {
 		// Persist modules that were inserted immediately before closing. The
@@ -293,11 +301,56 @@ public final class ArmorModificationTableScreenHandler extends ScreenHandler {
 
 	@Override
 	public boolean canUse(PlayerEntity player) {
-		return player.getWorld().getBlockState(pos)
-				.isOf(TkGunServer.ARMOR_MODIFICATION_TABLE)
+		var state = player.getWorld().getBlockState(pos);
+		return com.tk.gun.block.ArmorDressingStationBlock.isStation(state)
+				&& player instanceof ServerPlayerEntity serverPlayer
+				&& com.tk.gun.block.ArmorDressingStationService
+						.isMounted(serverPlayer)
 				&& player.squaredDistanceTo(
 						pos.getX() + 0.5D,
 						pos.getY() + 0.5D,
 						pos.getZ() + 0.5D) <= 64.0D;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static ScreenHandlerType<ArmorModificationTableScreenHandler>
+			createVanillaType() {
+		try {
+			Class<?> factoryType = Arrays.stream(
+							ScreenHandlerType.class.getDeclaredClasses())
+					.filter(Class::isInterface)
+					.filter(type -> Arrays.stream(type.getDeclaredMethods())
+							.anyMatch(method -> method.getParameterCount() == 2
+									&& method.getParameterTypes()[0] == int.class
+									&& method.getParameterTypes()[1]
+											== PlayerInventory.class))
+					.findFirst()
+					.orElseThrow(() -> new IllegalStateException(
+							"ScreenHandlerType.Factory not found"));
+			Object factory = Proxy.newProxyInstance(
+					ArmorModificationTableScreenHandler.class.getClassLoader(),
+					new Class<?>[]{factoryType},
+					(proxy, method, args) -> {
+						if (method.getDeclaringClass() == Object.class) {
+							return switch (method.getName()) {
+								case "toString" ->
+										"mechaniciancombat:armor_station_factory";
+								case "hashCode" -> System.identityHashCode(proxy);
+								case "equals" -> proxy == args[0];
+								default -> null;
+							};
+						}
+						return new ArmorModificationTableScreenHandler(
+								(int) args[0], (PlayerInventory) args[1]);
+					});
+			Constructor<ScreenHandlerType> constructor =
+					(Constructor<ScreenHandlerType>) ScreenHandlerType.class
+							.getDeclaredConstructor(factoryType, FeatureSet.class);
+			constructor.setAccessible(true);
+			return (ScreenHandlerType<ArmorModificationTableScreenHandler>)
+					constructor.newInstance(factory, FeatureSet.empty());
+		} catch (Throwable throwable) {
+			throw new ExceptionInInitializerError(throwable);
+		}
 	}
 }

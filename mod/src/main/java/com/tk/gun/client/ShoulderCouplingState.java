@@ -24,6 +24,9 @@ public final class ShoulderCouplingState {
 		if (client == null || client.player == null || client.currentScreen != null) {
 			return false;
 		}
+		if (ArmorDressingClientState.locksInput(client.player.getId())) {
+			return false;
+		}
 		if (SoulAnchorSkillClientState.cameraDecoupledDuringAnchor(
 				client.player.getId())) {
 			return false;

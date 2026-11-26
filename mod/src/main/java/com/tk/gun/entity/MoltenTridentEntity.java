@@ -134,7 +134,7 @@ public class MoltenTridentEntity extends TridentEntity {
 		Box search = new Box(before, after).expand(2.0D);
 		for (Entity entity : this.getWorld().getOtherEntities(this, search,
 				e -> e.isAlive() && !e.isSpectator() && e != this.getOwner()
-						&& e.canHit() && !CombatTargeting.isGolem(e)
+						&& e.canHit() && CombatTargeting.isTargetable(e)
 						&& !(e instanceof HunterTurretEntity))) {
 			if (this.mechaniciancombat$hitEntities.contains(entity.getUuid())) {
 				continue;
@@ -273,7 +273,7 @@ public class MoltenTridentEntity extends TridentEntity {
 	@Override
 	protected void onEntityHit(EntityHitResult result) {
 		Entity hitEntity = result.getEntity();
-		if (CombatTargeting.isGolem(hitEntity)) {
+		if (!CombatTargeting.isTargetable(hitEntity)) {
 			return;
 		}
 		float totalHealthBefore = hitEntity instanceof LivingEntity living

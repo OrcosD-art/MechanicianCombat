@@ -14,6 +14,8 @@ import net.minecraft.registry.RegistryKeys;
 /** Shared exclusions for MechanicianCombat attacks, projectiles, and locks. */
 public final class CombatTargeting {
 	public static final String BACKPACK_PROJECTILE_TAG = "mechaniciancombat_backpack_projectile";
+	/** Every player entity is friendly by default, independent of scoreboard teams. */
+	public static final boolean PLAYERS_FRIENDLY_BY_DEFAULT = true;
 
 	private static final RegistryKey<DamageType> GUN_DAMAGE =
 			RegistryKey.of(RegistryKeys.DAMAGE_TYPE, TkGun.id("bolt"));
@@ -24,8 +26,21 @@ public final class CombatTargeting {
 		return entity instanceof MoltenGolemEntity;
 	}
 
+	public static boolean isFriendlyTo(Entity candidate) {
+		return candidate instanceof PlayerEntity;
+	}
+
+	public static boolean isFriendlyTo(Entity candidate, Entity owner) {
+		return candidate != null
+				&& (PLAYERS_FRIENDLY_BY_DEFAULT
+						&& candidate instanceof PlayerEntity
+						|| owner != null && candidate.isTeammate(owner));
+	}
+
 	public static boolean isTargetable(Entity entity) {
-		return entity != null && !isGolem(entity);
+		return entity != null && !isGolem(entity)
+				&& !(PLAYERS_FRIENDLY_BY_DEFAULT
+						&& entity instanceof PlayerEntity);
 	}
 
 	public static boolean isTkGunDamage(DamageSource source) {

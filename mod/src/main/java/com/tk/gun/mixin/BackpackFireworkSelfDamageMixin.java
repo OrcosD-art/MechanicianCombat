@@ -34,11 +34,12 @@ public abstract class BackpackFireworkSelfDamageMixin {
 					target = "Lnet/minecraft/class_1309;method_5643(Lnet/minecraft/class_1282;F)Z"))
 	private boolean mechaniciancombat$skipBackpackOwnerDamage(LivingEntity target, DamageSource source, float amount) {
 		FireworkRocketEntity rocket = (FireworkRocketEntity) (Object) this;
-		if (CombatTargeting.isGolem(target)) {
+		if (!CombatTargeting.isTargetable(target)) {
 			return false;
 		}
 		if (BackpackFireworkData.preventsSelfDamage(rocket.getStack())
-				&& target == rocket.getOwner()) {
+				&& CombatTargeting.isFriendlyTo(
+						target, rocket.getOwner())) {
 			return false;
 		}
 		return target.damage(source, amount);

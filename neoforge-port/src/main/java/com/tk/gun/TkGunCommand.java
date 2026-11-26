@@ -174,7 +174,8 @@ public final class TkGunCommand {
 									ServerPlayerEntity p = EntityArgumentType.getPlayer(ctx, "player");
 									p.setOnGround(true);
 									p.fallDistance = 0.0F;
-									TkGunServer.handleJumpBackpackInput(p, true, 0.0F, 0.0F);
+									TkGunServer.handleJumpBackpackInput(
+											p, true, 0.0F, 0.0F, false);
 									return 1;
 								})))
 				.then(CommandManager.literal("recipeeditor")
@@ -188,6 +189,21 @@ public final class TkGunCommand {
 									(byte) 0);
 							return 1;
 						}))
+				.then(CommandManager.literal("armoranim")
+						.executes(ctx -> spawnArmorAnimation(
+								ctx.getSource().getPlayerOrThrow(), -1.0F))
+						.then(CommandManager.argument("time",
+								com.mojang.brigadier.arguments
+										.DoubleArgumentType.doubleArg(
+												0.0D, 2.5D))
+								.executes(ctx -> spawnArmorAnimation(
+										ctx.getSource().getPlayerOrThrow(),
+										(float) com.mojang.brigadier
+												.arguments.DoubleArgumentType
+												.getDouble(ctx, "time")))))
+				.then(CommandManager.literal("armorstop")
+						.executes(ctx -> stopArmorAnimations(
+								ctx.getSource().getPlayerOrThrow())))
 				// /mechaniciancombat demo <player> <on|off> —— 远程开关客户端的自动演示（自己按键跑全套动作并截图）
 				.then(CommandManager.literal("demo")
 						.then(CommandManager.argument("player", EntityArgumentType.player())
@@ -200,6 +216,49 @@ public final class TkGunCommand {
 													"mechaniciancombat: 演示 " + (on ? "开启" : "关闭") + " -> " + p.getName().getString()), false);
 											return 1;
 										})))));
+	}
+
+	private static int spawnArmorAnimation(
+			ServerPlayerEntity player, float displayTime) {
+		var direction = player.getRotationVec(1.0F);
+		var horizontal = new net.minecraft.util.math.Vec3d(
+				direction.x, 0.0D, direction.z);
+		if (horizontal.lengthSquared() < 0.0001D) {
+			horizontal = net.minecraft.util.math.Vec3d.fromPolar(
+					0.0F, player.getYaw());
+		}
+		horizontal = horizontal.normalize().multiply(2.0D);
+		var position = player.getPos().add(horizontal);
+		var performer =
+				new com.tk.gun.entity.ArmorDressingPerformerEntity(
+						com.tk.gun.TkGunServer
+								.ARMOR_DRESSING_PERFORMER_ENTITY,
+						player.getServerWorld());
+		performer.setPosition(position.x, position.y, position.z);
+		performer.setYaw(player.getYaw());
+		performer.setHeadYaw(player.getYaw());
+		performer.setBodyYaw(player.getYaw());
+		performer.setDisplayTime(displayTime);
+		performer.setAnimationName("盔甲着装");
+		player.getServerWorld().spawnEntity(performer);
+		return 1;
+	}
+
+	private static int stopArmorAnimations(ServerPlayerEntity player) {
+		var box = player.getBoundingBox().expand(64.0D);
+		int removed = 0;
+		for (var performer : player.getServerWorld()
+				.getEntitiesByClass(
+						com.tk.gun.entity.ArmorDressingPerformerEntity.class,
+						box, entity -> true)) {
+			performer.discard();
+			removed++;
+		}
+		final int count = removed;
+		player.sendMessage(Text.literal(
+				"mechaniciancombat: removed armor performers=" + count),
+				false);
+		return removed;
 	}
 
 	private TkGunCommand() {

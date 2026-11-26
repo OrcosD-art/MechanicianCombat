@@ -51,6 +51,11 @@ public final class HelmetClientState {
 				: new Pose("收起", 0.625F);
 	}
 
+	public static boolean isClosedState(LivingEntity entity) {
+		State state = entity == null ? null : STATES.get(entity.getUuid());
+		return state != null && !state.expanded();
+	}
+
 	/**
 	 * The head's second skin layer remains visible through the first 0.25
 	 * seconds of expansion. Folding keeps it hidden until the original 0.38

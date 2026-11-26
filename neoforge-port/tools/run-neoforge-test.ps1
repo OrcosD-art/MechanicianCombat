@@ -161,6 +161,7 @@ for ($i = 0; $i -lt $jvm.Count; $i++) {
 $javaArgs.Add("-Xmx3072m")
 $javaArgs.Add("-Dfml.ignoreInvalidMinecraftCertificates=True")
 $javaArgs.Add("-Dfml.ignorePatchDiscrepancies=True")
+$javaArgs.Add("-Dcustomskinloader.ignorePatchFailure=true")
 $javaArgs.Add($profile.mainClass)
 foreach ($value in $game) {
     $javaArgs.Add($value)

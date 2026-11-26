@@ -57,14 +57,11 @@ public final class MechanicianArmorItem extends ArmorItem implements GeoItem {
 	@Override
 	public TypedActionResult<ItemStack> use(World world, PlayerEntity user,
 											Hand hand) {
-		if (!MechanicianUndersuitItem.isEquipped(user)) {
-			if (!world.isClient()) {
-				user.sendMessage(Text.translatable(
-						"message.mechaniciancombat.requires_undersuit"), true);
-			}
-			return TypedActionResult.fail(user.getStackInHand(hand));
+		if (!world.isClient()) {
+			user.sendMessage(Text.translatable(
+					"message.mechaniciancombat.armor_station_only"), true);
 		}
-		return super.use(world, user, hand);
+		return TypedActionResult.fail(user.getStackInHand(hand));
 	}
 
 	@Override

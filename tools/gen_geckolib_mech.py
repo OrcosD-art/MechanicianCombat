@@ -27,7 +27,8 @@ REBUILD = r"D:\codex\mod\rebuild"
 TOOLS = os.path.join(REBUILD, "tools")
 JAVA = r"C:\Program Files\Java\jdk-21\bin\java.exe"
 W = os.path.join(REBUILD, "mod")
-RES = os.path.join(W, "src", "main", "resources", "assets", "tkgun")
+RES = os.path.join(W, "src", "main", "resources", "assets",
+                   "mechaniciancombat")
 OUT_GEO = os.path.join(RES, "geo", "entity", "bowgun_rig.geo.json")
 OUT_ANIM = os.path.join(RES, "animations", "entity", "bowgun_rig.animation.json")
 OUT_TEX = os.path.join(RES, "textures", "entity", "bowgun_gun.png")
@@ -275,7 +276,13 @@ def split_foreign_cubes(geo_text, model_doc):
 #   所以客户端在 `client/TkGunMolang.install()` 里把这 4 个 query 对 tkgun rig 重新实现成
 #   "按被替换的那个玩家求值"，**动画里的表达式一个字都不用改**。
 #   这张表留着当"万一哪天要把某些表达式清成 0"的开关（目前是空的 = 不改）。
-MOLANG_FIXES = ()
+MOLANG_FIXES = (
+    (
+        "query.head_y_rotation > 90 ? "
+        "-(query.head_y_rotation - 90) / 6 : 0",
+        "math.min(0, -(query.head_y_rotation - 90) / 6)",
+    ),
+)
 
 # 作者音效关键帧的 `file`（= 素材包里的 ogg）→ 我们给这段动画音效起的名字。
 # 客户端 `BowgunRig.onSoundKeyframe` 按名字决定放不放（见那边的注释）。
@@ -336,6 +343,125 @@ UPPER_ONLY_ANIMS = (
 # 把每个通道的**最后一个关键帧**拎出来当 t=0 的固定值：
 # `stand_shooting_hold` 用于腰射举枪时的端枪静姿。
 HOLD_POSE_ANIMS = ("stand_shooting",)
+
+
+def _numeric_time(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _channel_vector(value):
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return None
+    if isinstance(value.get("post"), list):
+        return value["post"]
+    if isinstance(value.get("pre"), list):
+        return value["pre"]
+    if isinstance(value.get("vector"), list):
+        return value["vector"]
+    return None
+
+
+def _sample_channel(channel, seconds):
+    """Sample the exported linear channel at a given time."""
+    static = _channel_vector(channel)
+    if static is not None:
+        return copy.deepcopy(static)
+    if not isinstance(channel, dict):
+        return None
+    points = []
+    for key, value in channel.items():
+        time = _numeric_time(key)
+        vector = _channel_vector(value)
+        if time is not None and vector is not None:
+            points.append((time, vector))
+    if not points:
+        return None
+    points.sort(key=lambda item: item[0])
+    if seconds <= points[0][0]:
+        return copy.deepcopy(points[0][1])
+    if seconds >= points[-1][0]:
+        return copy.deepcopy(points[-1][1])
+    for index in range(len(points) - 1):
+        left_t, left = points[index]
+        right_t, right = points[index + 1]
+        if left_t <= seconds <= right_t:
+            if right_t - left_t <= 1.0E-8:
+                return copy.deepcopy(right)
+            amount = (seconds - left_t) / (right_t - left_t)
+            return [
+                float(left[axis])
+                + (float(right[axis]) - float(left[axis])) * amount
+                for axis in range(3)
+            ]
+    return copy.deepcopy(points[-1][1])
+
+
+def derive_stand_transition_variants(doc):
+    """
+    Derive the held standing pose and reverse-resume clips.
+
+    GeckoLib clamps animation time at zero, so it cannot play a controller at
+    negative speed. A re-press during stand_shooting_back-idle needs a clip that
+    starts at the current return frame and reaches the raised pose. The five
+    one-tick variants preserve that continuity without runtime seeking.
+    """
+    animations = doc.get("animations") or {}
+    raise_animation = animations.get("idle-to_stand_shooting")
+    return_animation = animations.get("stand_shooting_back-idle")
+    if raise_animation is None or return_animation is None:
+        return []
+
+    produced = []
+    hold = copy.deepcopy(raise_animation)
+    hold.pop("sound_effects", None)
+    hold.pop("particle_effects", None)
+    hold.pop("timeline", None)
+    hold["loop"] = "hold"
+    hold["animation_length"] = 0.05
+    for bones in (hold.get("bones") or {}).values():
+        for channel_name, channel in list(bones.items()):
+            value = _sample_channel(
+                channel, float(raise_animation.get("animation_length") or 0.0))
+            if value is not None:
+                bones[channel_name] = {"0.0": value}
+    animations["stand_shooting_hold"] = hold
+    produced.append("stand_shooting_hold")
+
+    return_length = float(return_animation.get("animation_length") or 0.25)
+    total_ticks = max(1, int(round(return_length * 20.0)))
+    for elapsed_ticks in range(1, total_ticks + 1):
+        name = "stand_shooting_resume_%d" % elapsed_ticks
+        duration = elapsed_ticks / 20.0
+        resume = {
+            "loop": "hold",
+            "animation_length": duration,
+            "bones": {},
+        }
+        for bone_name, channels in (
+                return_animation.get("bones") or {}).items():
+            output_bones = {}
+            for channel_name, channel in channels.items():
+                values = {}
+                for output_tick in range(elapsed_ticks + 1):
+                    source_time = (elapsed_ticks - output_tick) / 20.0
+                    value = _sample_channel(channel, source_time)
+                    if value is not None:
+                        values[("%.5f" % (output_tick / 20.0))
+                               .rstrip("0").rstrip(".")] = value
+                if values:
+                    output_bones[channel_name] = values
+            if output_bones:
+                resume["bones"][bone_name] = output_bones
+        animations[name] = resume
+        produced.append(name)
+    print("  派生站立举枪过渡 %d 段: %s" % (
+        len(produced), ", ".join(produced)))
+    return produced
 
 
 def merge_duplicate_focus_variants(doc):
@@ -460,6 +586,7 @@ def postprocess_animations(anim_text, model_doc, extra_textures):
     derive_shell_animations(doc)
     derive_upper_variants(doc)
     derive_lower_variants(doc)
+    derive_stand_transition_variants(doc)
     return json.dumps(doc, ensure_ascii=False)
     # 注：`derive_hands_split(doc)`（双手/身体切分）2026-10-17 已按用户要求**停用**，函数留着参考。
 
@@ -734,6 +861,7 @@ def main():
         print("  切格式告警:", info["format_error"])
 
     wrote = []
+    wrote_animation = False
     for e in info["exports"]:
         name = (e.get("name") or "").lower()
         content = e.get("content")
@@ -762,6 +890,22 @@ def main():
             anims = json.loads(content)["animations"]
             print("  动画 %d 段: %s" % (len(anims), ", ".join(anims.keys())))
             wrote.append(("anim", OUT_ANIM, os.path.getsize(OUT_ANIM)))
+            wrote_animation = True
+    if not wrote_animation:
+        raw_builtin = cdp(os.path.join(TOOLS, "bb_export_builtin.js")).strip()
+        builtin = json.loads(raw_builtin)
+        animation_document = builtin.get("animation_document")
+        if not animation_document:
+            raise SystemExit("Blockbench returned no animation document")
+        content = postprocess_animations(
+            animation_document, model, extras)
+        os.makedirs(os.path.dirname(OUT_ANIM), exist_ok=True)
+        with open(OUT_ANIM, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        anims = json.loads(content)["animations"]
+        print("  动画 %d 段（built-in fallback）: %s"
+              % (len(anims), ", ".join(anims.keys())))
+        wrote.append(("anim", OUT_ANIM, os.path.getsize(OUT_ANIM)))
     for kind, path, size in wrote:
         print("写出 %s: %s (%d 字节)" % (kind, path, size))
     if not wrote:
